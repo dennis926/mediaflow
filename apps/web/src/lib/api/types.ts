@@ -37,3 +37,32 @@ export interface AdaptResult {
   variants: import('@mediaflow/shared').ContentVariantDto[];
   skipped: import('@mediaflow/shared').PlatformCode[];
 }
+
+export interface SettingView {
+  key: string;
+  label: string;
+  description: string;
+  secret: boolean;
+  group: 'ai' | 'platform' | 'publish';
+  groupLabel: string;
+  value: string;
+  configured: boolean;
+  source: 'db' | 'env' | 'none';
+  placeholder?: string;
+  options?: Array<{ value: string; label: string }>;
+}
+
+export interface SettingGroupView {
+  group: 'ai' | 'platform' | 'publish';
+  label: string;
+  items: SettingView[];
+}
+
+export interface AiTestResult {
+  ok: boolean;
+  provider: string;
+  model: string;
+  latencyMs: number;
+  reply?: string;
+  error?: string;
+}

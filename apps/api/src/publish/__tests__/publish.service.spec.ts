@@ -1,9 +1,9 @@
 import { BadRequestException } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { AiFlagType, PlatformCode, PublishTaskStatus } from '@mediaflow/shared';
 import { ObjectLiteral, Repository } from 'typeorm';
 import { describe, expect, it, vi } from 'vitest';
 import { AuditService } from '../../audit/audit.service';
+import { SettingsService } from '../../modules/settings/settings.service';
 import { WorkspaceContextService } from '../../common/workspace-context.service';
 import { ContentVariant } from '../../modules/content/entities/content-variant.entity';
 import { Content } from '../../modules/content/entities/content.entity';
@@ -38,7 +38,11 @@ function buildService(options: {
     get: vi.fn(() => ({ platform: PlatformCode.WechatMp, capabilities: { mode: 'manual' } })),
     list: vi.fn(() => []),
   };
-  const config = { get: vi.fn(() => undefined) } as unknown as ConfigService;
+  const settings = {
+    get: vi.fn(async () => null),
+    getNumber: vi.fn(async (_key: string, fallback: number) => fallback),
+    getBoolean: vi.fn(async (_key: string, fallback: boolean) => fallback),
+  } as unknown as SettingsService;
 
   const service = new PublishService(
     tasks,
@@ -49,7 +53,7 @@ function buildService(options: {
     queue,
     audit,
     workspaceContext,
-    config,
+    settings,
   );
   return { service, queue, tasks };
 }

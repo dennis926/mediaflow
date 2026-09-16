@@ -14,8 +14,8 @@ export class AiController {
 
   @Public()
   @Get('status')
-  status(): { provider: string; model: string } {
-    return { provider: this.aiService.providerName, model: this.aiService.modelName };
+  status(): Promise<{ provider: string; model: string }> {
+    return this.aiService.describe();
   }
 
   @Post('generate')

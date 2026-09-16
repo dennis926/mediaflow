@@ -51,13 +51,23 @@ pnpm workspace 单仓多包：
 - 失败重试：间隔 `PUBLISH_RETRY_INTERVAL_MS`，达到 `maxAttempts` 后置 `failed`
 - 终态：`published` / `manual_required` / `failed` / `canceled`；worker 对终态任务直接跳过（幂等）
 
-## 4.3 移动端（apps/h5）
+## 4.3 运行时配置（系统设置）
+
+`system_settings` 表 + `SettingsService` 提供「数据库优先、.env 兜底」的运行时配置：
+
+- 配置项注册表在 `apps/api/src/modules/settings/settings.registry.ts`（新增配置项只改这里 + 前端自动渲染）
+- 密钥字段用 `CryptoService`（AES-256-GCM）加密入库，接口只返回掩码
+- AI 提供方由 `AiProviderFactory` 按当前配置动态构建，配置变更后无需重启即可生效（发布 Worker 开关与重试间隔改动仍需重启 API）
+- PC 端「系统设置」页（`/settings`）按分组渲染表单，含「测试连接」按钮
+- 因此把仓库公开出去时，仓库里只有 `.env.example` 模板，真实密钥一律在后台维护（提交前可跑 `pnpm check:secrets`）
+
+## 4.4 移动端（apps/h5）
 
 - React 18 + Vite 5，移动优先：底部 4 Tab 导航（56px + safe-area）、点击区域 ≥44px、输入框字号 16px（防 iOS 缩放）
 - 页面：`/h5/login`、`/h5/dashboard`（2×2 数据卡片）、`/h5/publish/queue`（Tab 过滤 + 卡片列表）、`/h5/publish/task/:id`（详情 + 重试）
 - 生产构建 `base=/h5/`，与 PC 端共用同一套 `/api` 与 `mediaflow.token`
 
-## 4.4 部署拓扑（生产）
+## 4.5 部署拓扑（生产）
 
 ```
 浏览器 ──HTTPS──> 宝塔 nginx (auto.liangyijianye.cn)

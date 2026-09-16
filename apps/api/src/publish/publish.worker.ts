@@ -1,5 +1,4 @@
 import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { ChannelAdapterRegistry, PublishResult } from '@mediaflow/channel-adapters';
 import { PublishTaskStatus } from '@mediaflow/shared';
 import { AuditService } from '../audit/audit.service';
@@ -7,6 +6,7 @@ import { PublishTask } from '../modules/publish/entities/publish-task.entity';
 import { CHANNEL_REGISTRY } from './channel-registry.provider';
 import { PublishQueueService } from './publish.queue';
 import { PublishService } from './publish.service';
+import { SettingsService } from '../modules/settings/settings.service';
 
 const SWEEP_INTERVAL_MS = 15_000;
 const BLOCK_MS = 5_000;
@@ -40,13 +40,13 @@ export class PublishWorker implements OnModuleInit, OnModuleDestroy {
     private readonly publishService: PublishService,
     private readonly queue: PublishQueueService,
     private readonly audit: AuditService,
-    private readonly config: ConfigService,
+    private readonly settings: SettingsService,
     @Inject(CHANNEL_REGISTRY) private readonly registry: ChannelAdapterRegistry,
   ) {}
 
   async onModuleInit(): Promise<void> {
-    if (!this.enabled) {
-      this.logger.log('发布 Worker 已禁用（PUBLISH_WORKER_ENABLED=false）');
+    if (!(await this.enabled())) {
+      this.logger.log('发布 Worker 已禁用（配置项 PUBLISH_WORKER_ENABLED=false）');
       return;
     }
     await this.queue.ensureGroup();
@@ -63,9 +63,8 @@ export class PublishWorker implements OnModuleInit, OnModuleDestroy {
     if (this.sweepTimer) clearInterval(this.sweepTimer);
   }
 
-  private get enabled(): boolean {
-    const value = this.config.get<string>('PUBLISH_WORKER_ENABLED');
-    return value === undefined || value === '' ? true : value === 'true';
+  private async enabled(): Promise<boolean> {
+    return this.settings.getBoolean('PUBLISH_WORKER_ENABLED', true);
   }
 
   private async consumeLoop(): Promise<void> {

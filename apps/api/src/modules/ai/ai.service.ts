@@ -1,18 +1,12 @@
-import { BadGatewayException, Inject, Injectable, Logger } from '@nestjs/common';
+import { BadGatewayException, Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { AiFlagType, PLATFORM_LABELS, PlatformCode } from '@mediaflow/shared';
 import { FindOptionsWhere, Repository } from 'typeorm';
 import { WorkspaceContextService } from '../../common/workspace-context.service';
 import { AiGeneration } from './entities/ai-generation.entity';
-import {
-  AdaptedVariantPayload,
-  AiCompletionResult,
-  AiProvider,
-  AiTaskType,
-  ComplianceReport,
-} from './ai.types';
+import { AdaptedVariantPayload, AiCompletionResult, AiTaskType, ComplianceReport } from './ai.types';
 import { checkCompliance, scoreViolations } from './compliance.rules';
-import { AI_PROVIDER } from './ai.provider';
+import { AiProviderFactory } from './ai-provider.factory';
 
 export interface AiInvocationMeta {
   contentId?: string | null;
@@ -57,16 +51,13 @@ export class AiService {
 
   constructor(
     @InjectRepository(AiGeneration) private readonly generations: Repository<AiGeneration>,
-    @Inject(AI_PROVIDER) private readonly provider: AiProvider,
+    private readonly aiProviders: AiProviderFactory,
     private readonly workspaceContext: WorkspaceContextService,
   ) {}
 
-  get providerName(): string {
-    return this.provider.name;
-  }
-
-  get modelName(): string {
-    return this.provider.model;
+  /** Reads the effective provider from the runtime settings (database over .env). */
+  async describe(): Promise<{ provider: string; model: string }> {
+    return this.aiProviders.describe();
   }
 
   async generate(prompt: string, tone: string | undefined, meta: AiInvocationMeta): Promise<{ text: string; generationId: string }> {
@@ -201,8 +192,9 @@ export class AiService {
     const scope = await this.workspaceContext.current();
     const startedAt = Date.now();
 
+    const provider = await this.aiProviders.get();
     try {
-      const completion = await this.provider.complete({
+      const completion = await provider.complete({
         task: params.task,
         system: params.system,
         user: params.user,
@@ -213,7 +205,7 @@ export class AiService {
         this.generations.create({
           tenantId: scope.tenantId,
           workspaceId: scope.workspaceId,
-          provider: this.provider.name,
+          provider: provider.name,
           model: completion.model,
           taskType: params.task,
           status: 'success',
@@ -237,8 +229,8 @@ export class AiService {
         this.generations.create({
           tenantId: scope.tenantId,
           workspaceId: scope.workspaceId,
-          provider: this.provider.name,
-          model: this.provider.model,
+          provider: provider.name,
+          model: provider.model,
           taskType: params.task,
           status: 'failed',
           prompt: params.user,

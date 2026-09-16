@@ -117,6 +117,19 @@
 
 **每一次 AI 调用都会写入 `ai_generations`**，包含 prompt、输出、token 数、耗时与失败原因。
 
+### 3.5 系统设置（仅 owner / admin）
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/settings` | 分组返回全部可配置项；密钥类只返回 `••••后四位`，并标注来源 `db` / `env` / `none` |
+| PUT | `/api/settings` | 批量保存，body：`{"items":[{"key":"AI_API_KEY","value":"sk-..."}]}`；空值 = 清除后台配置、回退 .env |
+| POST | `/api/settings/ai/test` | 连接测试；可选传入未保存的 `apiKey` / `model` / `baseUrl` |
+
+- 配置优先级：**数据库（后台界面）> `.env` > 代码默认值**
+- 密钥类字段用 AES-256-GCM 加密后入库（密钥来自 `SETTINGS_ENCRYPTION_KEY`，未配置则用 `JWT_SECRET` 派生）
+- 保存动作写入审计日志，只记录改了哪些 key，不记录值
+- 角色不足返回 `40300`
+
 ## 4. 任务状态机
 
 ```

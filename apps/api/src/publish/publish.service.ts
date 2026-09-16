@@ -1,5 +1,4 @@
 import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import {
   AdapterCapabilities,
@@ -21,6 +20,7 @@ import {
 import { IsNull, Repository } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
 import { WorkspaceContextService } from '../common/workspace-context.service';
+import { SettingsService } from '../modules/settings/settings.service';
 import { ContentVariant } from '../modules/content/entities/content-variant.entity';
 import { Content } from '../modules/content/entities/content.entity';
 import { SocialAccount } from '../modules/platform/entities/social-account.entity';
@@ -62,13 +62,12 @@ export class PublishService {
     private readonly queue: PublishQueueService,
     private readonly audit: AuditService,
     private readonly workspaceContext: WorkspaceContextService,
-    private readonly config: ConfigService,
+    private readonly settings: SettingsService,
   ) {}
 
-  /** Retry spacing is configurable so local verification does not wait five minutes. */
-  get retryIntervalMs(): number {
-    const configured = Number(this.config.get<string>('PUBLISH_RETRY_INTERVAL_MS'));
-    return Number.isFinite(configured) && configured > 0 ? configured : PUBLISH_RETRY.intervalMs;
+  /** Retry spacing is configurable at runtime so local verification does not wait five minutes. */
+  async retryIntervalMs(): Promise<number> {
+    return this.settings.getNumber('PUBLISH_RETRY_INTERVAL_MS', PUBLISH_RETRY.intervalMs);
   }
 
   listAdapters(): AdapterDescriptor[] {
@@ -195,8 +194,8 @@ export class PublishService {
   }
 
   async resolveCredentials(platform: PlatformCode, socialAccountId: string | null): Promise<AdapterCredentials> {
-    const appId = this.appIdFor(platform);
-    const appSecret = this.appSecretFor(platform);
+    const appId = await this.credential(platform, 'appId');
+    const appSecret = await this.credential(platform, 'appSecret');
     if (!socialAccountId) return { appId, appSecret };
 
     const account = await this.accounts
@@ -298,7 +297,7 @@ export class PublishService {
       { id: task.id },
       {
         status: PublishTaskStatus.Pending,
-        scheduledAt: new Date(Date.now() + this.retryIntervalMs),
+        scheduledAt: new Date(Date.now() + (await this.retryIntervalMs())),
         errorMessage,
         lockedBy: null,
         lockedAt: null,
@@ -389,14 +388,10 @@ export class PublishService {
     return account;
   }
 
-  private appIdFor(platform: PlatformCode): string {
-    const key = this.credentialKeys(platform);
-    return this.config.get<string>(key.appId) ?? '';
-  }
-
-  private appSecretFor(platform: PlatformCode): string {
-    const key = this.credentialKeys(platform);
-    return this.config.get<string>(key.appSecret) ?? '';
+  /** Credentials come from the runtime settings (admin UI), falling back to .env. */
+  private async credential(platform: PlatformCode, kind: 'appId' | 'appSecret'): Promise<string> {
+    const keys = this.credentialKeys(platform);
+    return (await this.settings.get(kind === 'appId' ? keys.appId : keys.appSecret)) ?? '';
   }
 
   private credentialKeys(platform: PlatformCode): { appId: string; appSecret: string } {

@@ -25,10 +25,11 @@ const NAV_ITEMS: SidebarItem[] = [
   { href: '/publish', label: '发布中心', icon: <PublishIcon />, disabled: true },
   { href: '/analytics', label: '数据中心', icon: <AnalyticsIcon />, disabled: true },
   { href: '/accounts', label: '账号管理', icon: <AccountIcon />, disabled: true },
-  { href: '/settings', label: '系统设置', icon: <SettingsIcon />, disabled: true },
+  { href: '/settings', label: '系统设置', icon: <SettingsIcon /> },
 ];
 
 const PAGE_META: Array<{ prefix: string; title: string; subtitle: string }> = [
+  { prefix: '/settings', title: '系统设置', subtitle: 'AI 与平台密钥、发布队列参数' },
   { prefix: '/dashboard', title: '工作台', subtitle: '内容与发布整体概况' },
   { prefix: '/content/edit', title: '内容编辑器', subtitle: '编辑正文并生成多平台版本' },
   { prefix: '/content', title: '内容中心', subtitle: '管理全部内容与平台版本' },

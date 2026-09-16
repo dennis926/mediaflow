@@ -2,6 +2,8 @@ import type { AiFlagType, ContentStatus, PlatformCode, PublishTaskStatus } from 
 import { api } from './client';
 import type {
   AdaptResult,
+  AiTestResult,
+  SettingGroupView,
   AdapterDescriptor,
   AiGeneration,
   AuthUser,
@@ -75,4 +77,11 @@ export const aiApi = {
     api.post<ComplianceReport>('/ai/compliance-check', payload),
   generations: (query: { page?: number; pageSize?: number; taskType?: string }) =>
     api.get<Paged<AiGeneration>>('/ai/generations', { ...query }),
+};
+
+export const settingsApi = {
+  list: () => api.get<SettingGroupView[]>('/settings'),
+  update: (items: Array<{ key: string; value: string }>) => api.put<SettingGroupView[]>('/settings', { items }),
+  testAi: (payload: { apiKey?: string; model?: string; baseUrl?: string }) =>
+    api.post<AiTestResult>('/settings/ai/test', payload),
 };
