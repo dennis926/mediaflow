@@ -19,7 +19,8 @@
     "typecheck": "pnpm -r --reporter append-only run typecheck",
     "migrate": "pnpm --filter @mediaflow/api run migrate",
     "migrate:revert": "pnpm --filter @mediaflow/api run migrate:revert",
-    "seed": "pnpm --filter @mediaflow/api run seed"
+    "seed": "pnpm --filter @mediaflow/api run seed",
+    "check:secrets": "node scripts/check-secrets.mjs"
   },
   "devDependencies": {
     "@typescript-eslint/eslint-plugin": "7.18.0",
