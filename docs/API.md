@@ -63,6 +63,46 @@
 - **AI 生成内容若未通过 AI 标识校验（`ai_flag_checked=false`）→ 40000 拒绝发布**（法定要求）
 - 平台无适配器 → 40000
 
+### 2.3 内容中心
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/contents` | 列表：`keyword`（标题/摘要/正文模糊搜索）、`status`、`platform`（有该平台版本）、`aiGenerated`、`page`、`pageSize` |
+| POST | `/api/contents` | 创建内容；`aiFlagType != none` 时自动置 `aiGenerated=true` 并把 AI 标识写入正文 |
+| GET | `/api/contents/:id` | 详情（含平台版本） |
+| PUT | `/api/contents/:id` | 更新（同样重算 AI 标识） |
+| DELETE | `/api/contents/:id` | 软删除（`deleted_at`，列表与详情立即不可见） |
+| PATCH | `/api/contents/:id/ai-flag-check` | 标记 AI 标识已复核（`aiFlagChecked=true/true` 才能发布 AI 内容） |
+| GET | `/api/contents/:id/variants` | 平台版本列表 |
+| POST | `/api/contents/:id/ai-adapt` | AI 多平台适配，生成/更新 `content_variants` |
+
+`POST /api/contents/:id/ai-adapt` 请求体：
+
+```json
+{
+  "platforms": ["wechat_mp", "xiaohongshu"],
+  "tone": "通俗易懂",
+  "keywords": ["肠道", "膳食纤维"],
+  "overwrite": false
+}
+```
+
+- 所有目标平台都已有版本且 `overwrite=false` → **提前返回 40900，不会白调用 AI**
+- 新版本自动带上 AI 标识（`aiFlagType=assisted`），正文末尾追加"（本文由 AI 辅助生成）"
+- 响应含 `generationId`（对应 `ai_generations` 记录）与 `model`
+
+### 2.4 AI 服务
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/ai/status` | 当前 AI 提供方与模型（`mock` 表示离线提供方） |
+| POST | `/api/ai/generate` | 纯文本生成 |
+| POST | `/api/ai/optimize-title` | 标题优化，返回 3 个候选 |
+| POST | `/api/ai/compliance-check` | 合规检查：本地规则（医疗功效/绝对化/效果承诺/权威背书）+ AI 复核说明；返回 `passed`、`score`、`violations[]` |
+| GET | `/api/ai/generations` | AI 调用日志（提供方、模型、token、耗时、状态、错误） |
+
+**每一次 AI 调用都会写入 `ai_generations`**，包含 prompt、输出、token 数、耗时与失败原因。
+
 ## 3. 任务状态机
 
 ```

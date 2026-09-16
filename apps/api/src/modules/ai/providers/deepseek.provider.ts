@@ -1,0 +1,79 @@
+import { AiCompletionRequest, AiCompletionResult, AiProvider } from '../ai.types';
+
+interface ChatCompletionResponse {
+  choices?: Array<{ message?: { content?: string } }>;
+  usage?: { prompt_tokens?: number; completion_tokens?: number };
+  error?: { message?: string };
+  model?: string;
+}
+
+export interface DeepSeekProviderOptions {
+  apiKey: string;
+  model: string;
+  baseUrl?: string;
+  fetchImpl?: (input: string, init?: RequestInit) => Promise<Response>;
+  timeoutMs?: number;
+}
+
+const DEFAULT_BASE_URL = 'https://api.deepseek.com';
+
+export class DeepSeekProvider implements AiProvider {
+  readonly name = 'deepseek';
+  readonly model: string;
+
+  private readonly apiKey: string;
+  private readonly baseUrl: string;
+  private readonly fetchImpl: (input: string, init?: RequestInit) => Promise<Response>;
+  private readonly timeoutMs: number;
+
+  constructor(options: DeepSeekProviderOptions) {
+    this.apiKey = options.apiKey;
+    this.model = options.model;
+    this.baseUrl = options.baseUrl ?? DEFAULT_BASE_URL;
+    this.fetchImpl = options.fetchImpl ?? ((input, init) => fetch(input, init));
+    this.timeoutMs = options.timeoutMs ?? 60_000;
+  }
+
+  async complete(request: AiCompletionRequest): Promise<AiCompletionResult> {
+    if (!this.apiKey) throw new Error('未配置 AI_API_KEY，无法调用 DeepSeek 接口');
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    try {
+      const response = await this.fetchImpl(`${this.baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${this.apiKey}`,
+        },
+        body: JSON.stringify({
+          model: this.model,
+          messages: [
+            { role: 'system', content: request.system },
+            { role: 'user', content: request.user },
+          ],
+          temperature: request.temperature ?? 0.7,
+          max_tokens: request.maxTokens ?? 2048,
+          ...(request.json ? { response_format: { type: 'json_object' } } : {}),
+        }),
+        signal: controller.signal,
+      });
+
+      const payload = (await response.json()) as ChatCompletionResponse;
+      if (!response.ok) {
+        throw new Error(`DeepSeek 接口返回 HTTP ${response.status}：${payload.error?.message ?? '未知错误'}`);
+      }
+      const text = payload.choices?.[0]?.message?.content;
+      if (!text) throw new Error('DeepSeek 未返回内容');
+
+      return {
+        text,
+        model: payload.model ?? this.model,
+        tokensInput: payload.usage?.prompt_tokens ?? 0,
+        tokensOutput: payload.usage?.completion_tokens ?? 0,
+      };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+}
