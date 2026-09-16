@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
+import { TypeOrmModule } from '@nestjs/typeorm';
+import { buildNestDataSourceOptions } from './database/database.config';
 import { HealthController } from './health/health.controller';
 
 @Module({
@@ -7,6 +9,10 @@ import { HealthController } from './health/health.controller';
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: ['../../.env', '.env'],
+    }),
+    TypeOrmModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: buildNestDataSourceOptions,
     }),
   ],
   controllers: [HealthController],
