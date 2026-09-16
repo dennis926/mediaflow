@@ -1,0 +1,96 @@
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--mf-space-3);
+  flex-wrap: wrap;
+}
+
+.weekLabel {
+  font-size: var(--mf-font-size-lg);
+  font-weight: var(--mf-font-weight-semibold);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: var(--mf-space-2);
+}
+
+.day {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mf-space-2);
+  min-height: calc(var(--mf-size-card-calendarHeight) * 6);
+  padding: var(--mf-space-2);
+  border: 1px solid var(--mf-color-border-subtle);
+  border-radius: var(--mf-radius-md);
+  background: var(--mf-color-bg-surface);
+}
+
+.dayToday {
+  border-color: var(--mf-color-brand-500);
+  box-shadow: var(--mf-shadow-focus);
+}
+
+.dayHeader {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  font-size: var(--mf-font-size-xs);
+  color: var(--mf-color-text-tertiary);
+}
+
+.dayNumber {
+  font-size: var(--mf-font-size-md);
+  font-weight: var(--mf-font-weight-semibold);
+  color: var(--mf-color-text-primary);
+}
+
+.taskCard {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  min-height: var(--mf-size-card-calendarHeight);
+  padding: var(--mf-space-1) var(--mf-space-2);
+  border-radius: var(--mf-radius-sm);
+  border: 1px solid var(--mf-color-border-base);
+  background: var(--mf-color-bg-body);
+  font-size: var(--mf-font-size-xs);
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.taskCard:hover {
+  border-color: var(--mf-color-border-focus);
+  background: var(--mf-color-brand-50);
+}
+
+.taskTitle {
+  font-weight: var(--mf-font-weight-medium);
+  color: var(--mf-color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.taskMeta {
+  color: var(--mf-color-text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.empty {
+  font-size: var(--mf-font-size-xs);
+  color: var(--mf-color-text-disabled);
+  text-align: center;
+  padding: var(--mf-space-2) 0;
+}
+
+@media (max-width: 1023px) {
+  .grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

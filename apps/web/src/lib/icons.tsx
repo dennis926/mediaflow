@@ -156,6 +156,24 @@ export function MenuIcon(props: IconProps) {
   );
 }
 
+export function CalendarIcon(props: IconProps) {
+  return (
+    <svg {...BASE} {...props}>
+      <rect x="3.5" y="5" width="17" height="16" rx="2" />
+      <path d="M3.5 10h17M8 3.5v3M16 3.5v3" />
+    </svg>
+  );
+}
+
+export function RefreshIcon(props: IconProps) {
+  return (
+    <svg {...BASE} {...props}>
+      <path d="M20 12a8 8 0 1 1-2.6-5.9" />
+      <path d="M20 4v5h-5" />
+    </svg>
+  );
+}
+
 export function InboxIcon(props: IconProps) {
   return (
     <svg {...BASE} {...props}>

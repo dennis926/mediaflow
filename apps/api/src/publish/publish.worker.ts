@@ -7,6 +7,7 @@ import { CHANNEL_REGISTRY } from './channel-registry.provider';
 import { PublishQueueService } from './publish.queue';
 import { PublishService } from './publish.service';
 import { SettingsService } from '../modules/settings/settings.service';
+import { NotificationService } from '../modules/notification/notification.service';
 
 const SWEEP_INTERVAL_MS = 15_000;
 const BLOCK_MS = 5_000;
@@ -41,6 +42,7 @@ export class PublishWorker implements OnModuleInit, OnModuleDestroy {
     private readonly queue: PublishQueueService,
     private readonly audit: AuditService,
     private readonly settings: SettingsService,
+    private readonly notifications: NotificationService,
     @Inject(CHANNEL_REGISTRY) private readonly registry: ChannelAdapterRegistry,
   ) {}
 
@@ -166,6 +168,15 @@ export class PublishWorker implements OnModuleInit, OnModuleDestroy {
       case 'manual_required':
         await this.publishService.markManualRequired(task, result);
         await this.record(task, 'publish_task.manual_required', { message: result.message });
+        await this.notifications.notify({
+          type: 'publish.manual_required',
+          level: 'warning',
+          title: `待人工发布：${task.platform}`,
+          body: result.message,
+          resourceType: 'publish_task',
+          resourceId: task.id,
+          payload: { platform: task.platform },
+        });
         this.logger.log(`任务 ${task.id} 需人工发布（${task.platform}）：${result.message}`);
         return;
       case 'pending':
@@ -177,6 +188,18 @@ export class PublishWorker implements OnModuleInit, OnModuleDestroy {
         await this.publishService.releaseWithRetry(task, result.message);
         await this.record(task, 'publish_task.attempt_failed', { attempts: task.attempts, error: result.message });
         this.logger.warn(`任务 ${task.id} 第 ${task.attempts} 次尝试失败：${result.message}`);
+        if (task.attempts >= task.maxAttempts) {
+          await this.notifications.notify({
+            type: 'publish.failed',
+            level: 'error',
+            title: `发布失败（已重试 ${task.attempts} 次）：${task.platform}`,
+            body: result.message,
+            resourceType: 'publish_task',
+            resourceId: task.id,
+            payload: { platform: task.platform, attempts: task.attempts },
+            email: true,
+          });
+        }
     }
   }
 

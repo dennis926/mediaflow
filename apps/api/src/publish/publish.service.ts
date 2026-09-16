@@ -167,6 +167,50 @@ export class PublishService {
     return task;
   }
 
+  /**
+   * Week view for the calendar page: tasks bucketed per day (by scheduled_at when set,
+   * otherwise by creation time), padded so the UI always receives seven days.
+   */
+  async calendar(weekStartIso?: string): Promise<Array<{ date: string; tasks: PublishTask[] }>> {
+    const scope = await this.workspaceContext.current();
+    const base = weekStartIso ? new Date(`${weekStartIso}T00:00:00`) : this.startOfWeek(new Date());
+    if (Number.isNaN(base.getTime())) throw new BadRequestException('weekStart 不是合法日期');
+
+    const start = this.startOfWeek(base);
+    const end = new Date(start.getTime() + 7 * 24 * 3600 * 1000);
+
+    const tasks = await this.tasks
+      .createQueryBuilder('task')
+      .leftJoin('task.content', 'content')
+      .addSelect(['content.id', 'content.title'])
+      .where('task.workspaceId = :workspaceId', { workspaceId: scope.workspaceId })
+      .andWhere(
+        'COALESCE(task.scheduledAt, task.createdAt) >= :start AND COALESCE(task.scheduledAt, task.createdAt) < :end',
+        { start, end },
+      )
+      .orderBy('task.createdAt', 'ASC')
+      .getMany();
+
+    const days: Array<{ date: string; tasks: PublishTask[] }> = [];
+    for (let index = 0; index < 7; index += 1) {
+      const day = new Date(start.getTime() + index * 24 * 3600 * 1000);
+      const key = day.toISOString().slice(0, 10);
+      days.push({
+        date: key,
+        tasks: tasks.filter((task) => (task.scheduledAt ?? task.createdAt).toISOString().slice(0, 10) === key),
+      });
+    }
+    return days;
+  }
+
+  private startOfWeek(day: Date): Date {
+    const local = new Date(day.getFullYear(), day.getMonth(), day.getDate());
+    // Week starts on Monday.
+    const weekday = (local.getDay() + 6) % 7;
+    local.setDate(local.getDate() - weekday);
+    return local;
+  }
+
   async queueStats(): Promise<{ length: number; pending: number; consumers: number }> {
     return this.queue.stats();
   }

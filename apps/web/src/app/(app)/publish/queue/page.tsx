@@ -1,0 +1,254 @@
+'use client';
+
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { PLATFORM_LABELS, PlatformCode, PublishTaskStatus } from '@mediaflow/shared';
+import Link from 'next/link';
+import { useState } from 'react';
+import { Banner } from '../../../../components/ui/Banner';
+import { Button } from '../../../../components/ui/Button';
+import { Card } from '../../../../components/ui/Card';
+import { DataTable, type Column } from '../../../../components/ui/DataTable';
+import { Dialog } from '../../../../components/ui/Dialog';
+import { EmptyState } from '../../../../components/ui/EmptyState';
+import { Pagination } from '../../../../components/ui/Pagination';
+import { SkeletonRows } from '../../../../components/ui/Skeleton';
+import { Tag } from '../../../../components/ui/Tag';
+import { ApiError } from '../../../../lib/api/client';
+import { publishApi } from '../../../../lib/api/endpoints';
+import type { PublishTask } from '../../../../lib/api/types';
+import { TASK_STATUS_LABELS, TASK_STATUS_TONES, formatDateTime } from '../../../../lib/format';
+import { PublishIcon, RefreshIcon } from '../../../../lib/icons';
+import styles from './page.module.css';
+
+const TABS: Array<{ key: string; label: string; status?: PublishTaskStatus }> = [
+  { key: 'all', label: '全部' },
+  { key: 'scheduled', label: '排期中', status: PublishTaskStatus.Scheduled },
+  { key: 'pending', label: '待发布', status: PublishTaskStatus.Pending },
+  { key: 'manual', label: '待人工发布', status: PublishTaskStatus.ManualRequired },
+  { key: 'published', label: '已发布', status: PublishTaskStatus.Published },
+  { key: 'failed', label: '失败', status: PublishTaskStatus.Failed },
+];
+
+const RETRYABLE: string[] = [
+  PublishTaskStatus.Failed,
+  PublishTaskStatus.ManualRequired,
+  PublishTaskStatus.Canceled,
+  PublishTaskStatus.Pending,
+];
+
+export default function PublishQueuePage() {
+  const queryClient = useQueryClient();
+  const [active, setActive] = useState('all');
+  const [page, setPage] = useState(1);
+  const [detail, setDetail] = useState<PublishTask | null>(null);
+  const [feedback, setFeedback] = useState<{ tone: 'success' | 'danger' | 'info'; text: string } | null>(null);
+
+  const tab = TABS.find((item) => item.key === active) ?? TABS[0];
+  const tasks = useQuery({
+    queryKey: ['publish', 'queue', tab.key, page],
+    queryFn: () => publishApi.tasks({ status: tab.status, page, pageSize: 10 }),
+  });
+
+  const retry = useMutation({
+    mutationFn: (id: string) => publishApi.retry(id),
+    onSuccess: (task) => {
+      setFeedback({ tone: 'success', text: '已重新入队，稍后刷新查看结果' });
+      setDetail(task);
+      void queryClient.invalidateQueries({ queryKey: ['publish', 'queue'] });
+    },
+    onError: (error: unknown) =>
+      setFeedback({ tone: 'danger', text: error instanceof ApiError ? error.message : '重试失败' }),
+  });
+
+  const columns: Array<Column<PublishTask>> = [
+    {
+      key: 'content',
+      title: '内容',
+      render: (row) => (
+        <div className={styles.titleCell}>
+          <Link className={styles.titleLink} href={`/content/edit?id=${row.contentId}`}>
+            {row.content?.title ?? row.contentId.slice(0, 8)}
+          </Link>
+          <span className={styles.meta}>
+            <Tag tone="info">{PLATFORM_LABELS[row.platform as PlatformCode]}</Tag>
+            <span>尝试 {row.attempts}/{row.maxAttempts}</span>
+            <span>创建 {formatDateTime(row.createdAt)}</span>
+          </span>
+          {row.errorMessage ? <span className={styles.error}>{row.errorMessage}</span> : null}
+        </div>
+      ),
+    },
+    {
+      key: 'status',
+      title: '状态',
+      width: '130px',
+      render: (row) => <Tag tone={TASK_STATUS_TONES[row.status]}>{TASK_STATUS_LABELS[row.status]}</Tag>,
+    },
+    {
+      key: 'scheduled',
+      title: '排期时间',
+      width: '170px',
+      render: (row) => <span className={styles.meta}>{row.scheduledAt ? formatDateTime(row.scheduledAt) : '立即'}</span>,
+    },
+    {
+      key: 'actions',
+      title: '操作',
+      width: '170px',
+      align: 'right',
+      render: (row) => (
+        <div className={styles.actions}>
+          <Button variant="text" size="sm" onClick={() => setDetail(row)}>
+            详情
+          </Button>
+          <Button
+            variant="text"
+            size="sm"
+            icon={<RefreshIcon width={15} height={15} />}
+            disabled={!RETRYABLE.includes(row.status)}
+            loading={retry.isPending && retry.variables === row.id}
+            onClick={() => retry.mutate(row.id)}
+          >
+            重试
+          </Button>
+        </div>
+      ),
+    },
+  ];
+
+  return (
+    <>
+      {feedback ? (
+        <Banner tone={feedback.tone}>
+          {feedback.text}
+          <button
+            type="button"
+            onClick={() => setFeedback(null)}
+            style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: 'inherit' }}
+          >
+            知道了
+          </button>
+        </Banner>
+      ) : null}
+
+      <Card flush>
+        <div className={styles.tabs}>
+          {TABS.map((item) => (
+            <button
+              key={item.key}
+              type="button"
+              className={`${styles.tab} ${active === item.key ? styles.tabActive : ''}`}
+              onClick={() => {
+                setActive(item.key);
+                setPage(1);
+              }}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+
+        <div style={{ padding: 'var(--mf-space-4) 0 0' }}>
+          {tasks.isLoading ? (
+            <div style={{ padding: 'var(--mf-space-5)' }}>
+              <SkeletonRows rows={5} />
+            </div>
+          ) : (
+            <DataTable
+              columns={columns}
+              rows={tasks.data?.items ?? []}
+              rowKey={(row) => row.id}
+              empty={
+                <EmptyState
+                  title="该状态下暂无任务"
+                  description="在内容编辑器里选择平台即可创建发布任务。"
+                  icon={<PublishIcon width={22} height={22} />}
+                  action={
+                    <Link href="/content">
+                      <Button size="sm">去内容中心</Button>
+                    </Link>
+                  }
+                />
+              }
+            />
+          )}
+        </div>
+
+        <Pagination page={page} pageSize={10} total={tasks.data?.meta.total ?? 0} onChange={setPage} />
+      </Card>
+
+      <Dialog
+        open={Boolean(detail)}
+        title="任务详情"
+        onClose={() => setDetail(null)}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setDetail(null)}>
+              关闭
+            </Button>
+            <Button
+              loading={retry.isPending}
+              disabled={!detail || !RETRYABLE.includes(detail.status)}
+              icon={<RefreshIcon width={16} height={16} />}
+              onClick={() => detail && retry.mutate(detail.id)}
+            >
+              重试发布
+            </Button>
+          </>
+        }
+      >
+        {detail ? (
+          <div className={styles.detail}>
+            <div className={styles.detailRow}>
+              <span className={styles.detailLabel}>内容</span>
+              <span>{detail.content?.title ?? detail.contentId}</span>
+            </div>
+            <div className={styles.detailRow}>
+              <span className={styles.detailLabel}>平台</span>
+              <span>
+                {PLATFORM_LABELS[detail.platform as PlatformCode]}（{detail.publishMode}）
+              </span>
+            </div>
+            <div className={styles.detailRow}>
+              <span className={styles.detailLabel}>状态</span>
+              <Tag tone={TASK_STATUS_TONES[detail.status]}>{TASK_STATUS_LABELS[detail.status]}</Tag>
+            </div>
+            <div className={styles.detailRow}>
+              <span className={styles.detailLabel}>尝试次数</span>
+              <span>
+                {detail.attempts}/{detail.maxAttempts}
+              </span>
+            </div>
+            <div className={styles.detailRow}>
+              <span className={styles.detailLabel}>排期</span>
+              <span>{detail.scheduledAt ? formatDateTime(detail.scheduledAt) : '立即发布'}</span>
+            </div>
+            <div className={styles.detailRow}>
+              <span className={styles.detailLabel}>开始</span>
+              <span>{formatDateTime(detail.startedAt)}</span>
+            </div>
+            <div className={styles.detailRow}>
+              <span className={styles.detailLabel}>完成</span>
+              <span>{formatDateTime(detail.finishedAt)}</span>
+            </div>
+            {detail.errorMessage ? (
+              <div className={styles.detailRow}>
+                <span className={styles.detailLabel}>失败原因</span>
+                <span className={styles.error}>{detail.errorMessage}</span>
+              </div>
+            ) : null}
+            {typeof detail.extra?.manualMessage === 'string' ? (
+              <Banner tone="warning">
+                <span>{String(detail.extra.manualMessage)}</span>
+              </Banner>
+            ) : null}
+            {detail.platformUrl ? (
+              <a href={detail.platformUrl} target="_blank" rel="noreferrer" style={{ color: 'var(--mf-color-text-link)' }}>
+                {detail.platformUrl}
+              </a>
+            ) : null}
+          </div>
+        ) : null}
+      </Dialog>
+    </>
+  );
+}

@@ -2,6 +2,9 @@ import type { AiFlagType, ContentStatus, PlatformCode, PublishTaskStatus } from 
 import { api } from './client';
 import type {
   AdaptResult,
+  CalendarDay,
+  NotificationItem,
+  NotificationPage,
   AiTestResult,
   SettingGroupView,
   AdapterDescriptor,
@@ -66,6 +69,8 @@ export const publishApi = {
   create: (payload: { contentId: string; platforms: PlatformCode[]; scheduledAt?: string }) =>
     api.post<PublishTask[]>('/publish/tasks', payload),
   adapters: () => api.get<AdapterDescriptor[]>('/publish/adapters'),
+  retry: (id: string) => api.post<PublishTask>(`/publish/tasks/${id}/retry`),
+  calendar: (weekStart?: string) => api.get<CalendarDay[]>('/publish/calendar', { weekStart }),
   queueStats: () => api.get<QueueStats>('/publish/queue/stats'),
 };
 
@@ -84,4 +89,11 @@ export const settingsApi = {
   update: (items: Array<{ key: string; value: string }>) => api.put<SettingGroupView[]>('/settings', { items }),
   testAi: (payload: { apiKey?: string; model?: string; baseUrl?: string }) =>
     api.post<AiTestResult>('/settings/ai/test', payload),
+};
+
+export const notificationsApi = {
+  list: (query: { page?: number; pageSize?: number; status?: 'unread' | 'read' } = {}) =>
+    api.get<NotificationPage>('/notifications', { ...query }),
+  markRead: (id: string) => api.patch<NotificationItem>(`/notifications/${id}/read`),
+  markAllRead: () => api.post<{ updated: number }>('/notifications/read-all'),
 };

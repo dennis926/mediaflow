@@ -6,6 +6,7 @@ import { AuditModule } from './audit/audit.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { JwtAuthGuard } from './modules/auth/jwt-auth.guard';
 import { RolesGuard } from './modules/auth/roles.guard';
+import { NotificationModule } from './modules/notification/notification.module';
 import { SettingsModule } from './modules/settings/settings.module';
 import { CommonModule } from './common/common.module';
 import { AiModule } from './modules/ai/ai.module';
@@ -33,6 +34,7 @@ import { RedisModule } from './redis/redis.module';
     ContentModule,
     AuthModule,
     SettingsModule,
+    NotificationModule,
   ],
   controllers: [HealthController],
   providers: [

@@ -24,6 +24,11 @@ export class PublishController {
     return this.publishService.queueStats();
   }
 
+  @Get('calendar')
+  calendar(@Query('weekStart') weekStart?: string): Promise<Array<{ date: string; tasks: PublishTask[] }>> {
+    return this.publishService.calendar(weekStart);
+  }
+
   @Get('tasks')
   list(@Query() query: QueryPublishTaskDto): Promise<PublishTaskPage> {
     return this.publishService.list(query);

@@ -69,6 +69,7 @@ function ContentEditor(): React.JSX.Element {
   const [adaptOverwrite, setAdaptOverwrite] = useState(false);
   const [publishOpen, setPublishOpen] = useState(false);
   const [publishPlatforms, setPublishPlatforms] = useState<PlatformCode[]>([PlatformCode.WechatMp]);
+  const [publishScheduledAt, setPublishScheduledAt] = useState('');
   const [compliance, setCompliance] = useState<ComplianceReport | null>(null);
   const [titleSuggestions, setTitleSuggestions] = useState<string[]>([]);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -180,13 +181,22 @@ function ContentEditor(): React.JSX.Element {
   });
 
   const publish = useMutation({
-    mutationFn: () => publishApi.create({ contentId: contentId as string, platforms: publishPlatforms }),
+    mutationFn: () =>
+      publishApi.create({
+        contentId: contentId as string,
+        platforms: publishPlatforms,
+        scheduledAt: publishScheduledAt ? new Date(publishScheduledAt).toISOString() : undefined,
+      }),
     onSuccess: (tasks) => {
       setPublishOpen(false);
       const summary = tasks
         .map((task) => `${PLATFORM_LABELS[task.platform as PlatformCode]}：${task.status === 'manual_required' ? '待人工发布' : '已入队'}`)
         .join('；');
-      setFeedback({ tone: 'success', text: `已创建 ${tasks.length} 个发布任务 — ${summary}` });
+      setFeedback({
+        tone: 'success',
+        text: `已创建 ${tasks.length} 个发布任务（${publishScheduledAt ? '已排期' : '立即入队'}）— ${summary}`,
+      });
+      void queryClient.invalidateQueries({ queryKey: ['publish'] });
     },
     onError: (error: unknown) =>
       setFeedback({ tone: 'danger', text: error instanceof ApiError ? error.message : '创建发布任务失败' }),
@@ -539,6 +549,14 @@ function ContentEditor(): React.JSX.Element {
             );
           })}
         </div>
+        <Input
+          label="排期时间（可选）"
+          name="scheduledAt"
+          type="datetime-local"
+          value={publishScheduledAt}
+          hint="留空=立即进入发布队列；选择未来时间=进入排队日历"
+          onChange={(event) => setPublishScheduledAt(event.target.value)}
+        />
         <Banner tone="warning">
           <WarningIcon width={16} height={16} />
           <span>公众号不允许 API 自动发布，任务会变成「待人工发布」；抖音/小红书需要先绑定账号；视频号等平台需插件填充后人工确认。</span>

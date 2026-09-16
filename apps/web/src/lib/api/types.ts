@@ -66,3 +66,26 @@ export interface AiTestResult {
   reply?: string;
   error?: string;
 }
+
+export interface NotificationItem {
+  id: string;
+  type: string;
+  level: 'info' | 'warning' | 'error';
+  title: string;
+  body: string;
+  status: 'unread' | 'read';
+  resourceType: string | null;
+  resourceId: string | null;
+  createdAt: string;
+}
+
+export interface NotificationPage {
+  items: NotificationItem[];
+  meta: { page: number; pageSize: number; total: number; totalPages: number };
+  unread: number;
+}
+
+export interface CalendarDay {
+  date: string;
+  tasks: import('@mediaflow/shared').PublishTaskDto[];
+}

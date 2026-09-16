@@ -8,6 +8,7 @@ import { getToken, setToken } from '../../lib/api/client';
 import {
   AccountIcon,
   AnalyticsIcon,
+  CalendarIcon,
   ContentIcon,
   DashboardIcon,
   LogoutIcon,
@@ -15,6 +16,7 @@ import {
   PublishIcon,
   SettingsIcon,
 } from '../../lib/icons';
+import { NotificationBell } from './NotificationBell';
 import { Sidebar, type SidebarItem } from '../ui/Sidebar';
 import { Button } from '../ui/Button';
 import styles from './AppShell.module.css';
@@ -22,7 +24,8 @@ import styles from './AppShell.module.css';
 const NAV_ITEMS: SidebarItem[] = [
   { href: '/dashboard', label: '工作台', icon: <DashboardIcon /> },
   { href: '/content', label: '内容中心', icon: <ContentIcon /> },
-  { href: '/publish', label: '发布中心', icon: <PublishIcon />, disabled: true },
+  { href: '/publish/queue', label: '发布队列', icon: <PublishIcon /> },
+  { href: '/publish/calendar', label: '排期日历', icon: <CalendarIcon /> },
   { href: '/analytics', label: '数据中心', icon: <AnalyticsIcon />, disabled: true },
   { href: '/accounts', label: '账号管理', icon: <AccountIcon />, disabled: true },
   { href: '/settings', label: '系统设置', icon: <SettingsIcon /> },
@@ -33,6 +36,8 @@ const PAGE_META: Array<{ prefix: string; title: string; subtitle: string }> = [
   { prefix: '/dashboard', title: '工作台', subtitle: '内容与发布整体概况' },
   { prefix: '/content/edit', title: '内容编辑器', subtitle: '编辑正文并生成多平台版本' },
   { prefix: '/content', title: '内容中心', subtitle: '管理全部内容与平台版本' },
+  { prefix: '/publish/calendar', title: '排期日历', subtitle: '按周查看发布排期' },
+  { prefix: '/publish/queue', title: '发布队列', subtitle: '任务状态、失败重试与人工发布' },
 ];
 
 function resolveMeta(pathname: string): { title: string; subtitle: string } {
@@ -94,6 +99,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             {meta.subtitle ? <span className={styles.subtitle}>{meta.subtitle}</span> : null}
           </div>
           <div className={styles.actions}>
+            <NotificationBell />
             <span className={styles.userChip}>
               <span className={styles.userMeta}>
                 <span className={styles.userName}>{user?.displayName ?? '未登录'}</span>
