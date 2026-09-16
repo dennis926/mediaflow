@@ -306,6 +306,61 @@ export class PublishService {
     );
   }
 
+  /**
+   * Manual retry: allowed for tasks that are not in flight. Clears the queue-confirmation
+   * flag so plugin platforms can be pushed again as well.
+   */
+  async retry(id: string, actor: PublishActor): Promise<PublishTask> {
+    const task = await this.tasks.findOne({ where: { id } });
+    if (!task) throw new NotFoundException('发布任务不存在');
+
+    const retryable: PublishTaskStatus[] = [
+      PublishTaskStatus.Failed,
+      PublishTaskStatus.ManualRequired,
+      PublishTaskStatus.Canceled,
+      PublishTaskStatus.Pending,
+    ];
+    if (!retryable.includes(task.status)) {
+      throw new BadRequestException(`当前状态（${task.status}）不支持重试`);
+    }
+
+    const previousStatus = task.status;
+    const extra = { ...task.extra };
+    delete extra.awaitingConfirmation;
+    delete extra.pluginMessage;
+    delete extra.manualMessage;
+
+    await this.tasks.save({
+      ...task,
+      status: PublishTaskStatus.Pending,
+      attempts: 0,
+      scheduledAt: null,
+      startedAt: null,
+      finishedAt: null,
+      errorMessage: null,
+      lockedBy: null,
+      lockedAt: null,
+      extra,
+    });
+    await this.queue.enqueue(task.id);
+
+    await this.audit.record({
+      action: 'publish_task.retry',
+      resourceType: 'publish_task',
+      resourceId: task.id,
+      tenantId: task.tenantId,
+      workspaceId: task.workspaceId,
+      actorId: actor.id ?? null,
+      actorName: actor.name ?? null,
+      ip: actor.ip ?? null,
+      userAgent: actor.userAgent ?? null,
+      payload: { platform: task.platform, previousStatus },
+    });
+
+    this.logger.log(`任务 ${task.id} 已重新入队（原状态 ${previousStatus}）`);
+    return this.get(task.id);
+  }
+
   /** Tasks the sweeper must re-enqueue: due scheduled tasks and pending tasks that are not waiting for a human. */
   async findDueTasks(limit = 20): Promise<PublishTask[]> {
     const now = new Date();

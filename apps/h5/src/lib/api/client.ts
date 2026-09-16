@@ -1,0 +1,89 @@
+import type { ApiResponse } from '@mediaflow/shared';
+
+export const TOKEN_STORAGE_KEY = 'mediaflow.token';
+
+export class ApiError extends Error {
+  constructor(
+    readonly code: number,
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+    this.name = 'ApiError';
+  }
+}
+
+export interface RequestOptions {
+  method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+  body?: unknown;
+  query?: Record<string, string | number | boolean | undefined | null>;
+}
+
+export function getToken(): string | null {
+  if (typeof window === 'undefined') return null;
+  return window.localStorage.getItem(TOKEN_STORAGE_KEY);
+}
+
+export function setToken(token: string | null): void {
+  if (typeof window === 'undefined') return;
+  if (token) window.localStorage.setItem(TOKEN_STORAGE_KEY, token);
+  else window.localStorage.removeItem(TOKEN_STORAGE_KEY);
+}
+
+function buildUrl(path: string, query?: RequestOptions['query']): string {
+  if (!query) return path;
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(query)) {
+    if (value === undefined || value === null || value === '') continue;
+    search.append(key, String(value));
+  }
+  const suffix = search.toString();
+  return suffix ? `${path}?${suffix}` : path;
+}
+
+/** Single entry point for every mobile -> API call. */
+export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  const token = getToken();
+  const response = await fetch(buildUrl(`/api${path}`, options.query), {
+    method: options.method ?? 'GET',
+    headers: {
+      ...(options.body === undefined ? {} : { 'Content-Type': 'application/json' }),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: options.body === undefined ? undefined : JSON.stringify(options.body),
+    cache: 'no-store',
+  });
+
+  let payload: ApiResponse<T> | null = null;
+  const text = await response.text();
+  if (text) {
+    try {
+      payload = JSON.parse(text) as ApiResponse<T>;
+    } catch {
+      payload = null;
+    }
+  }
+
+  if (response.status === 401) {
+    setToken(null);
+    if (typeof window !== 'undefined' && !window.location.pathname.endsWith('/login')) {
+      window.location.href = `${import.meta.env.BASE_URL}login`.replace('//login', '/login');
+    }
+    throw new ApiError(payload?.code ?? 40100, payload?.message ?? '登录状态已失效', response.status);
+  }
+
+  if (!response.ok || (payload && payload.code !== 0)) {
+    throw new ApiError(
+      payload?.code ?? response.status,
+      payload?.message ?? `请求失败（HTTP ${response.status}）`,
+      response.status,
+    );
+  }
+
+  return (payload?.data ?? null) as T;
+}
+
+export const api = {
+  get: <T>(path: string, query?: RequestOptions['query']) => apiRequest<T>(path, { query }),
+  post: <T>(path: string, body?: unknown) => apiRequest<T>(path, { method: 'POST', body }),
+};

@@ -4,7 +4,7 @@ export interface ApiResponse<T = unknown> {
   data: T;
 }
 
-export interface PaginationMeta {
+export interface PageMeta {
   page: number;
   pageSize: number;
   total: number;
@@ -13,7 +13,7 @@ export interface PaginationMeta {
 
 export interface PaginatedData<T> {
   items: T[];
-  meta: PaginationMeta;
+  meta: PageMeta;
 }
 
 export interface PageQuery {

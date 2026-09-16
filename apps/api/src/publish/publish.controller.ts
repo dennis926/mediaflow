@@ -34,6 +34,11 @@ export class PublishController {
     return this.publishService.get(id);
   }
 
+  @Post('tasks/:id/retry')
+  retry(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user?: AuthUser): Promise<PublishTask> {
+    return this.publishService.retry(id, toActor(user));
+  }
+
   @Post('tasks')
   create(@Body() dto: CreatePublishTaskDto, @CurrentUser() user?: AuthUser): Promise<PublishTask[]> {
     return this.publishService.createTasks(dto, toActor(user));

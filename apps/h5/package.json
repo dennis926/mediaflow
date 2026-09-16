@@ -13,6 +13,7 @@
   "dependencies": {
     "@mediaflow/design-tokens": "workspace:*",
     "@mediaflow/shared": "workspace:*",
+    "@tanstack/react-query": "5.103.0",
     "react": "18.3.1",
     "react-dom": "18.3.1",
     "react-router-dom": "6.30.6"

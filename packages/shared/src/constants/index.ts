@@ -51,3 +51,5 @@ export const PLATFORM_LABELS: Record<PlatformCode, string> = {
 
 /** Platforms whose interactive APIs (DM / comments) were revoked and are out of scope. */
 export const INTERACTION_DISABLED_PLATFORMS: PlatformCode[] = [PlatformCode.Douyin];
+
+export * from './labels';

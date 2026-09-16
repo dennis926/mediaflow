@@ -26,15 +26,28 @@
 
 - 分页响应 `data`：`{ items: [], meta: { page, pageSize, total, totalPages } }`
 
-## 2. 已实现接口
+## 2. 鉴权
 
-### 2.1 系统
+除标注 **公开** 的接口外，全部接口需要 `Authorization: Bearer <accessToken>`，缺失或失效返回 `40100`。
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| POST | `/api/auth/login` | **公开**。邮箱 + 密码（bcrypt 校验）→ JWT（默认 2h，`JWT_ACCESS_EXPIRES` 可配） |
+| GET | `/api/auth/me` | 当前登录用户（含角色） |
+
+- 全局 `JwtAuthGuard`：`@Public()` 标记的接口（`/api/health`、`/api/auth/login`、`/api/publish/adapters`、`/api/ai/status`）免鉴权
+- 本地调试可设 `AUTH_ENFORCED=false` 临时关闭鉴权（生产保持 true）
+- 登录成功/失败、发布任务状态变化、AI 调用等都会写入 `audit_logs`
+
+## 3. 已实现接口
+
+### 3.1 系统
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | GET | `/api/health` | 健康检查 |
 
-### 2.2 发布中心
+### 3.2 发布中心
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
@@ -43,6 +56,7 @@
 | GET | `/api/publish/tasks` | 任务列表，支持 `status`、`platform`、`page`、`pageSize` |
 | GET | `/api/publish/tasks/:id` | 任务详情（含内容、平台版本） |
 | POST | `/api/publish/tasks` | 创建发布任务（支持多平台、定时） |
+| POST | `/api/publish/tasks/:id/retry` | 重试任务（failed / manual_required / canceled / pending 可重试）：重置状态与尝试次数并重新入队 |
 
 `POST /api/publish/tasks` 请求体：
 
@@ -63,7 +77,7 @@
 - **AI 生成内容若未通过 AI 标识校验（`ai_flag_checked=false`）→ 40000 拒绝发布**（法定要求）
 - 平台无适配器 → 40000
 
-### 2.3 内容中心
+### 3.3 内容中心
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
@@ -91,7 +105,7 @@
 - 新版本自动带上 AI 标识（`aiFlagType=assisted`），正文末尾追加"（本文由 AI 辅助生成）"
 - 响应含 `generationId`（对应 `ai_generations` 记录）与 `model`
 
-### 2.4 AI 服务
+### 3.4 AI 服务
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
@@ -103,7 +117,7 @@
 
 **每一次 AI 调用都会写入 `ai_generations`**，包含 prompt、输出、token 数、耗时与失败原因。
 
-## 3. 任务状态机
+## 4. 任务状态机
 
 ```
 pending ──(到点/入队)──> publishing ──> published
@@ -118,7 +132,7 @@ scheduled ──(到点，由扫描器入队)──> pending
 - 队列：Redis Stream `mediaflow:publish:tasks`，消费组 `publish-workers`；worker 崩溃留下的未确认消息 60s 后被接管
 - 数据库是唯一事实来源：队列消息只带任务 ID，消费时重新读取并做条件更新
 
-## 4. 规划接口（待实现）
+## 5. 规划接口（待实现）
 
 - 内容：`/api/contents`、`/api/contents/:id`、`/api/contents/:id/ai-adapt`
 - 发布：`/api/publish/tasks/:id/retry`、`/api/publish/calendar`

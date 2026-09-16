@@ -51,6 +51,27 @@ pnpm workspace 单仓多包：
 - 失败重试：间隔 `PUBLISH_RETRY_INTERVAL_MS`，达到 `maxAttempts` 后置 `failed`
 - 终态：`published` / `manual_required` / `failed` / `canceled`；worker 对终态任务直接跳过（幂等）
 
+## 4.3 移动端（apps/h5）
+
+- React 18 + Vite 5，移动优先：底部 4 Tab 导航（56px + safe-area）、点击区域 ≥44px、输入框字号 16px（防 iOS 缩放）
+- 页面：`/h5/login`、`/h5/dashboard`（2×2 数据卡片）、`/h5/publish/queue`（Tab 过滤 + 卡片列表）、`/h5/publish/task/:id`（详情 + 重试）
+- 生产构建 `base=/h5/`，与 PC 端共用同一套 `/api` 与 `mediaflow.token`
+
+## 4.4 部署拓扑（生产）
+
+```
+浏览器 ──HTTPS──> 宝塔 nginx (auto.liangyijianye.cn)
+                    ├── /h5/   → 静态文件 /www/wwwroot/auto.liangyijianye.cn/h5/
+                    ├── /api/  → 127.0.0.1:4000  mediaflow-api.service (NestJS, node dist/main.js)
+                    └── /      → 127.0.0.1:3000  mediaflow-web.service  (Next.js, next start)
+                        ↓
+             PostgreSQL 18 (mediaflow) + Redis 8 (发布队列)
+```
+
+- 两个服务均为 systemd 单元（`Restart=always`、开机自启），日志在 `/var/log/mediaflow-api.log`、`/var/log/mediaflow-web.log`
+- 生产仅监听回环地址（`APP_HOST=127.0.0.1`），公网只能经 nginx 访问
+- 部署流程：`NODE_ENV=production pnpm --filter @mediaflow/api run build` → 重启 api；`NODE_ENV=production pnpm --filter @mediaflow/web run build` → 重启 web；H5 构建产物拷到 `/www/wwwroot/auto.liangyijianye.cn/h5/`
+
 ## 5. 本机开发环境说明（与 AGENTS.md 的差异）
 
 | 项 | AGENTS.md 目标环境 | 当前开发机 |

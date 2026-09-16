@@ -25,10 +25,21 @@ pnpm dev                # 并行启动 api(4000) / web(3000) / h5(3101) / plugin
 | packages/channel-adapters | 平台适配器接口与注册表 |
 | docs | PRD / 架构 / API / 数据库文档 |
 
+## 线上地址
+
+| 端 | 地址 |
+| --- | --- |
+| PC 端 | https://auto.liangyijianye.cn/ |
+| 移动端 H5 | https://auto.liangyijianye.cn/h5/ |
+| API | https://auto.liangyijianye.cn/api/health |
+
+两个前端共用一套登录（Token 存 localStorage 的 `mediaflow.token`）。
+
 ## 开发环境备注
 
 - 包管理器限定 pnpm；依赖锁定精确版本。
 - 本机未安装 Docker，使用系统 PostgreSQL / Redis；`docker-compose.yml` 供目标环境使用。
+- **构建前端必须用 `NODE_ENV=production`**：在 `development` 下 Next 的预渲染会整体报错（`useContext of null`）；而 `pnpm install` 又需要 `NODE_ENV=development`（已在 `.npmrc` 中固定 `production=false`）。
 - H5 开发端口为 3101（3001 已被本机其它站点占用）。
 - 复制 `.env.example` 为 `.env` 后按需调整；`.env` 不提交。
 

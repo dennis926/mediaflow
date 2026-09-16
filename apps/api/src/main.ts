@@ -21,8 +21,10 @@ async function bootstrap(): Promise<void> {
   app.useGlobalFilters(new AllExceptionsFilter());
 
   const port = Number(config.get<string>('APP_PORT') ?? 4000);
-  await app.listen(port, '0.0.0.0');
-  Logger.log(`MediaFlow API ready on http://localhost:${port}/api`, 'Bootstrap');
+  // In production the API sits behind nginx and must not be reachable from the internet.
+  const host = config.get<string>('APP_HOST') ?? (config.get<string>('NODE_ENV') === 'production' ? '127.0.0.1' : '0.0.0.0');
+  await app.listen(port, host);
+  Logger.log(`MediaFlow API ready on http://${host}:${port}/api`, 'Bootstrap');
 }
 
 void bootstrap();

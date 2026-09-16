@@ -1,14 +1,14 @@
-interface PlaceholderPageProps {
-  title: string;
-  hint: string;
-}
+import { PageHeader } from '../components/PageHeader';
 
-// Skeleton only: the full mobile experience ships in the H5 stage.
-export function PlaceholderPage({ title, hint }: PlaceholderPageProps) {
+export function PlaceholderPage({ title, hint }: { title: string; hint: string }) {
   return (
-    <section className="page">
-      <h1 className="page-title">{title}</h1>
-      <p className="placeholder">{hint}</p>
-    </section>
+    <>
+      <PageHeader title={title} />
+      <div className="app-main">
+        <div className="card">
+          <span className="muted">{hint}</span>
+        </div>
+      </div>
+    </>
   );
 }
