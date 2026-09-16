@@ -1,0 +1,31 @@
+{
+  "name": "mediaflow",
+  "version": "0.1.0",
+  "private": true,
+  "description": "MediaFlow - social media content distribution and matrix operation platform",
+  "packageManager": "pnpm@9.15.9",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build:packages": "pnpm --filter \"./packages/*\" run build",
+    "dev": "pnpm run build:packages && pnpm -r --parallel --reporter append-only run dev",
+    "dev:api": "pnpm --filter @mediaflow/api run dev",
+    "dev:web": "pnpm --filter @mediaflow/web run dev",
+    "dev:h5": "pnpm --filter @mediaflow/h5 run dev",
+    "build": "pnpm run build:packages && pnpm -r --reporter append-only run build",
+    "test": "pnpm -r --reporter append-only run test",
+    "lint": "pnpm -r --reporter append-only run lint",
+    "typecheck": "pnpm -r --reporter append-only run typecheck",
+    "migrate": "pnpm --filter @mediaflow/api run migrate",
+    "migrate:revert": "pnpm --filter @mediaflow/api run migrate:revert",
+    "seed": "pnpm --filter @mediaflow/api run seed"
+  },
+  "devDependencies": {
+    "@typescript-eslint/eslint-plugin": "7.18.0",
+    "@typescript-eslint/parser": "7.18.0",
+    "eslint": "8.57.1",
+    "prettier": "3.9.7",
+    "typescript": "5.9.3"
+  }
+}

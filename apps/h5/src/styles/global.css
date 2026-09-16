@@ -1,0 +1,78 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
+}
+
+body {
+  font-family: var(--mf-font-family-base);
+  font-size: var(--mf-font-size-lg);
+  line-height: var(--mf-font-lineHeight-normal);
+  color: var(--mf-color-text-primary);
+  background: var(--mf-color-bg-body);
+  -webkit-font-smoothing: antialiased;
+}
+
+input,
+textarea,
+select {
+  /* Below 16px iOS zooms into the focused field. */
+  font-size: 16px;
+}
+
+.app-shell {
+  max-width: var(--mf-size-h5-viewport);
+  margin: 0 auto;
+  padding-bottom: calc(var(--mf-size-h5-tabbarHeight) + env(safe-area-inset-bottom, 0px));
+}
+
+.page {
+  padding: var(--mf-space-4);
+}
+
+.page-title {
+  font-size: var(--mf-font-size-2xl);
+  font-weight: var(--mf-font-weight-semibold);
+  margin: 0 0 var(--mf-space-4);
+}
+
+.placeholder {
+  color: var(--mf-color-text-secondary);
+}
+
+.tabbar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: calc(var(--mf-size-h5-tabbarHeight) + env(safe-area-inset-bottom, 0px));
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  align-items: center;
+  background: var(--mf-color-bg-surface);
+  border-top: 1px solid var(--mf-color-border-base);
+  box-shadow: var(--mf-shadow-sm);
+}
+
+.tabbar a {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--mf-size-touch-min);
+  font-size: var(--mf-font-size-sm);
+  color: var(--mf-color-text-secondary);
+}
+
+.tabbar a[aria-current='page'] {
+  color: var(--mf-color-brand-600);
+  font-weight: var(--mf-font-weight-semibold);
+}

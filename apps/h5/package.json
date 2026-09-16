@@ -1,0 +1,29 @@
+{
+  "name": "@mediaflow/h5",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "vite --port 3101 --strictPort",
+    "build": "vite build",
+    "preview": "vite preview --port 3101 --strictPort",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "lint": "eslint \"src/**/*.{ts,tsx}\" --ext .ts,.tsx"
+  },
+  "dependencies": {
+    "@mediaflow/design-tokens": "workspace:*",
+    "@mediaflow/shared": "workspace:*",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "react-router-dom": "6.30.6"
+  },
+  "devDependencies": {
+    "@types/node": "20.19.43",
+    "@types/react": "18.3.31",
+    "@types/react-dom": "18.3.7",
+    "@vitejs/plugin-react": "4.7.0",
+    "typescript": "5.9.3",
+    "vite": "5.4.21",
+    "vitest": "2.1.9"
+  }
+}

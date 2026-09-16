@@ -1,0 +1,25 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--mf-font-family-base);
+  font-size: var(--mf-font-size-md);
+  line-height: var(--mf-font-lineHeight-normal);
+  color: var(--mf-color-text-primary);
+  background: var(--mf-color-bg-body);
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: var(--mf-color-text-link);
+  text-decoration: none;
+}
