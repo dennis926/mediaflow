@@ -1,4 +1,7 @@
 import { Body, Controller, Get, Param, ParseUUIDPipe, Post } from '@nestjs/common';
+import { toActor } from '../auth/actor.util';
+import { AuthUser } from '../auth/auth.types';
+import { CurrentUser } from '../auth/current-user.decorator';
 import { AiAdaptDto } from '../ai/dto/ai.dto';
 import { ContentVariant } from './entities/content-variant.entity';
 import { AdaptResult, ContentService } from './content.service';
@@ -14,7 +17,11 @@ export class ContentVariantController {
 
   /** Generates per-platform versions of one content through the AI service. */
   @Post(':id/ai-adapt')
-  adapt(@Param('id', ParseUUIDPipe) id: string, @Body() dto: AiAdaptDto): Promise<AdaptResult> {
-    return this.contentService.aiAdapt(id, dto, { name: 'api' });
+  adapt(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: AiAdaptDto,
+    @CurrentUser() user?: AuthUser,
+  ): Promise<AdaptResult> {
+    return this.contentService.aiAdapt(id, dto, toActor(user));
   }
 }

@@ -1,7 +1,10 @@
 import { Module } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuditModule } from './audit/audit.module';
+import { AuthModule } from './modules/auth/auth.module';
+import { JwtAuthGuard } from './modules/auth/jwt-auth.guard';
 import { CommonModule } from './common/common.module';
 import { AiModule } from './modules/ai/ai.module';
 import { ContentModule } from './modules/content/content.module';
@@ -26,7 +29,9 @@ import { RedisModule } from './redis/redis.module';
     PublishModule,
     AiModule,
     ContentModule,
+    AuthModule,
   ],
   controllers: [HealthController],
+  providers: [{ provide: APP_GUARD, useClass: JwtAuthGuard }],
 })
 export class AppModule {}

@@ -68,6 +68,33 @@ export class PublishQueueService {
     return parseStreamEntries([[PUBLISH_STREAM, claimed]]);
   }
 
+  /**
+   * Drops consumers that left nothing pending, e.g. workers from previous restarts.
+   * Without this the consumer list grows on every deploy.
+   */
+  async pruneIdleConsumers(keep: string): Promise<number> {
+    // XINFO CONSUMERS needs the group name as well.
+    const raw = await this.redis.call('XINFO', 'CONSUMERS', PUBLISH_STREAM, PUBLISH_GROUP).catch((error: unknown) => {
+      this.logger.warn(`读取消费者列表失败：${error instanceof Error ? error.message : String(error)}`);
+      return [] as unknown;
+    });
+    if (!Array.isArray(raw)) return 0;
+    let removed = 0;
+    for (const entry of raw) {
+      if (!Array.isArray(entry)) continue;
+      const info = new Map<string, string>();
+      for (let index = 0; index + 1 < entry.length; index += 2) {
+        info.set(String(entry[index]), String(entry[index + 1]));
+      }
+      const name = info.get('name');
+      const pending = Number(info.get('pending') ?? '0');
+      if (!name || name === keep || pending > 0) continue;
+      await this.redis.call('XGROUP', 'DELCONSUMER', PUBLISH_STREAM, PUBLISH_GROUP, name);
+      removed += 1;
+    }
+    return removed;
+  }
+
   async ack(messageId: string): Promise<void> {
     await this.redis.xack(PUBLISH_STREAM, PUBLISH_GROUP, messageId);
   }

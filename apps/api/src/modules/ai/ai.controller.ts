@@ -1,4 +1,8 @@
 import { Body, Controller, Get, Post, Query } from '@nestjs/common';
+import { toActor } from '../auth/actor.util';
+import { AuthUser } from '../auth/auth.types';
+import { CurrentUser } from '../auth/current-user.decorator';
+import { Public } from '../auth/public.decorator';
 import { AiGeneration } from './entities/ai-generation.entity';
 import { AiService } from './ai.service';
 import { ComplianceReport } from './ai.types';
@@ -8,30 +12,39 @@ import { ComplianceCheckDto, GenerateTextDto, OptimizeTitleDto, QueryAiGeneratio
 export class AiController {
   constructor(private readonly aiService: AiService) {}
 
+  @Public()
   @Get('status')
   status(): { provider: string; model: string } {
     return { provider: this.aiService.providerName, model: this.aiService.modelName };
   }
 
   @Post('generate')
-  generate(@Body() dto: GenerateTextDto): Promise<{ text: string; generationId: string }> {
+  generate(
+    @Body() dto: GenerateTextDto,
+    @CurrentUser() user?: AuthUser,
+  ): Promise<{ text: string; generationId: string }> {
     return this.aiService.generate(dto.prompt, dto.tone, {
       inputRefs: { title: dto.title ?? null },
-      requestedBy: null,
+      requestedBy: toActor(user).id ?? null,
     });
   }
 
   @Post('optimize-title')
-  optimizeTitle(@Body() dto: OptimizeTitleDto): Promise<{ titles: string[]; generationId: string }> {
-    return this.aiService.optimizeTitle(dto.title, dto.platform, dto.keywords, {});
+  optimizeTitle(
+    @Body() dto: OptimizeTitleDto,
+    @CurrentUser() user?: AuthUser,
+  ): Promise<{ titles: string[]; generationId: string }> {
+    return this.aiService.optimizeTitle(dto.title, dto.platform, dto.keywords, { requestedBy: toActor(user).id ?? null });
   }
 
   @Post('compliance-check')
-  complianceCheck(@Body() dto: ComplianceCheckDto): Promise<ComplianceReport> {
-    return this.aiService.complianceCheck(
-      { text: dto.text, platform: dto.platform, useAiReview: dto.useAiReview },
-      {},
-    );
+  complianceCheck(
+    @Body() dto: ComplianceCheckDto,
+    @CurrentUser() user?: AuthUser,
+  ): Promise<ComplianceReport> {
+    return this.aiService.complianceCheck({ text: dto.text, platform: dto.platform, useAiReview: dto.useAiReview }, {
+      requestedBy: toActor(user).id ?? null,
+    });
   }
 
   @Get('generations')

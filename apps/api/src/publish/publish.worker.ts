@@ -50,6 +50,8 @@ export class PublishWorker implements OnModuleInit, OnModuleDestroy {
       return;
     }
     await this.queue.ensureGroup();
+    const pruned = await this.queue.pruneIdleConsumers(this.consumerName).catch(() => 0);
+    if (pruned > 0) this.logger.log(`已清理 ${pruned} 个空闲消费者记录`);
     this.running = true;
     void this.consumeLoop();
     this.sweepTimer = setInterval(() => void this.sweep(), SWEEP_INTERVAL_MS);

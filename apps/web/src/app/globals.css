@@ -20,6 +20,44 @@ body {
 }
 
 a {
-  color: var(--mf-color-text-link);
+  color: inherit;
   text-decoration: none;
+}
+
+a:hover {
+  color: var(--mf-color-text-link);
+}
+
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  margin: 0;
+}
+
+::selection {
+  background: var(--mf-color-brand-100);
+}
+
+/* Thin scrollbars keep dense tables readable */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--mf-color-border-strong) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: var(--mf-color-border-strong);
+  border-radius: var(--mf-radius-full);
 }
