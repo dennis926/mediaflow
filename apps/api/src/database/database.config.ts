@@ -54,7 +54,11 @@ export function buildNestDataSourceOptions(config: ConfigService): TypeOrmModule
     namingStrategy: new SnakeNamingStrategy(),
     uuidExtension: 'pgcrypto',
     synchronize: false,
-    autoLoadEntities: true,
+    // Load every entity file, exactly like the CLI data source does, otherwise relations
+    // pointing at entities that no module registered yet would fail metadata validation.
+    entities: [join(__dirname, '../**/*.entity{.ts,.js}')],
+    migrations: [join(__dirname, 'migrations/*{.ts,.js}')],
+    migrationsTableName: 'typeorm_migrations',
     logging: config.get<string>('DB_LOGGING') === 'true',
   };
 }

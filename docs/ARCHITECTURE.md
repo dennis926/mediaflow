@@ -28,10 +28,28 @@ pnpm workspace 单仓多包：
 - 前端颜色 / 尺寸只能引用 CSS 变量 `var(--mf-*)`，不得硬编码
 - 所有 API 响应由 `ResponseInterceptor` 统一封装为 `{ code, message, data }`
 
-## 4. 异步发布链路
+## 4. 平台适配层与异步发布链路
 
-发布任务一律异步：`POST /api/publish/tasks` 写库 → 入 Redis Stream → PublishWorker 消费 → 调用 ChannelAdapter → 回写状态。
-平台策略：`api`（抖音、小红书）走官方接口；`manual`（公众号）返回 `manual_required`；`plugin`（视频号、知乎等）等待插件回传人工确认结果。
+### 4.1 适配层（packages/channel-adapters）
+
+- 契约 `ChannelAdapter`：`auth` / `refreshToken` / `publish` / `fetchAnalytics` + `capabilities`
+- 已实现适配器：
+  | 适配器 | 平台 | 模式 | 发布行为 |
+  | --- | --- | --- | --- |
+  | `WechatMpAdapter` | 微信公众号 | manual | 永不调用群发接口，返回 `manual_required` 让运营手动发布；可拉取图文分析数据 |
+  | `DouyinAdapter` | 抖音 | api | `video/upload` → `video/create`；无 access_token 时明确失败；**无互动能力** |
+  | `XiaohongshuAdapter` | 小红书 | api | `note/publish`、`note/detail`；开放平台地址由 `XIAOHONGSHU_API_BASE` 配置，未配置则拒绝调用 |
+  | `PluginFillAdapter` | 视频号/知乎/头条/百家号 | plugin | 返回 `pending`，等待浏览器插件填充 + 人工点击发布 |
+- Token 缓存：适配器只依赖 `TokenStore` 接口，API 侧由 `RedisTokenStore` 用 Redis 实现（公众号 app_token 提前 5 分钟过期）
+
+### 4.2 发布链路
+
+`POST /api/publish/tasks` → 校验（内容存在、AI 标识已校验、平台有适配器）→ 写 `publish_tasks` → `XADD` 入 Redis Stream
+→ `PublishWorker`（消费组 `publish-workers`）读消息 → 重新读取任务 → **条件更新抢锁**（`attempts+1`，并发安全）→ 调用适配器 → 回写状态 + 审计日志。
+
+- 扫描器每 15s 兜底：把到点的 `scheduled` 任务、以及被 Redis 丢失的 `pending` 任务重新入队（等待人工确认的插件任务不再入队）
+- 失败重试：间隔 `PUBLISH_RETRY_INTERVAL_MS`，达到 `maxAttempts` 后置 `failed`
+- 终态：`published` / `manual_required` / `failed` / `canceled`；worker 对终态任务直接跳过（幂等）
 
 ## 5. 本机开发环境说明（与 AGENTS.md 的差异）
 

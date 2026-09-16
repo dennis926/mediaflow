@@ -1,8 +1,12 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { AuditModule } from './audit/audit.module';
+import { CommonModule } from './common/common.module';
 import { buildNestDataSourceOptions } from './database/database.config';
 import { HealthController } from './health/health.controller';
+import { PublishModule } from './publish/publish.module';
+import { RedisModule } from './redis/redis.module';
 
 @Module({
   imports: [
@@ -14,6 +18,10 @@ import { HealthController } from './health/health.controller';
       inject: [ConfigService],
       useFactory: buildNestDataSourceOptions,
     }),
+    RedisModule,
+    CommonModule,
+    AuditModule,
+    PublishModule,
   ],
   controllers: [HealthController],
 })

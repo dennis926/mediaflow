@@ -24,6 +24,7 @@
     "@mediaflow/shared": "workspace:*"
   },
   "devDependencies": {
+    "@types/node": "20.19.43",
     "typescript": "5.9.3",
     "vitest": "2.1.9",
     "eslint": "8.57.1"

@@ -3,9 +3,13 @@ import { PlatformCode, PublishMode } from '@mediaflow/shared';
 export interface AdapterCredentials {
   appId: string;
   appSecret: string;
+  /** Short lived user/app token used by analytics and publish calls. */
   accessToken?: string;
   refreshToken?: string;
   expiresAt?: string;
+  openId?: string;
+  /** OAuth authorization code, only present during the initial exchange. */
+  code?: string;
 }
 
 export interface PublishPayload {
@@ -19,26 +23,30 @@ export interface PublishPayload {
   aiGenerated: boolean;
 }
 
+export type PublishOutcome = 'published' | 'manual_required' | 'pending' | 'failed';
+
 export interface PublishResult {
-  status: 'published' | 'manual_required' | 'pending' | 'failed';
+  status: PublishOutcome;
   platformPostId?: string;
   platformUrl?: string;
   message: string;
   raw?: Record<string, unknown>;
 }
 
+export interface AnalyticsMetrics {
+  views: number;
+  likes: number;
+  comments: number;
+  shares: number;
+  favorites: number;
+  followers?: number;
+}
+
 export interface AnalyticsSnapshot {
   platform: PlatformCode;
   postId: string;
   capturedAt: string;
-  metrics: {
-    views: number;
-    likes: number;
-    comments: number;
-    shares: number;
-    favorites: number;
-    followers?: number;
-  };
+  metrics: AnalyticsMetrics;
 }
 
 export interface AdapterCapabilities {
@@ -49,6 +57,22 @@ export interface AdapterCapabilities {
   supportsSchedule: boolean;
   maxBodyLength: number;
   supportedMedia: Array<'image' | 'video' | 'audio'>;
+}
+
+/** Cache used for platform tokens; implemented by the API with Redis. */
+export interface TokenStore {
+  get(key: string): Promise<string | null>;
+  set(key: string, value: string, ttlSeconds: number): Promise<void>;
+  del(key: string): Promise<void>;
+}
+
+export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
+
+export interface AdapterContext {
+  /** Injectable for tests. */
+  fetchImpl?: FetchLike;
+  tokenStore?: TokenStore;
+  now?: () => Date;
 }
 
 /** Every platform integration must implement this contract. */

@@ -1,5 +1,9 @@
 import { PlatformCode } from '@mediaflow/shared';
-import { ChannelAdapter } from './types';
+import { DouyinAdapter } from './adapters/douyin.adapter';
+import { PluginFillAdapter } from './adapters/plugin-fill.adapter';
+import { WechatMpAdapter } from './adapters/wechat-mp.adapter';
+import { XiaohongshuAdapter } from './adapters/xiaohongshu.adapter';
+import { AdapterContext, ChannelAdapter } from './types';
 
 /** Single source of truth for platform integrations. */
 export class ChannelAdapterRegistry {
@@ -9,14 +13,14 @@ export class ChannelAdapterRegistry {
     this.adapters.set(adapter.platform, adapter);
   }
 
-  get(platform: PlatformCode): ChannelAdapter {
-    const adapter = this.adapters.get(platform);
-    if (!adapter) throw new Error(`No channel adapter registered for platform: ${platform}`);
-    return adapter;
-  }
-
   has(platform: PlatformCode): boolean {
     return this.adapters.has(platform);
+  }
+
+  get(platform: PlatformCode): ChannelAdapter {
+    const adapter = this.adapters.get(platform);
+    if (!adapter) throw new Error(`平台适配器尚未实现：${platform}`);
+    return adapter;
   }
 
   list(): ChannelAdapter[] {
@@ -24,4 +28,26 @@ export class ChannelAdapterRegistry {
   }
 }
 
-export const channelAdapterRegistry = new ChannelAdapterRegistry();
+export interface DefaultRegistryOptions {
+  context?: AdapterContext;
+  /** Xiaohongshu open platform base url; the adapter stays inert when it is missing. */
+  xiaohongshuBaseUrl?: string;
+}
+
+const PLUGIN_EDITOR_URLS: Partial<Record<PlatformCode, string>> = {
+  [PlatformCode.WechatVideo]: 'https://channels.weixin.qq.com/platform/post/create',
+  [PlatformCode.Zhihu]: 'https://zhuanlan.zhihu.com/write',
+  [PlatformCode.Toutiao]: 'https://mp.toutiao.com/profile_v4/graphic/publish',
+  [PlatformCode.Baijiahao]: 'https://baijiahao.baidu.com/builder/rc/edit?type=news',
+};
+
+export function createDefaultRegistry(options: DefaultRegistryOptions = {}): ChannelAdapterRegistry {
+  const registry = new ChannelAdapterRegistry();
+  registry.register(new WechatMpAdapter(options.context));
+  registry.register(new DouyinAdapter(options.context));
+  registry.register(new XiaohongshuAdapter(options.context, options.xiaohongshuBaseUrl));
+  for (const [platform, editorUrl] of Object.entries(PLUGIN_EDITOR_URLS)) {
+    registry.register(new PluginFillAdapter(platform as PlatformCode, editorUrl));
+  }
+  return registry;
+}
