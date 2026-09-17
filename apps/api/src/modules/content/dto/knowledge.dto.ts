@@ -62,6 +62,11 @@ export class CreateKnowledgeDto {
   @IsString()
   @Length(1, 512)
   sourceUrl?: string;
+
+  /** 内容由 AI 起草（人工确认后保存），保存时打标。 */
+  @IsOptional()
+  @IsBoolean()
+  aiGenerated?: boolean;
 }
 
 export class UpdateKnowledgeDto extends CreateKnowledgeDto {
@@ -183,6 +188,88 @@ export class CommitImportDto {
   @ValidateNested({ each: true })
   @Type(() => CommitChunkDto)
   chunks!: CommitChunkDto[];
+}
+
+/** 知识库 AI 体检/生成相关的请求体。 */
+export class AiGenerateKnowledgeDto {
+  @IsString()
+  @Length(1, 80)
+  brand!: string;
+
+  @IsIn(KNOWLEDGE_CATEGORIES, { message: '分类不合法' })
+  category!: (typeof KNOWLEDGE_CATEGORIES)[number];
+
+  /** 运营给的要点，几行都行。 */
+  @IsString()
+  @Length(5, 2000)
+  points!: string;
+
+  @IsOptional()
+  @IsIn(Object.values(PlatformCode))
+  platform?: PlatformCode;
+
+  @IsOptional()
+  @IsString()
+  @Length(1, 40)
+  tone?: string;
+}
+
+export class AiPolishKnowledgeDto {
+  @IsOptional()
+  @IsString()
+  @Length(1, 80)
+  brand?: string;
+
+  @IsOptional()
+  @IsIn(KNOWLEDGE_CATEGORIES)
+  category?: (typeof KNOWLEDGE_CATEGORIES)[number];
+
+  @IsString()
+  @Length(20, 5000)
+  content!: string;
+
+  @IsOptional()
+  @IsString()
+  @Length(1, 200)
+  instruction?: string;
+}
+
+/** 检索测试台：直接喂一段标题/正文，看会引用到哪几条资料。 */
+export class MatchKnowledgeDto {
+  @IsOptional()
+  @IsString()
+  @Length(0, 300)
+  title?: string;
+
+  @IsOptional()
+  @IsString()
+  @Length(0, 5000)
+  body?: string;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(20)
+  @IsString({ each: true })
+  tags?: string[];
+
+  @IsOptional()
+  @IsIn(Object.values(PlatformCode))
+  platform?: PlatformCode;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(20)
+  limit?: number;
+}
+
+export class BatchDeleteKnowledgeDto {
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(100)
+  @IsUUID('4', { each: true })
+  ids!: string[];
 }
 
 export class BatchActivateDto {

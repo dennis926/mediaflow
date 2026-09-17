@@ -20,7 +20,11 @@ import { AuthUser } from '../auth/auth.types';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { Roles } from '../auth/roles.decorator';
 import {
+  AiGenerateKnowledgeDto,
+  AiPolishKnowledgeDto,
   BatchActivateDto,
+  BatchDeleteKnowledgeDto,
+  MatchKnowledgeDto,
   CommitImportDto,
   CreateKnowledgeDto,
   ImportKnowledgeDto,
@@ -51,6 +55,19 @@ export class KnowledgeController {
   @Get('preview')
   preview(@Query() query: PreviewKnowledgeDto): Promise<{ matches: KnowledgeMatch[] }> {
     return this.knowledgeService.previewForContent(query.contentId, query.platform, query.limit ?? 5);
+  }
+
+  /** 按来源文件分组，用于整批启用/停用/删除 */
+  @Get('sources')
+  sources() {
+    return this.knowledgeService.sources();
+  }
+
+  /** 知识库体检：重复条目 + 欠打磨条目 */
+  @Roles('owner', 'admin', 'editor', 'reviewer', 'viewer')
+  @Get('audit')
+  audit() {
+    return this.knowledgeService.auditReport();
   }
 
   @Get(':id')
@@ -100,6 +117,33 @@ export class KnowledgeController {
       dto,
       toActor(user),
     );
+  }
+
+  /** 检索测试台：喂一段内容，看会引用哪几条资料（不写库） */
+  @Roles('owner', 'admin', 'editor', 'reviewer', 'viewer')
+  @Post('match')
+  match(@Body() dto: MatchKnowledgeDto): Promise<{ matches: KnowledgeMatch[] }> {
+    return this.knowledgeService.match(dto);
+  }
+
+  /** AI 起草一条资料（只返回草案，人工确认后再保存） */
+  @Roles('owner', 'admin', 'editor')
+  @Post('ai-draft')
+  aiDraft(@Body() dto: AiGenerateKnowledgeDto, @CurrentUser() user?: AuthUser) {
+    return this.knowledgeService.aiDraft(dto, toActor(user));
+  }
+
+  /** AI 润色（可作用于未保存的草稿） */
+  @Roles('owner', 'admin', 'editor')
+  @Post('ai-polish')
+  aiPolish(@Body() dto: AiPolishKnowledgeDto, @CurrentUser() user?: AuthUser) {
+    return this.knowledgeService.aiPolish(dto, toActor(user));
+  }
+
+  @Roles('owner', 'admin', 'editor')
+  @Post('batch-delete')
+  batchRemove(@Body() dto: BatchDeleteKnowledgeDto, @CurrentUser() user?: AuthUser): Promise<{ removed: number }> {
+    return this.knowledgeService.batchRemove(dto, toActor(user));
   }
 
   @Roles('owner', 'admin', 'editor')

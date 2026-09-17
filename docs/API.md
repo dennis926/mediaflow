@@ -175,6 +175,12 @@
 | PUT | `/api/knowledge/:id` | 更新（含 `isActive` 启停） |
 | DELETE | `/api/knowledge/:id` | 软删除 |
 
+| POST | `/api/knowledge/match` | **检索测试台**：喂 `title`/`body`/`tags`/`platform`/`limit`，返回会引用到的资料（含命中原因与得分），不写库 |
+| POST | `/api/knowledge/ai-draft` | **AI 起草资料**：`brand`+`category`+`points` → 返回 `{ draft{title,content,tags,keywords}, generationId, model, references }`；只返回草案，人工确认后再调 `POST /api/knowledge` |
+| POST | `/api/knowledge/ai-polish` | **AI 润色**（可作用于未保存的草稿）：`content`(+`brand`/`category`/`instruction`) → 返回润色后的 `content`，事实与数字不变 |
+| GET | `/api/knowledge/sources` | 按**来源文件**分组的导入资料（文件名、条数、启用数、最近导入时间、ids），用于整批启用/停用/删除 |
+| GET | `/api/knowledge/audit` | **知识库体检**：重复条目（3-gram 相似度 ≥ 0.75）+ 欠打磨条目（过短/过长/缺标签/长期未引用） |
+| POST | `/api/knowledge/batch-delete` | 批量软删除（`ids[]`，≤100 条） |
 | POST | `/api/knowledge/parse` | **第一步：只解析不入库**（multipart，字段 `file`）；返回 `{ parsed, tempFile, chunks[] }`，`chunks[].fromOcr` 标记该片来自本地 OCR，供前端逐片人工校对 |
 | POST | `/api/knowledge/commit` | **第三步：按校对后的分片入库**（JSON：`brand`、`category`、`priority?`、`activate?`、`sourceFileName?`、`tempFile?`、`chunks[{content,title?,fromOcr?}]`）；暂存原文件此时移入 `uploads/knowledge/` 留档 |
 | POST | `/api/knowledge/import` | **上传文档**（multipart，字段 `file` + `brand`、`category`、`priority?`、`autoActivate?`、`maxChunks?`）；支持 `.pdf/.docx/.pptx/.xlsx/.xls/.csv/.txt/.md`，单文件 ≤10MB。前端可多选文件后逐个调用，单个失败不影响其它文件 |

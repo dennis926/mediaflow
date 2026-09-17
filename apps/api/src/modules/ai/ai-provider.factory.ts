@@ -95,7 +95,8 @@ export class AiProviderFactory {
     const name = ((await this.settings.get('AI_PROVIDER')) ?? 'deepseek').trim().toLowerCase();
     const model = overrides.model?.trim() || (await this.settings.get('AI_MODEL'))?.trim() || DEFAULT_MODEL;
 
-    if (name === 'mock') return new MockAiProvider(model);
+    // Offline placeholder: keep the model name honest so nobody mistakes it for a real model run.
+    if (name === 'mock') return new MockAiProvider('mock-model（离线占位，未配置真实 Key）');
 
     const apiKey = overrides.apiKey?.trim() || (await this.settings.get('AI_API_KEY'))?.trim() || '';
     const baseUrl = overrides.baseUrl?.trim() || (await this.settings.get('AI_API_BASE'))?.trim() || undefined;

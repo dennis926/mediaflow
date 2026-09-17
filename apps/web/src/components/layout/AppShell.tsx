@@ -31,7 +31,7 @@ const NAV_ITEMS: SidebarItem[] = [
   { href: '/publish/queue', label: '发布队列', icon: <PublishIcon /> },
   { href: '/publish/calendar', label: '排期日历', icon: <CalendarIcon /> },
   { href: '/reviews', label: '内容审核', icon: <ReviewIcon /> },
-  { href: '/knowledge', label: '品牌知识库', icon: <KnowledgeIcon /> },
+  { href: '/knowledge', label: '知识库管理', icon: <KnowledgeIcon /> },
   { href: '/analytics', label: '数据中心', icon: <AnalyticsIcon /> },
   { href: '/accounts', label: '账号管理', icon: <AccountIcon /> },
   { href: '/users', label: '用户管理', icon: <AccountIcon /> },

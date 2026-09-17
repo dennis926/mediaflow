@@ -48,6 +48,10 @@ export class BrandKnowledge extends BaseEntity {
   @Column({ type: 'timestamptz', nullable: true })
   lastUsedAt!: Date | null;
 
+  /** 条目由 AI 起草（人工确认后入库）：界面上要标出来，也便于日后追溯。 */
+  @Column({ type: 'boolean', default: false })
+  aiGenerated!: boolean;
+
   @DeleteDateColumn({ type: 'timestamptz' })
   deletedAt!: Date | null;
 }

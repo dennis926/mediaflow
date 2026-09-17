@@ -4,7 +4,15 @@ import { AiFlagType, PLATFORM_LABELS, PlatformCode } from '@mediaflow/shared';
 import { FindOptionsWhere, Repository } from 'typeorm';
 import { WorkspaceContextService } from '../../common/workspace-context.service';
 import { AiGeneration } from './entities/ai-generation.entity';
-import { AdaptedVariantPayload, AiCompletionResult, AiTaskType, ComplianceReport } from './ai.types';
+import {
+  AdaptedVariantPayload,
+  AiCompletionResult,
+  AiTaskType,
+  ComplianceReport,
+  KnowledgeDraft,
+  KnowledgeDraftInput,
+  KnowledgePolishInput,
+} from './ai.types';
 import { checkCompliance, scoreViolations } from './compliance.rules';
 import { AiProviderFactory } from './ai-provider.factory';
 
@@ -111,6 +119,67 @@ export class AiService {
     });
 
     return { variants: invocation.result, generationId: invocation.generationId, model: invocation.model };
+  }
+
+  /**
+   * 知识库条目生成：运营给几个要点，AI 按分类规范扩写成一条可直接使用的品牌资料。
+   * 只返回草案，由人工确认后再入库（AI 生成内容必须经人确认，见 AGENTS.md 第 5 节）。
+   */
+  async generateKnowledge(
+    input: KnowledgeDraftInput,
+    meta: AiInvocationMeta,
+  ): Promise<{ draft: KnowledgeDraft; generationId: string; model: string }> {
+    const references = (input.references ?? [])
+      .map((item, index) => `参考${index + 1}｜${item.title}：${item.content.slice(0, 200)}`)
+      .join('\n');
+
+    const invocation = await this.invoke({
+      task: 'knowledge_generate',
+      system: `${SYSTEM_EDITOR}${SYSTEM_JSON}`,
+      json: true,
+      user: [
+        '请把运营给的要点扩写成一条标准品牌资料，供后续内容生成引用。',
+        `brand=${input.brand}`,
+        `category=${input.category}`,
+        input.platform ? `适用平台=${input.platform}` : '',
+        input.tone ? `语气=${input.tone}` : '',
+        `points=${input.points}`,
+        references ? `以下是该品牌已有资料，新条目必须与之一致，不得冲突：\n${references}` : '',
+        '',
+        '要求：只写可验证的事实（配方、规格、工艺、人群、用法），不写治疗功效、不做效果承诺、不使用绝对化用语。',
+        'content 用简洁短句分条，控制在 400 字以内。',
+        '输出格式：{"title":"不超过 30 字的标题","content":"条目正文","tags":["标签"],"keywords":["关键词"]}',
+      ]
+        .filter(Boolean)
+        .join('\n'),
+      meta,
+      parse: (completion) => this.parseKnowledgeDraft(completion.text),
+    });
+
+    return { draft: invocation.result, generationId: invocation.generationId, model: invocation.model };
+  }
+
+  /** 润色/规范化一条已有资料：只改表达，不动事实。 */
+  async polishKnowledge(input: KnowledgePolishInput, meta: AiInvocationMeta): Promise<{ content: string; generationId: string }> {
+    const invocation = await this.invoke({
+      task: 'knowledge_polish',
+      system: `${SYSTEM_EDITOR}${SYSTEM_JSON}`,
+      json: true,
+      user: [
+        '请润色下面这条品牌资料：保持全部事实、数字、规格不变，只让表达更清晰、更适合被内容生成引用。',
+        `brand=${input.brand}`,
+        `category=${input.category}`,
+        input.instruction ? `额外要求=${input.instruction}` : '',
+        '同时检查是否有违反广告法的表述，若有请改为合规说法。',
+        `content=${input.content}`,
+        '输出格式：{"content":"润色后的正文"}',
+      ]
+        .filter(Boolean)
+        .join('\n'),
+      meta,
+      parse: (completion) => this.parsePolished(completion.text),
+    });
+    return { content: invocation.result, generationId: invocation.generationId };
   }
 
   async optimizeTitle(
@@ -278,6 +347,27 @@ export class AiService {
     }
     if (variants.length === 0) throw new Error('AI 未返回可用的平台版本');
     return variants;
+  }
+
+  private parseKnowledgeDraft(text: string): KnowledgeDraft {
+    const parsed = this.parseJson(text);
+    const content = String(parsed.content ?? '').trim();
+    if (content.length < 20) throw new Error('AI 生成的条目内容过短，请补充要点后重试');
+    return {
+      title: String(parsed.title ?? '').trim().slice(0, 60) || content.slice(0, 24),
+      content,
+      tags: Array.isArray(parsed.tags) ? parsed.tags.map((tag) => String(tag).trim()).filter(Boolean).slice(0, 10) : [],
+      keywords: Array.isArray(parsed.keywords)
+        ? parsed.keywords.map((keyword) => String(keyword).trim()).filter(Boolean).slice(0, 10)
+        : [],
+    };
+  }
+
+  private parsePolished(text: string): string {
+    const parsed = this.parseJson(text);
+    const content = String(parsed.content ?? '').trim();
+    if (content.length < 20) throw new Error('AI 未返回可用的润色结果');
+    return content;
   }
 
   private parseTitles(text: string): string[] {

@@ -188,6 +188,8 @@ export interface KnowledgeItem {
   platforms: string[];
   sourceUrl: string | null;
   isActive: boolean;
+  /** 条目由 AI 起草（人工确认后入库）。 */
+  aiGenerated: boolean;
   usageCount: number;
   lastUsedAt: string | null;
   updatedAt: string;
@@ -209,6 +211,44 @@ export interface ImportChunkPreview {
   content: string;
   charCount: number;
   preview: string;
+}
+
+export interface KnowledgeDraft {
+  title: string;
+  content: string;
+  tags: string[];
+  keywords: string[];
+}
+
+export interface KnowledgeSourceGroup {
+  sourceUrl: string;
+  fileName: string;
+  count: number;
+  activeCount: number;
+  lastCreatedAt: string;
+  ids: string[];
+}
+
+export interface KnowledgeAuditIssue {
+  id: string;
+  title: string;
+  brand: string;
+  kind: 'too_short' | 'too_long' | 'no_tags' | 'never_used';
+  detail: string;
+}
+
+export interface KnowledgeAuditReport {
+  summary: {
+    total: number;
+    active: number;
+    inactive: number;
+    neverUsed: number;
+    aiGenerated: number;
+    duplicateGroups: number;
+    checkedAt: string;
+  };
+  duplicateGroups: Array<{ similarity: number; items: Array<{ id: string; title: string; brand: string }> }>;
+  issues: KnowledgeAuditIssue[];
 }
 
 export interface ParsedChunk {

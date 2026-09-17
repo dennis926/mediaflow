@@ -1,7 +1,7 @@
 import { Column, Entity, Index } from 'typeorm';
 import { BaseEntity } from '../../../database/base.entity';
+import type { AiTaskType } from '../ai.types';
 
-export type AiTaskType = 'generate' | 'adapt' | 'optimize_title' | 'compliance_check';
 export type AiGenerationStatus = 'success' | 'failed';
 
 @Entity('ai_generations')

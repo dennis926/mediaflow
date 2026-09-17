@@ -4,11 +4,17 @@ import { PlatformCode } from '@mediaflow/shared';
 import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { In, Repository } from 'typeorm';
+import { AiService } from '../ai/ai.service';
+import { KnowledgeDraft } from '../ai/ai.types';
 import { AuditService } from '../../audit/audit.service';
 import { WorkspaceContextService } from '../../common/workspace-context.service';
 import {
+  AiGenerateKnowledgeDto,
+  AiPolishKnowledgeDto,
   BatchActivateDto,
+  BatchDeleteKnowledgeDto,
   CommitImportDto,
+  MatchKnowledgeDto,
   CreateKnowledgeDto,
   ImportKnowledgeDto,
   QueryKnowledgeDto,
@@ -34,9 +40,46 @@ export interface KnowledgeMatch {
   score: number;
 }
 
+export interface KnowledgeAuditIssue {
+  id: string;
+  title: string;
+  brand: string;
+  kind: 'too_short' | 'too_long' | 'no_tags' | 'never_used';
+  detail: string;
+}
+
+export interface KnowledgeAuditReport {
+  summary: {
+    total: number;
+    active: number;
+    inactive: number;
+    neverUsed: number;
+    aiGenerated: number;
+    duplicateGroups: number;
+    checkedAt: string;
+  };
+  duplicateGroups: Array<{ similarity: number; items: Array<{ id: string; title: string; brand: string }> }>;
+  issues: KnowledgeAuditIssue[];
+}
+
+export interface KnowledgeSourceGroup {
+  sourceUrl: string;
+  fileName: string;
+  count: number;
+  activeCount: number;
+  lastCreatedAt: string;
+  ids: string[];
+}
+
 export interface KnowledgeActor {
   id?: string | null;
   name?: string | null;
+}
+
+/** 从留档路径取原始文件名（去掉时间戳前缀）。 */
+export function sourceFileName(sourceUrl: string): string {
+  const name = sourceUrl.split('/').pop() ?? sourceUrl;
+  return name.replace(/^\d{10,}-/, '');
 }
 
 /** 单次导入最多落库的资料片数（防止一份大文档灌爆知识库）。 */
@@ -63,6 +106,7 @@ export class KnowledgeService {
     private readonly audit: AuditService,
     private readonly workspaceContext: WorkspaceContextService,
     private readonly parser: DocumentParserService,
+    private readonly ai: AiService,
   ) {}
 
   /** 上传目录：源文件留档，便于追溯每片资料来自哪个文档。 */
@@ -145,6 +189,7 @@ export class KnowledgeService {
         isActive: true,
         usageCount: 0,
         lastUsedAt: null,
+        aiGenerated: dto.aiGenerated ?? false,
       }),
     );
     await this.record('knowledge.create', saved.id, actor, { brand: saved.brand, category: saved.category, title: saved.title });
@@ -163,6 +208,7 @@ export class KnowledgeService {
       priority: dto.priority ?? item.priority,
       platforms: dto.platforms ?? item.platforms,
       sourceUrl: dto.sourceUrl ?? item.sourceUrl,
+      aiGenerated: dto.aiGenerated ?? item.aiGenerated,
       isActive: dto.isActive ?? item.isActive,
     });
     const saved = await this.knowledge.save(item);
@@ -507,6 +553,172 @@ export class KnowledgeService {
     if (ids.length === 0) return [];
     const scope = await this.workspaceContext.current();
     return this.knowledge.find({ where: { id: In(ids), workspaceId: scope.workspaceId } });
+  }
+
+  /** 检索测试台：喂一段标题/正文，看实际会引用哪几条资料、为什么命中。 */
+  async match(dto: MatchKnowledgeDto): Promise<{ matches: KnowledgeMatch[] }> {
+    return {
+      matches: await this.findRelevant(
+        { title: dto.title ?? '', body: dto.body ?? '', tags: dto.tags, platform: dto.platform },
+        dto.limit ?? DEFAULT_LIMIT,
+      ),
+    };
+  }
+
+  /**
+   * AI 起草一条品牌资料。只返回草案，人工确认后再走 create() 入库。
+   * 会把同品牌已有资料一起喂给模型，避免新条目和现有口径打架。
+   */
+  async aiDraft(dto: AiGenerateKnowledgeDto, actor: KnowledgeActor): Promise<{ draft: KnowledgeDraft; generationId: string; model: string; references: string[] }> {
+    const scope = await this.workspaceContext.current();
+    const references = await this.knowledge.find({
+      where: { workspaceId: scope.workspaceId, brand: dto.brand, isActive: true },
+      order: { priority: 'DESC', updatedAt: 'DESC' },
+      take: 3,
+    });
+
+    const result = await this.ai.generateKnowledge(
+      {
+        brand: dto.brand,
+        category: dto.category,
+        points: dto.points,
+        platform: dto.platform,
+        tone: dto.tone,
+        references: references.map((item) => ({ title: item.title, content: item.content })),
+      },
+      { inputRefs: { brand: dto.brand, category: dto.category, knowledgeIds: references.map((item) => item.id) }, requestedBy: actor.id ?? null },
+    );
+
+    await this.record('knowledge.ai_draft', '', actor, { brand: dto.brand, category: dto.category, generationId: result.generationId });
+    return { ...result, references: references.map((item) => item.title) };
+  }
+
+  /** AI 润色（可作用于还没保存的草稿）：只改表达与合规，不动事实。 */
+  async aiPolish(dto: AiPolishKnowledgeDto, actor: KnowledgeActor): Promise<{ content: string; generationId: string }> {
+    const result = await this.ai.polishKnowledge(
+      { brand: dto.brand ?? '', category: dto.category ?? '', content: dto.content, instruction: dto.instruction },
+      { requestedBy: actor.id ?? null },
+    );
+    await this.record('knowledge.ai_polish', '', actor, { generationId: result.generationId, brand: dto.brand ?? '' });
+    return result;
+  }
+
+  /** 按来源文件分组，便于整批启用/停用/删除某次导入的资料。 */
+  async sources(): Promise<KnowledgeSourceGroup[]> {
+    const scope = await this.workspaceContext.current();
+    const rows = await this.knowledge.find({
+      where: { workspaceId: scope.workspaceId },
+      order: { createdAt: 'ASC' },
+    });
+
+    const groups = new Map<string, KnowledgeSourceGroup>();
+    for (const row of rows) {
+      if (!row.sourceUrl) continue;
+      const group = groups.get(row.sourceUrl) ?? {
+        sourceUrl: row.sourceUrl,
+        fileName: sourceFileName(row.sourceUrl),
+        count: 0,
+        activeCount: 0,
+        lastCreatedAt: row.createdAt.toISOString(),
+        ids: [],
+      };
+      group.count += 1;
+      if (row.isActive) group.activeCount += 1;
+      group.lastCreatedAt = row.createdAt.toISOString();
+      group.ids.push(row.id);
+      groups.set(row.sourceUrl, group);
+    }
+    return [...groups.values()].sort((left, right) => right.lastCreatedAt.localeCompare(left.lastCreatedAt));
+  }
+
+  /**
+   * 知识库体检：重复条目 + 明显欠打磨的条目。
+   * 说明：重复检测用「归一化后的 3-gram Jaccard 相似度」，中文不做分词，阈值 0.75 以压低误报。
+   */
+  async auditReport(): Promise<KnowledgeAuditReport> {
+    const scope = await this.workspaceContext.current();
+    const rows = await this.knowledge.find({
+      where: { workspaceId: scope.workspaceId },
+      order: { createdAt: 'DESC' },
+      take: 300,
+    });
+    const active = rows.filter((row) => row.isActive);
+    const issues: KnowledgeAuditIssue[] = [];
+
+    for (const row of active) {
+      const length = row.content.replace(/\s/g, '').length;
+      if (length < 60) {
+        issues.push({ id: row.id, title: row.title, brand: row.brand, kind: 'too_short', detail: `正文只有 ${length} 字，信息量太少，建议补充或合并` });
+      } else if (length > 2000) {
+        issues.push({ id: row.id, title: row.title, brand: row.brand, kind: 'too_long', detail: `正文 ${length} 字，偏长，建议拆成多条` });
+      }
+      if (row.tags.length === 0 && row.keywords.length === 0) {
+        issues.push({ id: row.id, title: row.title, brand: row.brand, kind: 'no_tags', detail: '没有标签也没有关键词，检索时很难被命中' });
+      }
+      const ageDays = (Date.now() - new Date(row.createdAt).getTime()) / 86_400_000;
+      if (row.usageCount === 0 && ageDays > 30) {
+        issues.push({ id: row.id, title: row.title, brand: row.brand, kind: 'never_used', detail: `入库 ${Math.floor(ageDays)} 天从未被引用，考虑停用或改写` });
+      }
+    }
+
+    const duplicateGroups: KnowledgeAuditReport['duplicateGroups'] = [];
+    const grams = new Map<string, Set<string>>();
+    for (const row of active) grams.set(row.id, KnowledgeService.grams(row.content));
+    for (let i = 0; i < active.length; i += 1) {
+      for (let j = i + 1; j < active.length; j += 1) {
+        const similarity = KnowledgeService.jaccard(grams.get(active[i].id)!, grams.get(active[j].id)!);
+        if (similarity >= 0.75) {
+          duplicateGroups.push({
+            similarity: Number(similarity.toFixed(2)),
+            items: [
+              { id: active[i].id, title: active[i].title, brand: active[i].brand },
+              { id: active[j].id, title: active[j].title, brand: active[j].brand },
+            ],
+          });
+        }
+      }
+    }
+
+    return {
+      summary: {
+        total: rows.length,
+        active: active.length,
+        inactive: rows.length - active.length,
+        neverUsed: active.filter((row) => row.usageCount === 0).length,
+        aiGenerated: rows.filter((row) => row.aiGenerated).length,
+        duplicateGroups: duplicateGroups.length,
+        checkedAt: new Date().toISOString(),
+      },
+      duplicateGroups: duplicateGroups.slice(0, 20),
+      issues: issues.slice(0, 100),
+    };
+  }
+
+  /** 批量软删除（用于「按来源整批清理」）。 */
+  async batchRemove(dto: BatchDeleteKnowledgeDto, actor: KnowledgeActor): Promise<{ removed: number }> {
+    const scope = await this.workspaceContext.current();
+    const result = await this.knowledge
+      .createQueryBuilder()
+      .softDelete()
+      .where('workspace_id = :workspaceId AND id IN (:...ids)', { workspaceId: scope.workspaceId, ids: dto.ids })
+      .execute();
+    await this.record('knowledge.batch_delete', dto.ids[0] ?? '', actor, { count: dto.ids.length });
+    return { removed: result.affected ?? 0 };
+  }
+
+  /** 归一化文本的 3-gram 集合（去空白与标点）。 */
+  private static grams(text: string): Set<string> {
+    const normalized = text.replace(/[\s，。、；：！？,.;:!?"'（）()【】\[\]-]/g, '');
+    const grams = new Set<string>();
+    for (let index = 0; index + 3 <= normalized.length; index += 1) grams.add(normalized.slice(index, index + 3));
+    return grams;
+  }
+
+  private static jaccard(left: Set<string>, right: Set<string>): number {
+    if (left.size === 0 || right.size === 0) return 0;
+    let shared = 0;
+    for (const gram of left) if (right.has(gram)) shared += 1;
+    return shared / (left.size + right.size - shared);
   }
 
   private async record(action: string, id: string, actor: KnowledgeActor, payload: Record<string, unknown>): Promise<void> {

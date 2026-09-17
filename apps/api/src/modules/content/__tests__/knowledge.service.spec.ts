@@ -1,6 +1,7 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { ObjectLiteral, Repository } from 'typeorm';
 import { describe, expect, it, vi } from 'vitest';
+import { AiService } from '../../ai/ai.service';
 import { AuditService } from '../../../audit/audit.service';
 import { WorkspaceContextService } from '../../../common/workspace-context.service';
 import { PlatformCode } from '@mediaflow/shared';
@@ -70,7 +71,15 @@ function buildService(pool: BrandKnowledge[], content: Partial<Content> | null =
         })),
     ),
   } as unknown as import('../document-parser.service').DocumentParserService;
-  return { service: new KnowledgeService(knowledge, contents, audit, workspaceContext, parser), knowledge, contents, audit, parser };
+  const ai = {
+    generateKnowledge: vi.fn(async () => ({
+      draft: { title: 'AI 草案标题', content: 'AI 生成的条目正文内容（草案）', tags: ['AI'], keywords: ['AI'] },
+      generationId: 'gen-1',
+      model: 'mock-model',
+    })),
+    polishKnowledge: vi.fn(async () => ({ content: '润色后的正文内容（足够长以便通过校验）', generationId: 'gen-2' })),
+  } as unknown as AiService;
+  return { service: new KnowledgeService(knowledge, contents, audit, workspaceContext, parser, ai), knowledge, contents, audit, parser, ai };
 }
 
 describe('KnowledgeService 检索', () => {

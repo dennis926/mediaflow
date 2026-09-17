@@ -18,7 +18,11 @@ import type { KnowledgeItem } from '../../../lib/api/types';
 import { formatDateTime } from '../../../lib/format';
 import { KnowledgeIcon, PlusIcon } from '../../../lib/icons';
 import { CATEGORY_LABELS, CATEGORY_TONES, sourceFileName } from '../../../lib/knowledge';
+import { SparkleIcon } from '../../../lib/icons';
+import { AuditPanel } from './AuditPanel';
 import { ImportReviewDialog } from './ImportReviewDialog';
+import { MatchPanel } from './MatchPanel';
+import { SourcesPanel } from './SourcesPanel';
 import styles from './page.module.css';
 
 type KnowledgeCategory = KnowledgeItem['category'];
@@ -58,6 +62,10 @@ export default function KnowledgePage() {
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [pendingDelete, setPendingDelete] = useState<KnowledgeItem | null>(null);
   const [importOpen, setImportOpen] = useState(false);
+  const [tab, setTab] = useState<'list' | 'sources' | 'match' | 'audit'>('list');
+  const [aiPoints, setAiPoints] = useState('');
+  const [aiNote, setAiNote] = useState('');
+  const [aiDrafted, setAiDrafted] = useState(false);
   /** 最近一次导入的来源文件，用于一键定位这批资料。 */
   const [lastImported, setLastImported] = useState<string[]>([]);
   const [feedback, setFeedback] = useState<{ tone: 'success' | 'danger' | 'info'; text: string } | null>(null);
@@ -98,6 +106,7 @@ export default function KnowledgePage() {
 
   const payload: Partial<KnowledgeItem> = {
     brand: form.brand.trim(),
+    aiGenerated: aiDrafted,
     category: form.category,
     title: form.title.trim(),
     content: form.content,
@@ -105,6 +114,39 @@ export default function KnowledgePage() {
     keywords: form.keywordsText.split(/[、,，\s]+/).map((word) => word.trim()).filter(Boolean),
     priority: Number(form.priority) || 0,
   };
+
+  /** AI 起草：把要点扩写成一条规范资料，填进表单由人工确认后才保存。 */
+  const draft = useMutation({
+    mutationFn: () =>
+      knowledgeApi.aiDraft({
+        brand: form.brand.trim(),
+        category: form.category,
+        points: aiPoints.trim(),
+      }),
+    onSuccess: (result) => {
+      setForm((prev) => ({
+        ...prev,
+        title: result.draft.title,
+        content: result.draft.content,
+        tagsText: result.draft.tags.join('、'),
+        keywordsText: result.draft.keywords.join('、'),
+      }));
+      setAiDrafted(true);
+      setAiNote(`由 AI 起草（${result.model}），已参考：${result.references.join('、') || '无同名品牌资料'}。请核对事实后再保存。`);
+    },
+    onError: (error: unknown) => setAiNote(error instanceof ApiError ? `AI 起草失败：${error.message}` : 'AI 起草失败'),
+  });
+
+  /** AI 润色：只改表达与合规，不动事实；结果仍由人工确认后才保存。 */
+  const polish = useMutation({
+    mutationFn: () => knowledgeApi.aiPolish({ brand: form.brand.trim(), category: form.category, content: form.content }),
+    onSuccess: (result) => {
+      setForm((prev) => ({ ...prev, content: result.content }));
+      setAiDrafted(true);
+      setAiNote('已用 AI 润色（事实未变，请复核数字与规格）。');
+    },
+    onError: (error: unknown) => setAiNote(error instanceof ApiError ? `AI 润色失败：${error.message}` : 'AI 润色失败'),
+  });
 
   const create = useMutation({
     mutationFn: () => knowledgeApi.create(payload),
@@ -153,7 +195,10 @@ export default function KnowledgePage() {
       title: '资料',
       render: (row) => (
         <div className={styles.titleCell}>
-          <span className={styles.titleStrong}>{row.title}</span>
+          <span className={styles.titleStrong}>
+            {row.title}
+            {row.aiGenerated ? <Tag tone="warning">AI 起草</Tag> : null}
+          </span>
           <span className={styles.preview}>{row.content.replace(/\n/g, ' ')}</span>
           <span className={styles.meta}>
             {row.tags.slice(0, 4).map((tag) => (
@@ -225,7 +270,7 @@ export default function KnowledgePage() {
       align: 'right',
       render: (row) => (
         <div className={styles.actions}>
-          <Button variant="text" size="sm" onClick={() => { setEditing(row); setFormOpen(true); }}>
+          <Button variant="text" size="sm" onClick={() => { setEditing(row); setAiPoints(''); setAiNote(''); setAiDrafted(false); setFormOpen(true); }}>
             编辑
           </Button>
           <Button variant="text" size="sm" onClick={() => toggle.mutate(row)}>
@@ -273,13 +318,38 @@ export default function KnowledgePage() {
         </Banner>
       ) : null}
 
+      {tab === 'list' ? (
       <Banner tone="info">
         <span>流程：导入文档后<strong>先校对、再入库</strong>——解析结果（含图片 OCR 文字）会先给你逐片核对修改，点「确认无误」才写入；入库后在列表里仍可随时编辑、停用或删除。</span>
         <span>
           规则：AI 做多平台适配时，会按内容的标题/正文/标签与这里的「标签 + 关键词」匹配，取优先级最高的若干条（默认 5 条）拼进提示词；被引用的资料会累加「被引用次数」，方便识别哪些资料真正有用。停用的资料不参与匹配。
         </span>
       </Banner>
+      ) : null}
 
+      <div className={styles.tabs}>
+        {([
+          { key: 'list', label: '资料' },
+          { key: 'sources', label: '来源管理' },
+          { key: 'match', label: '检索测试' },
+          { key: 'audit', label: '质量体检' },
+        ] as const).map((item) => (
+          <button
+            key={item.key}
+            type="button"
+            className={`${styles.tab} ${tab === item.key ? styles.tabActive : ''}`}
+            onClick={() => setTab(item.key)}
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'sources' ? <SourcesPanel onOpenItem={(name) => { setTab('list'); setKeyword(name); setAppliedKeyword(name); setPage(1); }} /> : null}
+      {tab === 'match' ? <MatchPanel /> : null}
+      {tab === 'audit' ? <AuditPanel onOpenItem={(title) => { setTab('list'); setKeyword(title); setAppliedKeyword(title); setPage(1); }} /> : null}
+
+      {tab === 'list' ? (
       <Card flush>
         <div className={styles.toolbar} style={{ padding: 'var(--mf-space-5) var(--mf-space-5) 0' }}>
           <div className={styles.search}>
@@ -331,7 +401,10 @@ export default function KnowledgePage() {
             <Button variant="secondary" onClick={() => setImportOpen(true)}>
               导入文档
             </Button>
-            <Button icon={<PlusIcon width={16} height={16} />} onClick={() => { setEditing(null); setForm(EMPTY_FORM); setFormOpen(true); }}>
+            <Button variant="secondary" icon={<SparkleIcon width={16} height={16} />} onClick={() => { setEditing(null); setForm(EMPTY_FORM); setAiPoints(''); setAiNote(''); setAiDrafted(false); setFormOpen(true); }}>
+              AI 起草资料
+            </Button>
+            <Button icon={<PlusIcon width={16} height={16} />} onClick={() => { setEditing(null); setForm(EMPTY_FORM); setAiPoints(''); setAiNote(''); setAiDrafted(false); setFormOpen(true); }}>
               新增资料
             </Button>
           </div>
@@ -354,6 +427,7 @@ export default function KnowledgePage() {
 
         <Pagination page={page} pageSize={10} total={list.data?.meta.total ?? 0} onChange={setPage} />
       </Card>
+      ) : null}
 
       <Dialog
         open={formOpen}
@@ -375,6 +449,51 @@ export default function KnowledgePage() {
         }
       >
         <div className={styles.form}>
+          {!editing ? (
+            <div className={styles.aiBox}>
+              <div className={styles.chunkHead}>
+                <SparkleIcon width={16} height={16} />
+                <span className={styles.titleStrong}>AI 起草（可跳过，直接手写）</span>
+                <span className={styles.meta}>写下要点，AI 按分类扩写成规范条目；生成后仍需你核对再保存</span>
+              </div>
+              <Textarea
+                label="要点（一行一条）"
+                name="aiPoints"
+                rows={3}
+                placeholder={'例如：\n畅享版含五种益生元复配\n突出稀缺水苏糖\n出厂活菌大于 200 亿 CFU/盒'}
+                value={aiPoints}
+                onChange={(event) => setAiPoints(event.target.value)}
+              />
+              <div className={styles.reviewToolbar}>
+                <Button
+                  variant="secondary"
+                  icon={<SparkleIcon width={16} height={16} />}
+                  loading={draft.isPending}
+                  disabled={!form.brand.trim() || aiPoints.trim().length < 5}
+                  onClick={() => draft.mutate()}
+                >
+                  AI 起草条目
+                </Button>
+                <Button
+                  variant="text"
+                  loading={polish.isPending}
+                  disabled={form.content.trim().length < 20}
+                  onClick={() => polish.mutate()}
+                >
+                  润色当前内容
+                </Button>
+              </div>
+              {aiNote ? <span className={styles.meta}>{aiNote}</span> : null}
+            </div>
+          ) : (
+            <div className={styles.reviewToolbar}>
+              <Button variant="text" loading={polish.isPending} disabled={form.content.trim().length < 20} onClick={() => polish.mutate()}>
+                <SparkleIcon width={15} height={15} /> 用 AI 润色这条资料
+              </Button>
+              {aiNote ? <span className={styles.meta}>{aiNote}</span> : null}
+            </div>
+          )}
+          {aiDrafted ? <Banner tone="warning">这条资料由 AI 起草，保存后会标记「AI 起草」便于日后追溯；数字、规格、认证信息请务必人工核对。</Banner> : null}
           <div className={styles.twoCol}>
             <Input label="品牌" name="brand" required placeholder="例如：卿尔美" value={form.brand} onChange={(event) => setForm({ ...form, brand: event.target.value })} />
             <Select

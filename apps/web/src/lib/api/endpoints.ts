@@ -14,8 +14,11 @@ import type {
   Content,
   ContentVariant,
   ImportResult,
+  KnowledgeAuditReport,
+  KnowledgeDraft,
   KnowledgeItem,
   KnowledgeMatchItem,
+  KnowledgeSourceGroup,
   LoginResult,
   NotificationItem,
   NotificationPage,
@@ -212,6 +215,20 @@ export const knowledgeApi = {
   },
   batchActivate: (ids: string[], isActive: boolean) =>
     api.post<{ updated: number }>('/knowledge/batch-activate', { ids, isActive }),
+  batchRemove: (ids: string[]) => api.post<{ removed: number }>('/knowledge/batch-delete', { ids }),
+  /** 按来源文件分组（导入的资料可按文件整批管理） */
+  sources: () => api.get<KnowledgeSourceGroup[]>('/knowledge/sources'),
+  /** 知识库体检：重复条目 + 欠打磨条目 */
+  audit: () => api.get<KnowledgeAuditReport>('/knowledge/audit'),
+  /** 检索测试台：喂一段内容，看会引用哪几条 */
+  match: (payload: { title?: string; body?: string; tags?: string[]; platform?: string; limit?: number }) =>
+    api.post<{ matches: KnowledgeMatchItem[] }>('/knowledge/match', payload),
+  /** AI 起草条目（返回草案，人工确认后再保存） */
+  aiDraft: (payload: { brand: string; category: string; points: string; platform?: string; tone?: string }) =>
+    api.post<{ draft: KnowledgeDraft; generationId: string; model: string; references: string[] }>('/knowledge/ai-draft', payload),
+  /** AI 润色（可作用于未保存的草稿） */
+  aiPolish: (payload: { brand?: string; category?: string; content: string; instruction?: string }) =>
+    api.post<{ content: string; generationId: string }>('/knowledge/ai-polish', payload),
 
   /** 预览本次 AI 生成会引用哪些品牌资料 */
   preview: (contentId: string, limit = 5) =>
