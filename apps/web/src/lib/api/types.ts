@@ -36,6 +36,7 @@ export interface AdaptResult {
   model: string;
   variants: import('@mediaflow/shared').ContentVariantDto[];
   skipped: import('@mediaflow/shared').PlatformCode[];
+  knowledgeUsed?: KnowledgeMatchItem[];
 }
 
 export interface SettingView {
@@ -173,4 +174,31 @@ export interface ReviewItem {
   reviewerName: string | null;
   decidedAt: string | null;
   createdAt: string;
+}
+
+export interface KnowledgeItem {
+  id: string;
+  brand: string;
+  category: 'brand' | 'product' | 'ingredient' | 'compliance' | 'faq' | 'tone';
+  title: string;
+  content: string;
+  tags: string[];
+  keywords: string[];
+  priority: number;
+  platforms: string[];
+  sourceUrl: string | null;
+  isActive: boolean;
+  usageCount: number;
+  lastUsedAt: string | null;
+  updatedAt: string;
+}
+
+export interface KnowledgeMatchItem {
+  id: string;
+  brand: string;
+  category: string;
+  title: string;
+  content: string;
+  matchedBy: string[];
+  score: number;
 }

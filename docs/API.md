@@ -161,7 +161,21 @@
 
 **闭环规则**：审核通过 → 内容变「已通过」；驳回/要求修改 → 退回草稿；已通过的内容被再次编辑 → 自动退回草稿（原审核结论失效）；系统设置开启「发布前必须审核通过」后，未通过的内容不能创建发布任务。
 
-### 3.8 其它
+### 3.8 品牌知识库
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/knowledge` | 列表：`keyword`（标题/正文/品牌）、`brand`、`category`、`isActive`、分页（全员可读） |
+| GET | `/api/knowledge/brands` | 品牌聚合（含条数），用于筛选下拉 |
+| GET | `/api/knowledge/preview` | 预览某内容本次生成会引用哪些资料：`contentId`、`platform`、`limit`（默认 5） |
+| GET | `/api/knowledge/:id` | 详情 |
+| POST | `/api/knowledge` | 新增（owner/admin/editor） |
+| PUT | `/api/knowledge/:id` | 更新（含 `isActive` 启停） |
+| DELETE | `/api/knowledge/:id` | 软删除 |
+
+**检索与引用规则**：按内容的标题/正文/标签与资料的 `tags + keywords + brand` 做子串匹配（中文不分词），得分 = 命中维度数 ×10 + 优先级 + 引用次数微调；仅 `isActive` 的资料参与；每次生成默认注入 5 条，引用 id 写入 `ai_generations.inputRefs.knowledgeIds`（可追溯"AI 为什么这么写"），并累加该资料的 `usageCount` / `lastUsedAt`。
+
+### 3.9 其它
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |

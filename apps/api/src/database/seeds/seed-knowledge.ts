@@ -1,23 +1,18 @@
 import 'reflect-metadata';
-import { Logger } from '@nestjs/common';
 import AppDataSource from '../data-source';
-import { runSeed } from './seed';
 import { seedKnowledge } from './knowledge';
 
+/** 只补品牌资料：pnpm --filter @mediaflow/api run seed:knowledge */
 async function main(): Promise<void> {
-  const logger = new Logger('Seed');
   await AppDataSource.initialize();
   try {
-    await runSeed(AppDataSource);
     await seedKnowledge(AppDataSource);
-    logger.log('种子数据写入完成');
   } finally {
     await AppDataSource.destroy();
   }
 }
 
 void main().catch((error: unknown) => {
-  const message = error instanceof Error ? error.message : String(error);
-  process.stderr.write(`种子数据写入失败：${message}\n`);
+  process.stderr.write(`品牌资料写入失败：${error instanceof Error ? error.message : String(error)}\n`);
   process.exitCode = 1;
 });

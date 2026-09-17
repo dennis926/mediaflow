@@ -43,6 +43,15 @@ export function PublishIcon(props: IconProps) {
   );
 }
 
+export function KnowledgeIcon(props: IconProps) {
+  return (
+    <svg {...BASE} {...props}>
+      <path d="M5 4h9a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3z" />
+      <path d="M5 4v16M9 9h5M9 13h5" />
+    </svg>
+  );
+}
+
 export function ReviewIcon(props: IconProps) {
   return (
     <svg {...BASE} {...props}>

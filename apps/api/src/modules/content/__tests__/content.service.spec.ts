@@ -23,12 +23,16 @@ function repositoryMock<T extends ObjectLiteral>(overrides: Partial<Record<strin
   } as unknown as Repository<T>;
 }
 
-function buildService(options: { existingVariants?: Partial<ContentVariant>[] } = {}): {
+interface ContentServiceHarness {
   service: ContentService;
   contents: Repository<Content>;
   variants: Repository<ContentVariant>;
   ai: AiService;
-} {
+  manager: { softDelete: ReturnType<typeof vi.fn> };
+  knowledge: { findRelevant: ReturnType<typeof vi.fn>; markUsed: ReturnType<typeof vi.fn> };
+}
+
+function buildService(options: { existingVariants?: Partial<ContentVariant>[] } = {}): ContentServiceHarness {
   const contents = repositoryMock<Content>();
   const variants = repositoryMock<ContentVariant>({
     findOne: vi.fn(async () => null),
@@ -47,15 +51,21 @@ function buildService(options: { existingVariants?: Partial<ContentVariant>[] } 
   } as unknown as WorkspaceContextService;
 
   const manager = { softDelete: vi.fn(async () => ({ affected: 1 })) };
+  const knowledge = {
+    findRelevant: vi.fn(async () => []),
+    buildPromptSection: vi.fn(() => ''),
+    markUsed: vi.fn(async () => undefined),
+  };
   const dataSource = {
     transaction: async (work: (m: typeof manager) => Promise<unknown>) => work(manager),
   } as unknown as import('typeorm').DataSource;
   return {
-    service: new ContentService(contents, variants, ai, audit, workspaceContext, dataSource),
+    service: new ContentService(contents, variants, ai, knowledge as never, audit, workspaceContext, dataSource),
     contents,
     variants,
     ai,
     manager,
+    knowledge,
   };
 }
 

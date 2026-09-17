@@ -5,9 +5,11 @@ import { DataSource, EntityManager, Repository } from 'typeorm';
 import { AuditService } from '../../audit/audit.service';
 import { WorkspaceContextService } from '../../common/workspace-context.service';
 import { AiService } from '../ai/ai.service';
+import { KnowledgeService } from './knowledge.service';
 import { AiAdaptDto } from '../ai/dto/ai.dto';
 import { ContentVariant } from './entities/content-variant.entity';
 import { Content } from './entities/content.entity';
+import type { KnowledgeMatch } from './knowledge.service';
 import { AiFlagCheckDto, CreateContentDto, QueryContentDto, UpdateContentDto } from './dto/content.dto';
 
 export interface ContentActor {
@@ -28,6 +30,8 @@ export interface AdaptResult {
   model: string;
   variants: ContentVariant[];
   skipped: PlatformCode[];
+  /** 本次生成引用的品牌资料（可解释 AI 为什么这么写）。 */
+  knowledgeUsed: KnowledgeMatch[];
 }
 
 @Injectable()
@@ -38,6 +42,7 @@ export class ContentService {
     @InjectRepository(Content) private readonly contents: Repository<Content>,
     @InjectRepository(ContentVariant) private readonly variants: Repository<ContentVariant>,
     private readonly aiService: AiService,
+    private readonly knowledgeService: KnowledgeService,
     private readonly audit: AuditService,
     private readonly workspaceContext: WorkspaceContextService,
     private readonly dataSource: DataSource,
@@ -191,6 +196,18 @@ export class ContentService {
       }
     }
 
+    // 生成前先捞出相关品牌资料：让 AI 用品牌口径写，而不是自由发挥。
+    const matches = await this.knowledgeService.findRelevant({
+      title: content.title,
+      body: content.body,
+      tags: content.tags,
+      brand: (content as unknown as { brand?: string }).brand,
+      platform: platforms[0],
+    });
+    const knowledge = matches.length
+      ? { ids: matches.map((match) => match.id), section: this.knowledgeService.buildPromptSection(matches) }
+      : undefined;
+
     const adapted = await this.aiService.adapt(
       {
         title: content.title,
@@ -200,9 +217,11 @@ export class ContentService {
         tone: dto.tone,
         keywords: dto.keywords,
         aiFlagType: content.aiFlagType,
+        knowledge,
       },
       { contentId: content.id, requestedBy: actor.id ?? null },
     );
+    await this.knowledgeService.markUsed(knowledge?.ids ?? []);
 
     const variantFlag: AiFlagType =
       content.aiFlagType === AiFlagType.None ? AiFlagType.Assisted : content.aiFlagType;
@@ -231,7 +250,12 @@ export class ContentService {
         aiGenerated: true,
         aiFlagType: variantFlag,
         generationId: adapted.generationId,
-        extra: { model: adapted.model, tone: dto.tone ?? null, keywords: dto.keywords ?? [] },
+        extra: {
+          model: adapted.model,
+          tone: dto.tone ?? null,
+          keywords: dto.keywords ?? [],
+          knowledgeIds: knowledge?.ids ?? [],
+        },
       };
 
       const entity = existing ? Object.assign(existing, payload) : this.variants.create(payload);
@@ -248,20 +272,29 @@ export class ContentService {
       actorName: actor.name ?? null,
       ip: actor.ip ?? null,
       userAgent: actor.userAgent ?? null,
-      payload: { platforms, generated: saved.length, skipped, generationId: adapted.generationId },
+      payload: {
+        platforms,
+        generated: saved.length,
+        skipped,
+        generationId: adapted.generationId,
+        knowledgeIds: knowledge?.ids ?? [],
+      },
     });
 
     if (skipped.length > 0 && saved.length === 0) {
       throw new ConflictException(`所选平台均已存在版本，如需覆盖请传 overwrite=true：${skipped.join(', ')}`);
     }
 
-    this.logger.log(`AI 适配完成：新增/更新 ${saved.length} 个平台版本`);
+    this.logger.log(
+      `AI 适配完成：新增/更新 ${saved.length} 个平台版本${knowledge ? `（引用品牌资料 ${knowledge.ids.length} 条）` : ''}`,
+    );
     return {
       contentId: content.id,
       generationId: adapted.generationId,
       model: adapted.model,
       variants: saved,
       skipped,
+      knowledgeUsed: matches,
     };
   }
 

@@ -10,6 +10,7 @@ import {
   AnalyticsIcon,
   CalendarIcon,
   ContentIcon,
+  KnowledgeIcon,
   ReviewIcon,
   DashboardIcon,
   LogoutIcon,
@@ -30,6 +31,7 @@ const NAV_ITEMS: SidebarItem[] = [
   { href: '/publish/queue', label: '发布队列', icon: <PublishIcon /> },
   { href: '/publish/calendar', label: '排期日历', icon: <CalendarIcon /> },
   { href: '/reviews', label: '内容审核', icon: <ReviewIcon /> },
+  { href: '/knowledge', label: '品牌知识库', icon: <KnowledgeIcon /> },
   { href: '/analytics', label: '数据中心', icon: <AnalyticsIcon /> },
   { href: '/accounts', label: '账号管理', icon: <AccountIcon /> },
   { href: '/users', label: '用户管理', icon: <AccountIcon /> },
@@ -39,6 +41,7 @@ const NAV_ITEMS: SidebarItem[] = [
 const PAGE_META: Array<{ prefix: string; title: string; subtitle: string }> = [
   { prefix: '/settings', title: '系统设置', subtitle: 'AI 与平台密钥、发布队列参数' },
   { prefix: '/reviews', title: '内容审核', subtitle: '提交审核与审核决定' },
+  { prefix: '/knowledge', title: '品牌知识库', subtitle: 'AI 生成时引用的品牌资料' },
   { prefix: '/users', title: '用户管理', subtitle: '成员、角色与密码管理' },
   { prefix: '/analytics', title: '数据中心', subtitle: '核心指标、趋势与账号排行' },
   { prefix: '/accounts', title: '账号管理', subtitle: '绑定与管理平台账号' },

@@ -23,6 +23,8 @@ export interface AdaptInput {
   tone?: string;
   keywords?: string[];
   aiFlagType: AiFlagType;
+  /** 品牌知识库检索结果：会拼进 prompt，并把 id 记入 ai_generations.inputRefs 以便追溯。 */
+  knowledge?: { ids: string[]; section: string };
 }
 
 export interface ComplianceInput {
@@ -82,6 +84,7 @@ export class AiService {
       json: true,
       user: [
         '请把以下内容改写为指定平台各自的版本，保留事实信息，不新增疗效描述。',
+        input.knowledge?.section ? input.knowledge.section : '',
         `platforms=${input.platforms.join(',')}`,
         `title=${input.title}`,
         `body=${input.body}`,
@@ -96,7 +99,14 @@ export class AiService {
       ]
         .filter(Boolean)
         .join('\n'),
-      meta: { ...meta, inputRefs: { ...meta.inputRefs, platforms: input.platforms } },
+      meta: {
+        ...meta,
+        inputRefs: {
+          ...meta.inputRefs,
+          platforms: input.platforms,
+          ...(input.knowledge?.ids.length ? { knowledgeIds: input.knowledge.ids } : {}),
+        },
+      },
       parse: (completion) => this.parseVariants(completion.text, input.platforms),
     });
 

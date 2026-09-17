@@ -15,7 +15,8 @@
     "migrate:revert": "typeorm-ts-node-commonjs migration:revert -d src/database/data-source.ts",
     "migrate:prod": "typeorm migration:run -d dist/database/data-source.js",
     "seed": "ts-node src/database/seeds/run-seed.ts",
-    "schema:log": "typeorm-ts-node-commonjs schema:log -d src/database/data-source.ts"
+    "schema:log": "typeorm-ts-node-commonjs schema:log -d src/database/data-source.ts",
+    "seed:knowledge": "ts-node src/database/seeds/seed-knowledge.ts"
   },
   "dependencies": {
     "@mediaflow/channel-adapters": "workspace:*",

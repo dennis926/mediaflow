@@ -2,6 +2,8 @@ import type { AiFlagType, ContentStatus, PlatformCode, PublishTaskStatus } from 
 import { api } from './client';
 import type {
   AccountRankingRow,
+  KnowledgeItem,
+  KnowledgeMatchItem,
   ReviewItem,
   RoleItem,
   UserItem,
@@ -166,4 +168,16 @@ export const accountsApi = {
     extra?: Record<string, unknown>;
   }) => api.post<AccountView>('/accounts/bind', payload),
   unbind: (id: string) => api.delete<{ id: string }>(`/accounts/${id}`),
+};
+
+export const knowledgeApi = {
+  list: (query: { keyword?: string; brand?: string; category?: string; isActive?: string; page?: number; pageSize?: number } = {}) =>
+    api.get<Paged<KnowledgeItem>>('/knowledge', { ...query }),
+  brands: () => api.get<Array<{ brand: string; count: number }>>('/knowledge/brands'),
+  create: (payload: Partial<KnowledgeItem>) => api.post<KnowledgeItem>('/knowledge', payload),
+  update: (id: string, payload: Partial<KnowledgeItem>) => api.put<KnowledgeItem>(`/knowledge/${id}`, payload),
+  remove: (id: string) => api.delete<{ id: string }>(`/knowledge/${id}`),
+  /** 预览本次 AI 生成会引用哪些品牌资料 */
+  preview: (contentId: string, limit = 5) =>
+    api.get<{ matches: KnowledgeMatchItem[] }>('/knowledge/preview', { contentId, limit }),
 };

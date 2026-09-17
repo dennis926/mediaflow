@@ -13,7 +13,7 @@ import { Input, Select, Textarea } from '../../../../../components/ui/Field';
 import { SkeletonRows } from '../../../../../components/ui/Skeleton';
 import { Tag } from '../../../../../components/ui/Tag';
 import { ApiError } from '../../../../../lib/api/client';
-import { aiApi, contentApi, publishApi, reviewsApi } from '../../../../../lib/api/endpoints';
+import { aiApi, contentApi, knowledgeApi, publishApi, reviewsApi } from '../../../../../lib/api/endpoints';
 import type { ComplianceReport } from '../../../../../lib/api/types';
 import { AI_FLAG_LABELS, CONTENT_STATUS_LABELS, formatDateTime } from '../../../../../lib/format';
 import { CheckIcon, PlusIcon, SparkleIcon, TrashIcon, WarningIcon } from '../../../../../lib/icons';
@@ -84,6 +84,13 @@ function ContentEditor({ mode }: { mode: 'new' | 'edit' }): React.JSX.Element {
     queryKey: ['reviews', 'history', contentId],
     queryFn: () => reviewsApi.history(contentId as string),
     enabled: Boolean(contentId),
+  });
+
+  // 生成前先看这次会引用哪些品牌资料，避免"AI 自由发挥"
+  const knowledgePreview = useQuery({
+    queryKey: ['knowledge', 'preview', contentId],
+    queryFn: () => knowledgeApi.preview(contentId as string, 5),
+    enabled: Boolean(contentId) && adaptOpen,
   });
 
   const submitReview = useMutation({
@@ -176,7 +183,9 @@ function ContentEditor({ mode }: { mode: 'new' | 'edit' }): React.JSX.Element {
       setAdaptOpen(false);
       setFeedback({
         tone: 'success',
-        text: `已生成 ${result.variants.length} 个平台版本${result.skipped.length ? `，跳过 ${result.skipped.length} 个已存在平台` : ''}（模型：${result.model}）`,
+        text: `已生成 ${result.variants.length} 个平台版本${result.skipped.length ? `，跳过 ${result.skipped.length} 个已存在平台` : ''}（模型：${result.model}${
+          result.knowledgeUsed?.length ? `，引用品牌资料 ${result.knowledgeUsed.length} 条` : '，未引用品牌资料'
+        }）`,
       });
       void queryClient.invalidateQueries({ queryKey: ['variants', contentId] });
     },
@@ -561,6 +570,31 @@ function ContentEditor({ mode }: { mode: 'new' | 'edit' }): React.JSX.Element {
           <input type="checkbox" checked={adaptOverwrite} onChange={() => setAdaptOverwrite(!adaptOverwrite)} />
           覆盖已存在的同平台版本
         </label>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--mf-space-2)' }}>
+          <strong style={{ fontSize: 'var(--mf-font-size-sm)' }}>
+            本次将引用 {knowledgePreview.data?.matches.length ?? 0} 条品牌资料
+          </strong>
+          {knowledgePreview.isLoading ? (
+            <SkeletonRows rows={2} />
+          ) : knowledgePreview.data && knowledgePreview.data.matches.length > 0 ? (
+            knowledgePreview.data.matches.map((match) => (
+              <div key={match.id} className={styles.variantItem}>
+                <div style={{ display: 'flex', gap: 'var(--mf-space-2)', alignItems: 'center', flexWrap: 'wrap' }}>
+                  <Tag tone="brand">{match.brand}</Tag>
+                  <span className={styles.variantTitle}>{match.title}</span>
+                </div>
+                <span className={styles.variantBody}>{match.matchedBy.join('；')}</span>
+              </div>
+            ))
+          ) : (
+            <Banner tone="warning">
+              <span>
+                没有匹配到品牌资料。可到「品牌知识库」补充该主题的标签/关键词，或提高资料优先级，AI 就会照着品牌口径写。
+              </span>
+            </Banner>
+          )}
+        </div>
         <Banner tone="info">
           <span>AI 生成内容会自动追加「（本文由 AI 辅助生成）」标识，并记录到 AI 调用日志。</span>
         </Banner>
