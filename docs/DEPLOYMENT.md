@@ -185,6 +185,21 @@ E2E_ADMIN_EMAIL=you@example.com E2E_ADMIN_PASSWORD=... pnpm --filter @mediaflow/
 | 任务不执行 | `publish/queue/stats` 的 consumers 是否为 1；Worker 开关是否为 true |
 | 迁移失败 | 检查 `DB_*`、数据库是否存在、是否已有同名表 |
 
+## 8.5 数据库备份（必做）
+
+`mediaflow` 库此前不在任何备份任务中（2026-09-17 审计发现并修复）。现在：
+
+```bash
+# 脚本：scripts/backup-db.sh（同时部署在 /root/.hermes/scripts/mediaflow_backup.sh）
+# cron：每天 04:30 执行，保留 14 天
+30 4 * * * /root/.hermes/scripts/mediaflow_backup.sh >> /var/log/mediaflow-backup.log 2>&1
+```
+
+- 导出前先写明文临时文件，校验「≥15 张表 + ≥10 个数据段」通过后才压缩落盘，避免留下坏备份
+- 备份目录：`/www/backup/mediaflow/mediaflow_<日期>_<时间>.sql.gz`
+- 恢复：`gunzip -c 备份文件 | psql -h 127.0.0.1 -U mediaflow -d mediaflow`
+- 已做恢复演练：备份可成功导入到临时库（19 张表、用户/内容/设置数据齐全）
+
 ## 9. 备份
 
 - 数据库：`pg_dump -U mediaflow mediaflow > mediaflow_$(date +%F).sql`
