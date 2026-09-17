@@ -1,12 +1,19 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { PlatformCode } from '@mediaflow/shared';
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { basename, join } from 'node:path';
 import { In, Repository } from 'typeorm';
 import { AuditService } from '../../audit/audit.service';
 import { WorkspaceContextService } from '../../common/workspace-context.service';
-import { BatchActivateDto, CreateKnowledgeDto, ImportKnowledgeDto, QueryKnowledgeDto, UpdateKnowledgeDto } from './dto/knowledge.dto';
+import {
+  BatchActivateDto,
+  CommitImportDto,
+  CreateKnowledgeDto,
+  ImportKnowledgeDto,
+  QueryKnowledgeDto,
+  UpdateKnowledgeDto,
+} from './dto/knowledge.dto';
 import { DocumentParserService, KnowledgeChunk, ParsedDocument } from './document-parser.service';
 import { BrandKnowledge, KnowledgeCategory } from './entities/brand-knowledge.entity';
 import { Content } from './entities/content.entity';
@@ -32,6 +39,8 @@ export interface KnowledgeActor {
   name?: string | null;
 }
 
+/** 单次导入最多落库的资料片数（防止一份大文档灌爆知识库）。 */
+const MAX_IMPORT_CHUNKS = 40;
 /** 每次生成最多注入多少条品牌资料（太多会稀释重点、推高 token）。 */
 const DEFAULT_LIMIT = 5;
 
@@ -58,6 +67,9 @@ export class KnowledgeService {
 
   /** 上传目录：源文件留档，便于追溯每片资料来自哪个文档。 */
   private readonly uploadDir = join(process.cwd(), '../../uploads/knowledge');
+  /** 复核阶段的暂存区：确认入库后才移入 uploads/knowledge，超期自动清理。 */
+  private readonly tempDir = join(process.cwd(), '../../uploads/tmp');
+  private readonly tempTtlMs = 24 * 60 * 60 * 1000;
 
   /**
    * multer/busboy 按 latin1 解析 multipart 文件名，中文会变乱码；
@@ -80,7 +92,8 @@ export class KnowledgeService {
 
     if (query.keyword) {
       builder.andWhere(
-        '(knowledge.title ILIKE :kw OR knowledge.content ILIKE :kw OR knowledge.brand ILIKE :kw)',
+        // 标签也参与搜索：导入的资料带「来源：文件名」，按文件名即可找回这一批
+        "(knowledge.title ILIKE :kw OR knowledge.content ILIKE :kw OR knowledge.brand ILIKE :kw OR knowledge.tags::text ILIKE :kw)",
         { kw: `%${query.keyword}%` },
       );
     }
@@ -252,8 +265,72 @@ export class KnowledgeService {
   }
 
   /**
-   * 导入文档：解析 → 切片 → 生成资料草稿（默认停用，人工确认后启用）。
-   * 原始文件会留档到 uploads/knowledge，并记在资料的 sourceUrl 上。
+   * 第一步：只解析、不入库。把切片结果交给前端做人工校对，原文件暂存到 uploads/tmp。
+   */
+  async parseDocument(file: { originalname: string; buffer: Buffer; size: number }): Promise<{
+    parsed: Pick<ParsedDocument, 'fileName' | 'fileType' | 'charCount' | 'warnings' | 'ocrSections'>;
+    tempFile: string;
+    chunks: KnowledgeChunk[];
+  }> {
+    const fileName = KnowledgeService.normalizeFileName(file.originalname);
+    const parsed = await this.parser.parse(fileName, file.buffer);
+    const chunks = this.parser.chunkSegments(parsed.segments, MAX_IMPORT_CHUNKS);
+
+    this.pruneTempFiles();
+    mkdirSync(this.tempDir, { recursive: true });
+    const tempFile = `${Date.now()}-${KnowledgeService.safeFileName(fileName)}`;
+    writeFileSync(join(this.tempDir, tempFile), file.buffer);
+
+    return {
+      parsed: {
+        fileName: parsed.fileName,
+        fileType: parsed.fileType,
+        charCount: parsed.charCount,
+        warnings: parsed.warnings,
+        ocrSections: parsed.ocrSections,
+      },
+      tempFile,
+      chunks,
+    };
+  }
+
+  /**
+   * 第三步：按人工校对后的分片入库（用户点"确认无误"后调用）。
+   * 以提交内容为准，不再重新解析原文；暂存的原文件此刻移入留档目录。
+   */
+  async commitImport(dto: CommitImportDto, actor: KnowledgeActor): Promise<{
+    created: Array<{ id: string; title: string; isActive: boolean }>;
+    storedPath: string | null;
+  }> {
+    const scope = await this.workspaceContext.current();
+    const storedPath = dto.tempFile ? this.archiveTempFile(dto.tempFile) : null;
+
+    const created = await this.persistChunks(
+      {
+        tenantId: scope.tenantId,
+        workspaceId: scope.workspaceId,
+        brand: dto.brand,
+        category: dto.category,
+        priority: dto.priority ?? 0,
+        isActive: dto.activate ?? true,
+        sourceFileName: dto.sourceFileName,
+        sourceUrl: storedPath,
+        chunks: dto.chunks,
+      },
+    );
+
+    await this.record('knowledge.commit_import', created[0]?.id ?? '', actor, {
+      fileName: dto.sourceFileName ?? '',
+      chunks: created.length,
+      activated: dto.activate ?? true,
+      ocrChunks: dto.chunks.filter((chunk) => chunk.fromOcr === true).length,
+    });
+    this.logger.log(`文档入库（人工已确认）：${dto.sourceFileName ?? '未命名'} → ${created.length} 片`);
+    return { created, storedPath };
+  }
+
+  /**
+   * 旧接口：解析后直接入库（跳过人工校对）。保留给脚本/接口调用方，界面默认走"解析 → 校对 → 提交"。
    */
   async importDocument(
     file: { originalname: string; buffer: Buffer; size: number },
@@ -268,38 +345,26 @@ export class KnowledgeService {
     const scope = await this.workspaceContext.current();
     const fileName = KnowledgeService.normalizeFileName(file.originalname);
     const parsed = await this.parser.parse(fileName, file.buffer);
-    const chunks = this.parser.chunk(parsed.text, dto.maxChunks ?? 40);
+    const chunks = this.parser.chunkSegments(parsed.segments, dto.maxChunks ?? MAX_IMPORT_CHUNKS);
 
     mkdirSync(this.uploadDir, { recursive: true });
-    const safeName = fileName.replace(/[^\w.\u4e00-\u9fa5-]/g, '_').slice(-80);
-    const storedName = `${Date.now()}-${safeName}`;
-    const storedPath = join(this.uploadDir, storedName);
-    writeFileSync(storedPath, file.buffer);
+    const storedName = `${Date.now()}-${KnowledgeService.safeFileName(fileName)}`;
+    writeFileSync(join(this.uploadDir, storedName), file.buffer);
 
     const autoActivate = dto.autoActivate ?? false;
-    const created: Array<{ id: string; title: string; isActive: boolean }> = [];
-
-    for (const chunk of chunks) {
-      const saved = await this.knowledge.save(
-        this.knowledge.create({
-          tenantId: scope.tenantId,
-          workspaceId: scope.workspaceId,
-          brand: dto.brand,
-          category: dto.category,
-          title: chunk.title,
-          content: chunk.content,
-          tags: [`来源：${parsed.fileName}`],
-          keywords: [],
-          priority: dto.priority ?? 0,
-          platforms: [],
-          sourceUrl: `uploads/knowledge/${storedName}`,
-          isActive: autoActivate,
-          usageCount: 0,
-          lastUsedAt: null,
-        }),
-      );
-      created.push({ id: saved.id, title: saved.title, isActive: saved.isActive });
-    }
+    const created = await this.persistChunks(
+      {
+        tenantId: scope.tenantId,
+        workspaceId: scope.workspaceId,
+        brand: dto.brand,
+        category: dto.category,
+        priority: dto.priority ?? 0,
+        isActive: autoActivate,
+        sourceFileName: parsed.fileName,
+        sourceUrl: `uploads/knowledge/${storedName}`,
+        chunks,
+      },
+    );
 
     await this.record('knowledge.import', created[0]?.id ?? '', actor, {
       fileName: parsed.fileName,
@@ -308,7 +373,7 @@ export class KnowledgeService {
       chunks: chunks.length,
       autoActivate,
     });
-    this.logger.log(`文档导入完成：${parsed.fileName} → ${chunks.length} 片（${autoActivate ? '已启用' : '草稿待确认'}）`);
+    this.logger.log(`文档导入完成（未校对）：${parsed.fileName} → ${chunks.length} 片（${autoActivate ? '已启用' : '草稿待确认'}）`);
 
     return {
       parsed: {
@@ -322,6 +387,107 @@ export class KnowledgeService {
       chunks: chunks.map((chunk) => ({ ...chunk, preview: chunk.content.slice(0, 120) })),
       created,
     };
+  }
+
+  /** 统一的落库逻辑：一份分片 → 一条资料。 */
+  private async persistChunks(
+    input: {
+      tenantId: string;
+      workspaceId: string;
+      brand: string;
+      category: BrandKnowledge['category'];
+      priority: number;
+      isActive: boolean;
+      sourceFileName?: string;
+      sourceUrl: string | null;
+      chunks: Array<{ title?: string; content: string; fromOcr?: boolean }>;
+    },
+  ): Promise<Array<{ id: string; title: string; isActive: boolean }>> {
+    const tags = input.sourceFileName
+      ? [`来源：${input.sourceFileName}`, ...(input.chunks.some((chunk) => chunk.fromOcr) ? ['含图片识别内容'] : [])]
+      : [];
+
+    const created: Array<{ id: string; title: string; isActive: boolean }> = [];
+    for (const chunk of input.chunks) {
+      const content = chunk.content.trim();
+      if (content.length < 20) continue;
+      const saved = await this.knowledge.save(
+        this.knowledge.create({
+          tenantId: input.tenantId,
+          workspaceId: input.workspaceId,
+          brand: input.brand,
+          category: input.category,
+          title: KnowledgeService.deriveTitle(chunk.title, content),
+          content,
+          tags,
+          keywords: [],
+          priority: input.priority,
+          platforms: [],
+          sourceUrl: input.sourceUrl ?? '',
+          isActive: input.isActive,
+          usageCount: 0,
+          lastUsedAt: null,
+        }),
+      );
+      created.push({ id: saved.id, title: saved.title, isActive: saved.isActive });
+    }
+
+    if (created.length === 0) {
+      throw new BadRequestException('没有可入库的内容（每片至少 20 字）');
+    }
+    return created;
+  }
+
+  /** 把暂存文件移入留档目录；文件名非法或已过期时返回 null（不影响入库）。 */
+  private archiveTempFile(tempFile: string): string | null {
+    const name = basename(tempFile);
+    if (name !== tempFile || !/^[\w.\u4e00-\u9fa5-]+$/.test(name)) {
+      throw new BadRequestException('暂存文件标识不合法');
+    }
+    const source = join(this.tempDir, name);
+    if (!existsSync(source)) {
+      this.logger.warn(`暂存文件已过期，未留档：${name}`);
+      return null;
+    }
+    mkdirSync(this.uploadDir, { recursive: true });
+    renameSync(source, join(this.uploadDir, name));
+    return `uploads/knowledge/${name}`;
+  }
+
+  /** 清理超过保留期的暂存文件（用户中途放弃复核时不留下孤儿文件）。 */
+  private pruneTempFiles(): void {
+    try {
+      if (!existsSync(this.tempDir)) return;
+      const deadline = Date.now() - this.tempTtlMs;
+      let removed = 0;
+      for (const name of readdirSync(this.tempDir)) {
+        const path = join(this.tempDir, name);
+        const stat = statSync(path);
+        if (stat.isFile() && stat.mtimeMs < deadline) {
+          rmSync(path, { force: true });
+          removed += 1;
+        }
+      }
+      if (removed > 0) this.logger.log(`已清理 ${removed} 个超期暂存文件`);
+    } catch (error) {
+      this.logger.warn(`清理暂存目录失败：${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  /** 取暂存/留档文件名，供下载原文校验。 */
+  static safeFileName(fileName: string): string {
+    return fileName.replace(/[^\w.\u4e00-\u9fa5-]/g, '_').slice(-80);
+  }
+
+  static deriveTitle(title: string | undefined, content: string): string {
+    const explicit = title?.trim();
+    if (explicit) return explicit.slice(0, 60);
+    // OCR 片段的首行往往只有"【扫描页文字（本地 OCR）】"这类来源标记，标题要取第一行有意义的正文。
+    const meaningful = content
+      .split('\n')
+      .map((line) => line.replace(/^[#*\-0-9.、\s]+/, '').replace(/^【[^】]*】/, '').trim())
+      .find((line) => line.length >= 4);
+    return (meaningful ?? '未命名片段').slice(0, 60);
   }
 
   /** 导入后批量确认启用（或反向停用）。 */

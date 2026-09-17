@@ -1,4 +1,4 @@
-import { NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { ObjectLiteral, Repository } from 'typeorm';
 import { describe, expect, it, vi } from 'vitest';
 import { AuditService } from '../../../audit/audit.service';
@@ -55,8 +55,20 @@ function buildService(pool: BrandKnowledge[], content: Partial<Content> | null =
       text: buffer.toString('utf8'),
       charCount: buffer.length,
       warnings: [],
+      ocrSections: 0,
+      segments: [{ text: buffer.toString('utf8'), fromOcr: false }],
     })),
-    chunk: vi.fn((text: string) => [{ index: 1, title: '片段标题', content: text, charCount: text.length }]),
+    chunk: vi.fn((text: string) => [{ index: 1, title: '片段标题', content: text, charCount: text.length, fromOcr: false }]),
+    chunkSegments: vi.fn(
+      (segments: Array<{ text: string; fromOcr: boolean }>) =>
+        segments.map((segment, position) => ({
+          index: position + 1,
+          title: `片段 ${position + 1}`,
+          content: segment.text,
+          charCount: segment.text.length,
+          fromOcr: segment.fromOcr,
+        })),
+    ),
   } as unknown as import('../document-parser.service').DocumentParserService;
   return { service: new KnowledgeService(knowledge, contents, audit, workspaceContext, parser), knowledge, contents, audit, parser };
 }
@@ -137,7 +149,7 @@ describe('KnowledgeService 文件名解码', () => {
     const { service } = buildService([]);
     const mangled = Buffer.from('产品卖点.docx', 'utf8').toString('latin1');
     const result = await service.importDocument(
-      { originalname: mangled, buffer: Buffer.from('卿尔美畅享版复配益生元相关内容内容'), size: 40 },
+      { originalname: mangled, buffer: Buffer.from('卿尔美畅享版复配益生元，包含稀缺水苏糖成分，适合日常补充。'), size: 40 },
       { brand: '卿尔美', category: 'product' },
       { id: 'u1' },
     );
@@ -150,7 +162,7 @@ describe('KnowledgeService 文档导入', () => {
   it('导入生成停用草稿（默认不直接启用）', async () => {
     const { service, knowledge } = buildService([]);
     const result = await service.importDocument(
-      { originalname: '公司简介.txt', buffer: Buffer.from('卿尔美成立于某年，专注膳食纤维与益生元。'), size: 40 },
+      { originalname: '公司简介.txt', buffer: Buffer.from('卿尔美成立于某年，专注膳食纤维与益生元复配产品的研发与销售。'), size: 40 },
       { brand: '卿尔美', category: 'brand', autoActivate: false },
       { id: 'u1', name: '编辑' },
     );
@@ -166,7 +178,7 @@ describe('KnowledgeService 文档导入', () => {
   it('autoActivate 为 true 时直接启用', async () => {
     const { service } = buildService([]);
     const result = await service.importDocument(
-      { originalname: '简介.md', buffer: Buffer.from('内容内容内容内容内容内容'), size: 24 },
+      { originalname: '简介.md', buffer: Buffer.from('卿尔美专注膳食纤维与益生元复配，坚持真实配料与合规表述。'), size: 24 },
       { brand: '卿尔美', category: 'brand', autoActivate: true },
       { id: 'u1' },
     );
@@ -206,5 +218,72 @@ describe('KnowledgeService 增删改', () => {
     await expect(
       service.update('missing', { brand: 'x', category: 'brand', title: 't', content: 'c' }, { id: 'u1' }),
     ).rejects.toBeInstanceOf(NotFoundException);
+  });
+});
+
+describe('KnowledgeService 复核后提交（parse → commit）', () => {
+  it('解析阶段不写库，只返回可校对的分片', async () => {
+    const { service, knowledge } = buildService([]);
+    const result = await service.parseDocument({
+      originalname: '产品介绍.pptx',
+      buffer: Buffer.from('第一页正文内容').length ? Buffer.from('第一页正文内容足够长了可以切片') : Buffer.from(''),
+      size: 40,
+    });
+
+    expect(result.chunks.length).toBeGreaterThan(0);
+    expect(result.tempFile).toContain('产品介绍');
+    expect(knowledge.save).not.toHaveBeenCalled();
+  });
+
+  it('提交时按人工修改后的内容入库，并保留 OCR 来源标记', async () => {
+    const { service, knowledge } = buildService([]);
+    const saved = await service.commitImport(
+      {
+        brand: '卿尔美',
+        category: 'product',
+        sourceFileName: '产品介绍.pptx',
+        activate: true,
+        chunks: [
+          { content: '人工改过的正文内容（已校对，长度足够）人工改过的正文内容' },
+          { content: '图片识别出来的内容（已校对）图片识别内容', fromOcr: true },
+        ],
+      },
+      { id: 'u1' },
+    );
+
+    expect(saved.created).toHaveLength(2);
+    expect(saved.created[0].isActive).toBe(true);
+    expect(knowledge.save).toHaveBeenCalledWith(
+      expect.objectContaining({ tags: expect.arrayContaining(['来源：产品介绍.pptx', '含图片识别内容']) }),
+    );
+    // 第二片按 OCR 标记入库
+    expect(knowledge.save).toHaveBeenLastCalledWith(
+      expect.objectContaining({ content: '图片识别出来的内容（已校对）图片识别内容' }),
+    );
+  });
+
+  it('全部内容过短时拒绝入库', async () => {
+    const { service } = buildService([]);
+    await expect(
+      service.commitImport(
+        { brand: '卿尔美', category: 'product', chunks: [{ content: '太短' }] } as never,
+        { id: 'u1' },
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('暂存文件标识含路径分隔符时拒绝（防目录穿越）', async () => {
+    const { service } = buildService([]);
+    await expect(
+      service.commitImport(
+        {
+          brand: '卿尔美',
+          category: 'product',
+          tempFile: '../evil.pdf',
+          chunks: [{ content: '内容内容内容内容内容内容内容内容' }],
+        },
+        { id: 'u1' },
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 });

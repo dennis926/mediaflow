@@ -19,7 +19,15 @@ import { toActor } from '../auth/actor.util';
 import { AuthUser } from '../auth/auth.types';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { Roles } from '../auth/roles.decorator';
-import { BatchActivateDto, CreateKnowledgeDto, ImportKnowledgeDto, PreviewKnowledgeDto, QueryKnowledgeDto, UpdateKnowledgeDto } from './dto/knowledge.dto';
+import {
+  BatchActivateDto,
+  CommitImportDto,
+  CreateKnowledgeDto,
+  ImportKnowledgeDto,
+  PreviewKnowledgeDto,
+  QueryKnowledgeDto,
+  UpdateKnowledgeDto,
+} from './dto/knowledge.dto';
 import { MAX_DOCUMENT_BYTES } from './document-parser.service';
 import { BrandKnowledge } from './entities/brand-knowledge.entity';
 import { KnowledgeMatch, KnowledgePage, KnowledgeService } from './knowledge.service';
@@ -51,7 +59,31 @@ export class KnowledgeController {
   }
 
   /**
+   * 第一步：解析文档（PDF / Word / PPT / Excel / CSV / txt / md），**不入库**。
+   * 返回切片（含 OCR 来源标记）供人工校对，原文件暂存 24 小时。
+   */
+  @Roles('owner', 'admin', 'editor')
+  @Post('parse')
+  @UseInterceptors(FileInterceptor('file', { storage: memoryStorage(), limits: { fileSize: MAX_DOCUMENT_BYTES } }))
+  parse(
+    @UploadedFile(new ParseFilePipe({ validators: [new MaxFileSizeValidator({ maxSize: MAX_DOCUMENT_BYTES })] }))
+    file: Express.Multer.File,
+  ) {
+    return this.knowledgeService.parseDocument({ originalname: file.originalname, buffer: file.buffer, size: file.size });
+  }
+
+  /**
+   * 第三步：人工校对完成后提交入库（以提交的切片为准）。
+   */
+  @Roles('owner', 'admin', 'editor')
+  @Post('commit')
+  commit(@Body() dto: CommitImportDto, @CurrentUser() user?: AuthUser) {
+    return this.knowledgeService.commitImport(dto, toActor(user));
+  }
+
+  /**
    * 导入文档（PDF / Word / Excel / CSV / txt / md）→ 解析切片 → 落成资料草稿。
+   * 旧接口：跳过人工校对直接入库，界面默认走 parse → commit。
    * 表单字段：brand、category、priority?、autoActivate?、maxChunks?
    */
   @Roles('owner', 'admin', 'editor')

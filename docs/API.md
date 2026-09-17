@@ -165,6 +165,7 @@
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
+| GET | `/api/knowledge` | 列表（分页/品牌/分类/状态/关键字；关键字同时匹配标签，所以按「来源：文件名」可找回某次导入的那批资料） |
 | GET | `/api/knowledge` | 列表：`keyword`（标题/正文/品牌）、`brand`、`category`、`isActive`、分页（全员可读） |
 | GET | `/api/knowledge/brands` | 品牌聚合（含条数），用于筛选下拉 |
 | GET | `/api/knowledge/preview` | 预览某内容本次生成会引用哪些资料：`contentId`、`platform`、`limit`（默认 5） |
@@ -173,6 +174,8 @@
 | PUT | `/api/knowledge/:id` | 更新（含 `isActive` 启停） |
 | DELETE | `/api/knowledge/:id` | 软删除 |
 
+| POST | `/api/knowledge/parse` | **第一步：只解析不入库**（multipart，字段 `file`）；返回 `{ parsed, tempFile, chunks[] }`，`chunks[].fromOcr` 标记该片来自本地 OCR，供前端逐片人工校对 |
+| POST | `/api/knowledge/commit` | **第三步：按校对后的分片入库**（JSON：`brand`、`category`、`priority?`、`activate?`、`sourceFileName?`、`tempFile?`、`chunks[{content,title?,fromOcr?}]`）；暂存原文件此时移入 `uploads/knowledge/` 留档 |
 | POST | `/api/knowledge/import` | **上传文档**（multipart，字段 `file` + `brand`、`category`、`priority?`、`autoActivate?`、`maxChunks?`）；支持 `.pdf/.docx/.pptx/.xlsx/.xls/.csv/.txt/.md`，单文件 ≤10MB。前端可多选文件后逐个调用，单个失败不影响其它文件 |
 | POST | `/api/knowledge/batch-activate` | 批量启用/停用：`{ ids: [], isActive: bool }`（导入后确认用） |
 
@@ -186,6 +189,8 @@
 | `.docx` | 正文用 mammoth 提取；`word/media` 图片本地 OCR，追加到「文档内图片文字」 |
 | `.pdf` | 优先用文字层；**没有文字层（扫描件）时自动把前 10 页渲染成图片做 OCR**（200 DPI） |
 | 老版 `.ppt` | 明确报错，提示另存为 `.pptx` |
+
+**导入流程分两步（界面默认走这条）**：`parse` 只解析并把切片交给人校对（原文件暂存 `uploads/tmp`，24 小时未确认自动清理）→ 人工确认后 `commit` 才写库，暂存文件随之移入留档目录。这样 OCR 错字能在入库前改掉，误上传也不会产生垃圾资料。`import` 为旧的一步式接口（解析即入库），保留给脚本调用。
 
 OCR 引擎为 **tesseract 5（chi_sim+eng）**，离线运行；两种版面模式（psm 3 / psm 6）各跑一次取中文识别更优的结果；单文档最多识别 20 张图片（PDF 最多 10 页），超限会在响应 `warnings` 里说明。响应中的 `parsed.ocrSections` 表示 OCR 贡献了几段文字。可用环境变量 `OCR_ENABLED=false` 关闭、`OCR_LANGUAGES` 调整语言。
 

@@ -1,6 +1,7 @@
 import { Transform, Type } from 'class-transformer';
 import {
   ArrayMaxSize,
+  ArrayMinSize,
   IsArray,
   IsBoolean,
   IsIn,
@@ -9,6 +10,7 @@ import {
   IsString,
   IsUUID,
   Length,
+  ValidateNested,
   Max,
   Min,
 } from 'class-validator';
@@ -128,6 +130,59 @@ export class ImportKnowledgeDto {
   @Min(1)
   @Max(40)
   maxChunks?: number;
+}
+
+export class CommitChunkDto {
+  @IsString()
+  @Length(20, 20000, { message: '每一片内容需 20-20000 字' })
+  content!: string;
+
+  @IsOptional()
+  @IsString()
+  @Length(1, 200)
+  title?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  fromOcr?: boolean;
+}
+
+/** 复核校对后提交：以人工确认（可能已修改）的分片为准入库。 */
+export class CommitImportDto {
+  @IsString()
+  @Length(1, 100)
+  brand!: string;
+
+  @IsIn(KNOWLEDGE_CATEGORIES)
+  category!: (typeof KNOWLEDGE_CATEGORIES)[number];
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(100)
+  priority?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  activate?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @Length(1, 255)
+  sourceFileName?: string;
+
+  /** 解析阶段返回的临时文件名；提交时移入留档目录。 */
+  @IsOptional()
+  @IsString()
+  @Length(1, 200)
+  tempFile?: string;
+
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(60)
+  @ValidateNested({ each: true })
+  @Type(() => CommitChunkDto)
+  chunks!: CommitChunkDto[];
 }
 
 export class BatchActivateDto {

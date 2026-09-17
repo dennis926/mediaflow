@@ -2,31 +2,33 @@ import type { AiFlagType, ContentStatus, PlatformCode, PublishTaskStatus } from 
 import { api, apiUpload } from './client';
 import type {
   AccountRankingRow,
-  ImportResult,
-  KnowledgeItem,
-  KnowledgeMatchItem,
-  ReviewItem,
-  RoleItem,
-  UserItem,
   AccountView,
   AdaptResult,
-  CalendarDay,
-  NotificationItem,
-  NotificationPage,
-  AiTestResult,
-  OverviewData,
-  TrendPointData,
-  SettingGroupView,
   AdapterDescriptor,
   AiGeneration,
+  AiTestResult,
   AuthUser,
+  CalendarDay,
+  CommitImportResult,
   ComplianceReport,
   Content,
   ContentVariant,
+  ImportResult,
+  KnowledgeItem,
+  KnowledgeMatchItem,
   LoginResult,
+  NotificationItem,
+  NotificationPage,
+  OverviewData,
   Paged,
+  ParseResult,
   PublishTask,
   QueueStats,
+  ReviewItem,
+  RoleItem,
+  SettingGroupView,
+  TrendPointData,
+  UserItem,
 } from './types';
 
 export const usersApi = {
@@ -179,6 +181,22 @@ export const knowledgeApi = {
   update: (id: string, payload: Partial<KnowledgeItem>) => api.put<KnowledgeItem>(`/knowledge/${id}`, payload),
   remove: (id: string) => api.delete<{ id: string }>(`/knowledge/${id}`),
   /** 上传文档（PDF/Word/Excel/CSV/txt/md）→ 解析切片 → 生成资料草稿 */
+  /** 第一步：只解析文档、不入库，返回可人工校对的分片（OCR 文字单独标注） */
+  parseDocument: (file: File) => {
+    const form = new FormData();
+    form.append('file', file);
+    return apiUpload<ParseResult>('/knowledge/parse', form);
+  },
+  /** 第三步：按人工校对后的分片入库 */
+  commitImport: (payload: {
+    brand: string;
+    category: string;
+    priority?: number;
+    activate?: boolean;
+    sourceFileName?: string;
+    tempFile?: string;
+    chunks: Array<{ content: string; title?: string; fromOcr?: boolean }>;
+  }) => api.post<CommitImportResult>('/knowledge/commit', payload),
   importDocument: (
     file: File,
     payload: { brand: string; category: string; priority?: number; autoActivate?: boolean },

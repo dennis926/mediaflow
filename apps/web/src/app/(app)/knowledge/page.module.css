@@ -107,3 +107,112 @@
   border-color: var(--mf-color-brand-500);
   color: var(--mf-color-brand-600);
 }
+
+.filePicker input {
+  display: none;
+}
+
+.fileList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mf-space-1);
+  max-height: 7rem;
+  overflow-y: auto;
+}
+
+/* 复核校对台 */
+.tabs {
+  display: flex;
+  gap: var(--mf-space-2);
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--mf-color-border-subtle);
+  padding-bottom: var(--mf-space-2);
+}
+
+.tab {
+  display: flex;
+  align-items: center;
+  gap: var(--mf-space-2);
+  min-height: var(--mf-size-touch-min);
+  padding: 0 var(--mf-space-3);
+  border: 1px solid var(--mf-color-border-subtle);
+  border-radius: var(--mf-radius-md);
+  background: var(--mf-color-surface-raised);
+  color: var(--mf-color-text-secondary);
+  font-size: var(--mf-font-size-sm);
+  cursor: pointer;
+}
+
+.tab:hover {
+  border-color: var(--mf-color-brand-500);
+  color: var(--mf-color-brand-600);
+}
+
+.tabActive {
+  border-color: var(--mf-color-brand-500);
+  background: var(--mf-color-brand-50);
+  color: var(--mf-color-brand-700);
+  font-weight: var(--mf-font-weight-medium);
+}
+
+.tabName {
+  max-width: 12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reviewSummary {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mf-space-1);
+  padding: var(--mf-space-3) var(--mf-space-4);
+  border-radius: var(--mf-radius-md);
+  background: var(--mf-color-surface-sunken);
+}
+
+.reviewToolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--mf-space-2);
+  flex-wrap: wrap;
+}
+
+.chunkList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mf-space-3);
+  max-height: 46vh;
+  overflow-y: auto;
+  padding-right: var(--mf-space-1);
+}
+
+.chunkCard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mf-space-2);
+  padding: var(--mf-space-3);
+  border: 1px solid var(--mf-color-border-subtle);
+  border-radius: var(--mf-radius-md);
+  background: var(--mf-color-surface-raised);
+}
+
+.chunkHead {
+  display: flex;
+  align-items: center;
+  gap: var(--mf-space-2);
+  flex-wrap: wrap;
+}
+
+.chunkIndex {
+  font-size: var(--mf-font-size-sm);
+  font-weight: var(--mf-font-weight-medium);
+  color: var(--mf-color-text-primary);
+}
+
+.bannerAction {
+  display: inline-flex;
+  gap: var(--mf-space-2);
+  flex-wrap: wrap;
+  margin-left: auto;
+}

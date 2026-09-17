@@ -211,6 +211,26 @@ export interface ImportChunkPreview {
   preview: string;
 }
 
+export interface ParsedChunk {
+  index: number;
+  title: string;
+  content: string;
+  charCount: number;
+  /** 该片来自本地 OCR（图片/扫描件），复核时需重点核对。 */
+  fromOcr: boolean;
+}
+
+export interface ParseResult {
+  parsed: { fileName: string; fileType: string; charCount: number; warnings: string[]; ocrSections?: number };
+  tempFile: string;
+  chunks: ParsedChunk[];
+}
+
+export interface CommitImportResult {
+  created: Array<{ id: string; title: string; isActive: boolean }>;
+  storedPath: string | null;
+}
+
 export interface ImportResult {
   parsed: { fileName: string; fileType: string; charCount: number; warnings: string[]; ocrSections?: number };
   storedPath: string;

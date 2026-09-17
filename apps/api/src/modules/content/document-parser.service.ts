@@ -8,6 +8,12 @@ import { MAX_OCR_IMAGES, OcrService } from './ocr.service';
 
 const execFileAsync = promisify(execFile);
 
+/** 解析出的文字段落；fromOcr 标记该段来自图片识别，人工复核时需重点核对。 */
+export interface ParsedSegment {
+  text: string;
+  fromOcr: boolean;
+}
+
 export interface ParsedDocument {
   fileName: string;
   fileType: string;
@@ -16,6 +22,8 @@ export interface ParsedDocument {
   warnings: string[];
   /** 经过 OCR 得到的文字段落数，便于运营判断是否依赖了图片内容。 */
   ocrSections: number;
+  /** 分来源的段落，切片时不会把 OCR 文字和正文混在一片里。 */
+  segments: ParsedSegment[];
 }
 
 export interface KnowledgeChunk {
@@ -23,6 +31,7 @@ export interface KnowledgeChunk {
   title: string;
   content: string;
   charCount: number;
+  fromOcr: boolean;
 }
 
 export const SUPPORTED_DOCUMENT_TYPES = [
@@ -71,46 +80,54 @@ export class DocumentParserService {
   async parse(fileName: string, buffer: Buffer): Promise<ParsedDocument> {
     const type = this.assertSupported(fileName, buffer.length);
     const warnings: string[] = [];
-    let text = '';
+    const segments: ParsedSegment[] = [];
     let ocrSections = 0;
 
     try {
       switch (type) {
         case '.pdf': {
-          text = await this.parsePdf(buffer);
+          const text = await this.parsePdf(buffer);
           if (text.replace(/\s/g, '').length < 100) {
-            // 没有文字层（扫描版/纯图片 PDF）→ 渲染成图片后本地 OCR
-            const ocrText = await this.ocrPdfPages(buffer, warnings);
-            if (ocrText) {
-              text = ocrText.text;
-              ocrSections = ocrText.sections;
-              warnings.push('该 PDF 没有文字层，已用本地 OCR 识别图片文字');
+            // No text layer (scanned or image-only PDF): render the pages and OCR them locally.
+            const ocr = await this.ocrPdfPages(buffer, warnings);
+            if (ocr.text) {
+              ocrSections = ocr.sections;
+              segments.push({ text: `【扫描页文字（本地 OCR）】\n${ocr.text}`, fromOcr: true });
+              warnings.push('该 PDF 没有文字层，已用本地 OCR 识别图片文字，请重点核对');
             }
+          } else {
+            segments.push({ text, fromOcr: false });
           }
           break;
         }
         case '.docx': {
-          text = await this.parseDocx(buffer);
+          const body = await this.parseDocx(buffer);
+          if (body.trim().length > 0) segments.push({ text: body, fromOcr: false });
           const media = await this.ocrZipMedia(buffer, /^word\/media\//, warnings);
           if (media.text) {
-            text = `${text}\n\n【文档内图片文字】\n${media.text}`;
             ocrSections = media.sections;
+            segments.push({ text: `【文档内图片文字（本地 OCR）】\n${media.text}`, fromOcr: true });
+            warnings.push('文档内图片文字由本地 OCR 识别，请重点核对');
           }
           break;
         }
         case '.pptx': {
           const pptx = await this.parsePptx(buffer, warnings);
-          text = pptx.text;
-          ocrSections = pptx.sections;
+          if (pptx.text.trim().length > 0) segments.push({ text: pptx.text, fromOcr: false });
+          if (pptx.imageText) {
+            ocrSections = pptx.sections;
+            segments.push({ text: `【幻灯片图片文字（本地 OCR）】\n${pptx.imageText}`, fromOcr: true });
+            warnings.push('幻灯片内图片文字由本地 OCR 识别，请重点核对');
+          }
           break;
         }
         case '.xlsx':
         case '.xls':
         case '.csv':
-          text = await this.parseSpreadsheet(buffer, type, warnings);
+          segments.push({ text: await this.parseSpreadsheet(buffer, type, warnings), fromOcr: false });
           break;
         default:
-          text = buffer.toString('utf8');
+          segments.push({ text: buffer.toString('utf8'), fromOcr: false });
       }
     } catch (error) {
       if (error instanceof BadRequestException) throw error;
@@ -119,7 +136,11 @@ export class DocumentParserService {
       throw new BadRequestException(`文档解析失败：${message}`);
     }
 
-    text = this.normalize(text);
+    const cleaned = segments
+      .map((segment) => ({ text: this.normalize(segment.text), fromOcr: segment.fromOcr }))
+      .filter((segment) => segment.text.replace(/\s/g, '').length > 0);
+
+    let text = cleaned.map((segment) => segment.text).join('\n\n');
     if (text.replace(/\s/g, '').length < 20) {
       throw new BadRequestException('解析出的文本过少（可能是扫描件且 OCR 未识别到文字），请改用文字版文件或手动录入');
     }
@@ -127,7 +148,23 @@ export class DocumentParserService {
       warnings.push('文档较长，已截断到 50 万字符');
       text = text.slice(0, 500000);
     }
-    return { fileName, fileType: type, text, charCount: text.length, warnings, ocrSections };
+
+    return { fileName, fileType: type, text, charCount: text.length, warnings, ocrSections, segments: cleaned };
+  }
+
+  /**
+   * 按来源分段切片：OCR 段落与正文段落分别切片，不混在同一片里，
+   * 这样运营能一眼看出哪些内容来自图片识别、需要重点校对。
+   */
+  chunkSegments(segments: ParsedSegment[], maxChunks = 40): KnowledgeChunk[] {
+    const chunks: KnowledgeChunk[] = [];
+    for (const segment of segments) {
+      if (chunks.length >= maxChunks) break;
+      for (const chunk of this.chunk(segment.text, maxChunks - chunks.length)) {
+        chunks.push({ ...chunk, index: chunks.length + 1, fromOcr: segment.fromOcr });
+      }
+    }
+    return chunks.slice(0, maxChunks).map((chunk, position) => ({ ...chunk, index: position + 1 }));
   }
 
   /** 按空行/标题切段，再按长度合并成 1200 字左右、带 200 字重叠的片段。 */
@@ -143,7 +180,7 @@ export class DocumentParserService {
     const flush = (): void => {
       const content = buffer.trim();
       if (content.length >= 40) {
-        chunks.push({ index: chunks.length + 1, title: this.deriveTitle(content), content, charCount: content.length });
+        chunks.push({ index: chunks.length + 1, title: this.deriveTitle(content), content, charCount: content.length, fromOcr: false });
       }
       buffer = '';
     };
@@ -154,7 +191,7 @@ export class DocumentParserService {
         for (let start = 0; start < paragraph.length; start += CHUNK_SIZE - CHUNK_OVERLAP) {
           const slice = paragraph.slice(start, start + CHUNK_SIZE).trim();
           if (slice.length >= 40) {
-            chunks.push({ index: chunks.length + 1, title: this.deriveTitle(slice), content: slice, charCount: slice.length });
+            chunks.push({ index: chunks.length + 1, title: this.deriveTitle(slice), content: slice, charCount: slice.length, fromOcr: false });
           }
           if (chunks.length >= maxChunks) break;
         }
@@ -199,7 +236,7 @@ export class DocumentParserService {
   }
 
   /** PPT：按幻灯片顺序取文本框文字，再对幻灯片图片做本地 OCR。 */
-  private async parsePptx(buffer: Buffer, warnings: string[]): Promise<{ text: string; sections: number }> {
+  private async parsePptx(buffer: Buffer, warnings: string[]): Promise<{ text: string; imageText: string; sections: number }> {
     const JSZip = (await import('jszip')).default;
     const zip = await JSZip.loadAsync(buffer);
     const slideNames = Object.keys(zip.files)
@@ -218,9 +255,7 @@ export class DocumentParserService {
     }
 
     const media = await this.ocrZipMedia(buffer, /^ppt\/media\//, warnings);
-    if (media.text) parts.push(`【幻灯片图片文字（本地 OCR）】\n${media.text}`);
-
-    return { text: parts.join('\n\n'), sections: media.sections };
+    return { text: parts.join('\n\n'), imageText: media.text, sections: media.sections };
   }
 
   /** 读取压缩包内图片并逐张 OCR（docx 的 word/media、pptx 的 ppt/media）。 */
