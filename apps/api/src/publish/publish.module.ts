@@ -16,6 +16,6 @@ import { RedisTokenStore } from './token-store.service';
   imports: [TypeOrmModule.forFeature([PublishTask, Content, ContentVariant, SocialAccount]), SettingsModule],
   controllers: [PublishController],
   providers: [PublishService, PublishQueueService, PublishWorker, RedisTokenStore, channelRegistryProvider],
-  exports: [PublishService, PublishQueueService],
+  exports: [PublishService, PublishQueueService, channelRegistryProvider],
 })
 export class PublishModule {}

@@ -46,7 +46,7 @@ export default function DashboardPage() {
       title: '内容',
       render: (row) => (
         <div className={styles.titleCell}>
-          <Link className={styles.titleStrong} href={`/content/edit?id=${row.contentId}`}>
+          <Link className={styles.titleStrong} href={`/content/${row.contentId}/edit`}>
             {row.content?.title ?? row.contentId.slice(0, 8)}
           </Link>
           <span className={styles.metaRow}>

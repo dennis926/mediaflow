@@ -6,12 +6,15 @@ import { AuditModule } from './audit/audit.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { JwtAuthGuard } from './modules/auth/jwt-auth.guard';
 import { RolesGuard } from './modules/auth/roles.guard';
+import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { NotificationModule } from './modules/notification/notification.module';
+import { PlatformModule } from './modules/platform/platform.module';
 import { SettingsModule } from './modules/settings/settings.module';
 import { CommonModule } from './common/common.module';
 import { AiModule } from './modules/ai/ai.module';
 import { ContentModule } from './modules/content/content.module';
 import { buildNestDataSourceOptions } from './database/database.config';
+import { DatabaseModule } from './database/database.module';
 import { HealthController } from './health/health.controller';
 import { PublishModule } from './publish/publish.module';
 import { RedisModule } from './redis/redis.module';
@@ -26,6 +29,7 @@ import { RedisModule } from './redis/redis.module';
       inject: [ConfigService],
       useFactory: buildNestDataSourceOptions,
     }),
+    DatabaseModule,
     RedisModule,
     CommonModule,
     AuditModule,
@@ -35,6 +39,8 @@ import { RedisModule } from './redis/redis.module';
     AuthModule,
     SettingsModule,
     NotificationModule,
+    AnalyticsModule,
+    PlatformModule,
   ],
   controllers: [HealthController],
   providers: [

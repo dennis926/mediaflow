@@ -89,3 +89,49 @@ export interface CalendarDay {
   date: string;
   tasks: import('@mediaflow/shared').PublishTaskDto[];
 }
+
+export interface OverviewData {
+  contents: number;
+  tasks: number;
+  published: number;
+  pending: number;
+  manualRequired: number;
+  failed: number;
+  aiGenerated: number;
+  publishedLast7Days: number;
+  platformBreakdown: Array<{ platform: import('@mediaflow/shared').PlatformCode; total: number; published: number }>;
+}
+
+export interface TrendPointData {
+  date: string;
+  published: number;
+  failed: number;
+  views: number;
+  likes: number;
+}
+
+export interface AccountView {
+  id: string;
+  platform: import('@mediaflow/shared').PlatformCode;
+  platformName: string;
+  publishMode: import('@mediaflow/shared').PublishMode;
+  accountName: string;
+  platformAccountId: string;
+  avatarUrl: string | null;
+  status: string;
+  hasToken: boolean;
+  tokenExpiresAt: string | null;
+  lastSyncedAt: string | null;
+  createdAt: string;
+}
+
+export interface AccountRankingRow {
+  socialAccountId: string;
+  accountName: string;
+  platform: import('@mediaflow/shared').PlatformCode;
+  published: number;
+  views: number;
+  likes: number;
+  comments: number;
+  shares: number;
+}

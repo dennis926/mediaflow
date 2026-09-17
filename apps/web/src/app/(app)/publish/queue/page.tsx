@@ -66,7 +66,7 @@ export default function PublishQueuePage() {
       title: '内容',
       render: (row) => (
         <div className={styles.titleCell}>
-          <Link className={styles.titleLink} href={`/content/edit?id=${row.contentId}`}>
+          <Link className={styles.titleLink} href={`/content/${row.contentId}/edit`}>
             {row.content?.title ?? row.contentId.slice(0, 8)}
           </Link>
           <span className={styles.meta}>

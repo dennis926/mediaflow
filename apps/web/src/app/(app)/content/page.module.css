@@ -65,3 +65,201 @@
     width: 100%;
   }
 }
+
+/* editor styles moved here so both the dynamic route and the legacy redirect can reuse them */
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: var(--mf-space-5);
+  align-items: start;
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mf-space-4);
+}
+
+.formGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--mf-space-4);
+}
+
+.fullRow {
+  grid-column: 1 / -1;
+}
+
+.bodyArea {
+  min-height: calc(var(--mf-size-control-lg) * 8);
+}
+
+.actions {
+  display: flex;
+  gap: var(--mf-space-3);
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.previewTabs {
+  display: flex;
+  gap: var(--mf-space-2);
+  flex-wrap: wrap;
+}
+
+.previewTab {
+  height: var(--mf-size-control-sm);
+  padding: 0 var(--mf-space-3);
+  border-radius: var(--mf-radius-full);
+  border: 1px solid var(--mf-color-border-base);
+  background: var(--mf-color-bg-surface);
+  color: var(--mf-color-text-secondary);
+  font-size: var(--mf-font-size-sm);
+  cursor: pointer;
+}
+
+.previewTabActive {
+  border-color: var(--mf-color-brand-500);
+  background: var(--mf-color-brand-50);
+  color: var(--mf-color-brand-700);
+  font-weight: var(--mf-font-weight-medium);
+}
+
+.previewCard {
+  border: 1px solid var(--mf-color-border-subtle);
+  border-radius: var(--mf-radius-lg);
+  background: var(--mf-color-bg-surface);
+  padding: var(--mf-space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--mf-space-3);
+}
+
+.previewTitle {
+  margin: 0;
+  font-size: var(--mf-font-size-xl);
+  font-weight: var(--mf-font-weight-semibold);
+  line-height: var(--mf-font-lineHeight-tight);
+}
+
+.previewBody {
+  font-size: var(--mf-font-size-md);
+  line-height: var(--mf-font-lineHeight-relaxed);
+  color: var(--mf-color-text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.previewMeta {
+  display: flex;
+  gap: var(--mf-space-2);
+  flex-wrap: wrap;
+  align-items: center;
+  font-size: var(--mf-font-size-xs);
+  color: var(--mf-color-text-tertiary);
+}
+
+.counter {
+  font-size: var(--mf-font-size-xs);
+  color: var(--mf-color-text-tertiary);
+}
+
+.counterOver {
+  color: var(--mf-color-danger-600);
+}
+
+.variantList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mf-space-3);
+}
+
+.variantItem {
+  border: 1px solid var(--mf-color-border-subtle);
+  border-radius: var(--mf-radius-md);
+  padding: var(--mf-space-3) var(--mf-space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--mf-space-1);
+}
+
+.variantTitle {
+  font-size: var(--mf-font-size-sm);
+  font-weight: var(--mf-font-weight-medium);
+}
+
+.variantBody {
+  font-size: var(--mf-font-size-xs);
+  color: var(--mf-color-text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.checkboxGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--mf-space-2);
+}
+
+.checkboxItem {
+  display: flex;
+  align-items: center;
+  gap: var(--mf-space-2);
+  min-height: var(--mf-size-touch-min);
+  padding: 0 var(--mf-space-3);
+  border-radius: var(--mf-radius-md);
+  border: 1px solid var(--mf-color-border-base);
+  font-size: var(--mf-font-size-sm);
+  cursor: pointer;
+}
+
+.checkboxItemActive {
+  border-color: var(--mf-color-brand-500);
+  background: var(--mf-color-brand-50);
+  color: var(--mf-color-brand-700);
+}
+
+.violationList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mf-space-2);
+}
+
+.violation {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--mf-space-2) var(--mf-space-3);
+  border-radius: var(--mf-radius-md);
+  background: var(--mf-color-danger-50);
+  color: var(--mf-color-danger-700);
+  font-size: var(--mf-font-size-xs);
+}
+
+.titleOption {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--mf-space-3);
+  padding: var(--mf-space-2) var(--mf-space-3);
+  border: 1px solid var(--mf-color-border-base);
+  border-radius: var(--mf-radius-md);
+  font-size: var(--mf-font-size-sm);
+}
+
+@media (max-width: 1023px) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 640px) {
+  .formGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .checkboxGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

@@ -1,11 +1,15 @@
 import type { AiFlagType, ContentStatus, PlatformCode, PublishTaskStatus } from '@mediaflow/shared';
 import { api } from './client';
 import type {
+  AccountRankingRow,
+  AccountView,
   AdaptResult,
   CalendarDay,
   NotificationItem,
   NotificationPage,
   AiTestResult,
+  OverviewData,
+  TrendPointData,
   SettingGroupView,
   AdapterDescriptor,
   AiGeneration,
@@ -96,4 +100,29 @@ export const notificationsApi = {
     api.get<NotificationPage>('/notifications', { ...query }),
   markRead: (id: string) => api.patch<NotificationItem>(`/notifications/${id}/read`),
   markAllRead: () => api.post<{ updated: number }>('/notifications/read-all'),
+};
+
+export const analyticsApi = {
+  overview: () => api.get<OverviewData>('/analytics/overview'),
+  trend: (days = 14) => api.get<TrendPointData[]>('/analytics/trend', { days }),
+  ranking: () => api.get<AccountRankingRow[]>('/analytics/accounts/ranking'),
+  sync: (payload: { contentId?: string; limit?: number } = {}) =>
+    api.post<{ synced: number; failed: number; results: Array<{ taskId: string; platform: string; ok: boolean; message: string }> }>(
+      '/analytics/sync',
+      payload,
+    ),
+};
+
+export const accountsApi = {
+  list: (platform?: string) => api.get<AccountView[]>('/accounts', { platform }),
+  bind: (payload: {
+    platform: string;
+    accountName: string;
+    platformAccountId: string;
+    avatarUrl?: string;
+    accessToken?: string;
+    refreshToken?: string;
+    extra?: Record<string, unknown>;
+  }) => api.post<AccountView>('/accounts/bind', payload),
+  unbind: (id: string) => api.delete<{ id: string }>(`/accounts/${id}`),
 };

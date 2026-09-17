@@ -5,8 +5,8 @@
   justify-content: center;
   padding: var(--mf-space-6);
   background:
-    radial-gradient(900px 480px at 15% -10%, rgba(79, 107, 255, 0.18), transparent 60%),
-    radial-gradient(700px 420px at 100% 100%, rgba(79, 107, 255, 0.12), transparent 55%),
+    var(--mf-gradient-brandAura),
+    var(--mf-gradient-brandAuraAlt),
     var(--mf-color-bg-body);
 }
 

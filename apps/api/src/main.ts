@@ -12,8 +12,21 @@ async function bootstrap(): Promise<void> {
 
   app.setGlobalPrefix('api');
   app.use(cookieParser());
+  // Browser extension pages (chrome-extension://) and the local 127.0.0.1 aliases are allowed
+  // in addition to the configured web/h5 origins, so the plugin can talk to the API too.
+  const configuredOrigins = [
+    config.get<string>('WEB_URL') ?? 'http://localhost:3000',
+    config.get<string>('H5_URL') ?? 'http://localhost:3101',
+    ...(config.get<string>('CORS_ORIGINS') ?? '').split(',').map((origin) => origin.trim()).filter(Boolean),
+  ];
+  const allowedOrigins = new Set(
+    configuredOrigins.flatMap((origin) => [origin, origin.replace('localhost', '127.0.0.1')]),
+  );
   app.enableCors({
-    origin: [config.get<string>('WEB_URL') ?? 'http://localhost:3000', config.get<string>('H5_URL') ?? 'http://localhost:3101'],
+    origin: (origin: string | undefined, callback: (error: Error | null, allow?: boolean) => void) => {
+      if (!origin || allowedOrigins.has(origin) || origin.startsWith('chrome-extension://')) callback(null, true);
+      else callback(null, false);
+    },
     credentials: true,
   });
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true, forbidNonWhitelisted: false }));

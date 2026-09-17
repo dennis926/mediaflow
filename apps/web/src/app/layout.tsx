@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import '@mediaflow/design-tokens/tokens.css';
 import './globals.css';
+import { tokens } from '@mediaflow/design-tokens';
 import { Providers } from '../lib/providers';
 
 export const metadata: Metadata = {
@@ -11,7 +12,7 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
-  themeColor: '#0F172A',
+  themeColor: tokens.color.neutral[900],
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

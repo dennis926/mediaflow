@@ -26,15 +26,18 @@ const NAV_ITEMS: SidebarItem[] = [
   { href: '/content', label: '内容中心', icon: <ContentIcon /> },
   { href: '/publish/queue', label: '发布队列', icon: <PublishIcon /> },
   { href: '/publish/calendar', label: '排期日历', icon: <CalendarIcon /> },
-  { href: '/analytics', label: '数据中心', icon: <AnalyticsIcon />, disabled: true },
-  { href: '/accounts', label: '账号管理', icon: <AccountIcon />, disabled: true },
+  { href: '/analytics', label: '数据中心', icon: <AnalyticsIcon /> },
+  { href: '/accounts', label: '账号管理', icon: <AccountIcon /> },
   { href: '/settings', label: '系统设置', icon: <SettingsIcon /> },
 ];
 
 const PAGE_META: Array<{ prefix: string; title: string; subtitle: string }> = [
   { prefix: '/settings', title: '系统设置', subtitle: 'AI 与平台密钥、发布队列参数' },
+  { prefix: '/analytics', title: '数据中心', subtitle: '核心指标、趋势与账号排行' },
+  { prefix: '/accounts', title: '账号管理', subtitle: '绑定与管理平台账号' },
   { prefix: '/dashboard', title: '工作台', subtitle: '内容与发布整体概况' },
-  { prefix: '/content/edit', title: '内容编辑器', subtitle: '编辑正文并生成多平台版本' },
+  { prefix: '/content/new', title: '内容编辑器', subtitle: '新建内容并生成多平台版本' },
+  { prefix: '/content/', title: '内容编辑器', subtitle: '编辑正文并生成多平台版本' },
   { prefix: '/content', title: '内容中心', subtitle: '管理全部内容与平台版本' },
   { prefix: '/publish/calendar', title: '排期日历', subtitle: '按周查看发布排期' },
   { prefix: '/publish/queue', title: '发布队列', subtitle: '任务状态、失败重试与人工发布' },

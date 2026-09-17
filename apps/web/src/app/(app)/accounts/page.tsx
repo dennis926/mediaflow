@@ -1,0 +1,233 @@
+'use client';
+
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { PLATFORM_LABELS, PlatformCode, PublishMode } from '@mediaflow/shared';
+import { useState } from 'react';
+import { Banner } from '../../../components/ui/Banner';
+import { Button } from '../../../components/ui/Button';
+import { Card } from '../../../components/ui/Card';
+import { Dialog } from '../../../components/ui/Dialog';
+import { EmptyState } from '../../../components/ui/EmptyState';
+import { Input, Select } from '../../../components/ui/Field';
+import { SkeletonRows } from '../../../components/ui/Skeleton';
+import { Tag } from '../../../components/ui/Tag';
+import { ApiError } from '../../../lib/api/client';
+import { accountsApi } from '../../../lib/api/endpoints';
+import type { AccountView } from '../../../lib/api/types';
+import { formatDateTime } from '../../../lib/format';
+import { AccountIcon, PlusIcon, TrashIcon } from '../../../lib/icons';
+import styles from './page.module.css';
+
+const PLATFORM_OPTIONS = Object.values(PlatformCode).map((platform) => ({
+  value: platform,
+  label: PLATFORM_LABELS[platform],
+}));
+
+const MODE_LABELS: Record<PublishMode, string> = {
+  [PublishMode.Api]: '官方接口发布',
+  [PublishMode.Plugin]: '插件半自动',
+  [PublishMode.Manual]: '人工发布',
+};
+
+export default function AccountsPage() {
+  const queryClient = useQueryClient();
+  const [bindOpen, setBindOpen] = useState(false);
+  const [pendingUnbind, setPendingUnbind] = useState<AccountView | null>(null);
+  const [feedback, setFeedback] = useState<{ tone: 'success' | 'danger' | 'info'; text: string } | null>(null);
+  const [form, setForm] = useState({
+    platform: PlatformCode.WechatMp as PlatformCode,
+    accountName: '',
+    platformAccountId: '',
+    accessToken: '',
+    refreshToken: '',
+  });
+
+  const accounts = useQuery({ queryKey: ['accounts'], queryFn: () => accountsApi.list() });
+
+  const bind = useMutation({
+    mutationFn: () =>
+      accountsApi.bind({
+        platform: form.platform,
+        accountName: form.accountName.trim(),
+        platformAccountId: form.platformAccountId.trim(),
+        accessToken: form.accessToken.trim() || undefined,
+        refreshToken: form.refreshToken.trim() || undefined,
+      }),
+    onSuccess: (account) => {
+      setBindOpen(false);
+      setFeedback({ tone: 'success', text: `已绑定：${account.accountName}（${account.platformName}）` });
+      setForm({ platform: PlatformCode.WechatMp, accountName: '', platformAccountId: '', accessToken: '', refreshToken: '' });
+      void queryClient.invalidateQueries({ queryKey: ['accounts'] });
+    },
+    onError: (error: unknown) =>
+      setFeedback({ tone: 'danger', text: error instanceof ApiError ? error.message : '绑定失败' }),
+  });
+
+  const unbind = useMutation({
+    mutationFn: (id: string) => accountsApi.unbind(id),
+    onSuccess: () => {
+      setPendingUnbind(null);
+      setFeedback({ tone: 'info', text: '已解绑该账号' });
+      void queryClient.invalidateQueries({ queryKey: ['accounts'] });
+    },
+    onError: (error: unknown) =>
+      setFeedback({ tone: 'danger', text: error instanceof ApiError ? error.message : '解绑失败' }),
+  });
+
+  return (
+    <>
+      {feedback ? (
+        <Banner tone={feedback.tone}>
+          {feedback.text}
+          <button
+            type="button"
+            onClick={() => setFeedback(null)}
+            style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: 'inherit' }}
+          >
+            知道了
+          </button>
+        </Banner>
+      ) : null}
+
+      <Card
+        title="已绑定平台账号"
+        extra={
+          <Button size="sm" icon={<PlusIcon width={15} height={15} />} onClick={() => setBindOpen(true)}>
+            绑定账号
+          </Button>
+        }
+      >
+        {accounts.isLoading ? (
+          <SkeletonRows rows={4} />
+        ) : accounts.data && accounts.data.length > 0 ? (
+          <div className={styles.grid}>
+            {accounts.data.map((account) => (
+              <article className={styles.accountCard} key={account.id}>
+                <div className={styles.cardTop}>
+                  <span className={styles.avatar}>{account.accountName.slice(0, 1)}</span>
+                  <span className={styles.name}>
+                    <strong>{account.accountName}</strong>
+                    <span className={styles.meta}>{account.platformName}</span>
+                  </span>
+                </div>
+                <div className={styles.tags}>
+                  <Tag tone="info">{MODE_LABELS[account.publishMode]}</Tag>
+                  <Tag tone={account.hasToken ? 'success' : 'warning'}>{account.hasToken ? '令牌已配置' : '未配置令牌'}</Tag>
+                </div>
+                <span className={styles.meta}>平台账号 ID：{account.platformAccountId}</span>
+                <span className={styles.meta}>
+                  {account.tokenExpiresAt ? `令牌到期：${formatDateTime(account.tokenExpiresAt)}` : '绑定时间：' + formatDateTime(account.createdAt)}
+                </span>
+                <div className={styles.actions}>
+                  <Button
+                    size="sm"
+                    variant="text"
+                    icon={<TrashIcon width={15} height={15} />}
+                    onClick={() => setPendingUnbind(account)}
+                  >
+                    解绑
+                  </Button>
+                </div>
+              </article>
+            ))}
+            <button type="button" className={styles.addCard} onClick={() => setBindOpen(true)}>
+              <PlusIcon width={20} height={20} />
+              <span>绑定新账号</span>
+            </button>
+          </div>
+        ) : (
+          <EmptyState
+            title="还没有绑定平台账号"
+            description="绑定后发布任务才能带账号执行：公众号用于取数，抖音/小红书用于 API 发布。"
+            icon={<AccountIcon width={22} height={22} />}
+            action={
+              <Button size="sm" icon={<PlusIcon width={15} height={15} />} onClick={() => setBindOpen(true)}>
+                绑定账号
+              </Button>
+            }
+          />
+        )}
+      </Card>
+
+      <Dialog
+        open={bindOpen}
+        title="绑定平台账号"
+        onClose={() => setBindOpen(false)}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setBindOpen(false)}>
+              取消
+            </Button>
+            <Button
+              loading={bind.isPending}
+              disabled={!form.accountName.trim() || !form.platformAccountId.trim()}
+              onClick={() => bind.mutate()}
+            >
+              保存
+            </Button>
+          </>
+        }
+      >
+        <Select
+          label="平台"
+          name="platform"
+          options={PLATFORM_OPTIONS}
+          value={form.platform}
+          onChange={(event) => setForm({ ...form, platform: event.target.value as PlatformCode })}
+        />
+        <Input
+          label="账号名称"
+          name="accountName"
+          placeholder="例如：卿尔美官方号"
+          value={form.accountName}
+          onChange={(event) => setForm({ ...form, accountName: event.target.value })}
+        />
+        <Input
+          label="平台账号 ID"
+          name="platformAccountId"
+          placeholder="平台侧唯一标识（openid / 账号 ID）"
+          value={form.platformAccountId}
+          onChange={(event) => setForm({ ...form, platformAccountId: event.target.value })}
+        />
+        <Input
+          label="Access Token（可选）"
+          name="accessToken"
+          type="password"
+          placeholder="通过平台 OAuth 授权得到，留空表示稍后补"
+          value={form.accessToken}
+          onChange={(event) => setForm({ ...form, accessToken: event.target.value })}
+        />
+        <Input
+          label="Refresh Token（可选）"
+          name="refreshToken"
+          type="password"
+          value={form.refreshToken}
+          onChange={(event) => setForm({ ...form, refreshToken: event.target.value })}
+        />
+        <Banner tone="info">
+          <span>
+            令牌会加密保存在数据库中、界面不回显。公众号仅用于拉取图文数据（平台禁止 API 自动发布）；抖音/小红书需要真实 OAuth 令牌才能发布。
+          </span>
+        </Banner>
+      </Dialog>
+
+      <Dialog
+        open={Boolean(pendingUnbind)}
+        title="解绑账号"
+        onClose={() => setPendingUnbind(null)}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setPendingUnbind(null)}>
+              取消
+            </Button>
+            <Button variant="danger" loading={unbind.isPending} onClick={() => pendingUnbind && unbind.mutate(pendingUnbind.id)}>
+              确认解绑
+            </Button>
+          </>
+        }
+      >
+        <span>解绑后，该账号的发布任务将无法执行，已发布内容不受影响。确定解绑「{pendingUnbind?.accountName}」吗？</span>
+      </Dialog>
+    </>
+  );
+}

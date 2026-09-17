@@ -80,7 +80,7 @@ export default function ContentListPage() {
       title: '内容',
       render: (row) => (
         <div className={styles.titleCell}>
-          <Link className={styles.titleLink} href={`/content/edit?id=${row.id}`}>
+          <Link className={styles.titleLink} href={`/content/${row.id}/edit`}>
             {row.title}
           </Link>
           <span className={styles.summary}>{row.summary ?? row.body.slice(0, 60)}</span>
@@ -136,7 +136,7 @@ export default function ContentListPage() {
             variant="text"
             size="sm"
             icon={<EditIcon width={15} height={15} />}
-            onClick={() => router.push(`/content/edit?id=${row.id}`)}
+            onClick={() => router.push(`/content/${row.id}/edit`)}
           >
             编辑
           </Button>
@@ -220,7 +220,7 @@ export default function ContentListPage() {
             搜索
           </Button>
           <div className={styles.spacer}>
-            <Link href="/content/edit">
+            <Link href="/content/new">
               <Button icon={<PlusIcon width={16} height={16} />}>新建内容</Button>
             </Link>
           </div>
@@ -242,7 +242,7 @@ export default function ContentListPage() {
                   description="创建第一篇内容，然后让 AI 生成公众号、小红书等平台版本。"
                   icon={<ContentIcon width={22} height={22} />}
                   action={
-                    <Link href="/content/edit">
+                    <Link href="/content/new">
                       <Button size="sm" icon={<PlusIcon width={16} height={16} />}>
                         新建内容
                       </Button>
