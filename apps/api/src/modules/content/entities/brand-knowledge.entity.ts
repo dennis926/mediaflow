@@ -2,7 +2,8 @@ import { Column, DeleteDateColumn, Entity, Index } from 'typeorm';
 import { PlatformCode } from '@mediaflow/shared';
 import { BaseEntity } from '../../../database/base.entity';
 
-export type KnowledgeCategory = 'brand' | 'product' | 'ingredient' | 'compliance' | 'faq' | 'tone';
+/** 分类标识：取值来自可配置的分类表（见 knowledge.categories.ts），因此这里是自由字符串。 */
+export type KnowledgeCategory = string;
 
 @Entity('brand_knowledge')
 export class BrandKnowledge extends BaseEntity {

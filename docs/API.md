@@ -175,6 +175,11 @@
 | PUT | `/api/knowledge/:id` | 更新（含 `isActive` 启停） |
 | DELETE | `/api/knowledge/:id` | 软删除 |
 
+| GET | `/api/knowledge/categories` | 当前生效的分类配置 + 每个分类的资料数（分类是配置项，不是写死的枚举） |
+| PUT | `/api/knowledge/categories` | 保存整套分类（`categories[{code,label,tone,description?}]`）；**正在被资料使用的分类不允许删除**；保存后 DTO 校验码表即时刷新 |
+| POST | `/api/knowledge/export` | 导出知识库：`format` = `json`（原生，含分类配置，可整站迁移）/ `csv` / `markdown`，另可 `brand`/`category`/`includeInactive` 过滤；返回 `{fileName,mimeType,content}` 由前端下载 |
+| POST | `/api/knowledge/import-data/preview` | **导入第一步**（multipart `file`）：解析 `.json/.csv/.tsv/.xlsx/.xls/.md/.txt`，自动识别字段映射（中英文别名），返回 `{columns,mapping,preview,rows,total,warnings}`，不写库 |
+| POST | `/api/knowledge/import-data/commit` | **导入第二步**：`rows`+`mapping`+默认品牌/分类 入库；默认按「品牌+标题+正文前 200 字」**去重** |
 | POST | `/api/knowledge/match` | **检索测试台**：喂 `title`/`body`/`tags`/`platform`/`limit`，返回会引用到的资料（含命中原因与得分），不写库 |
 | POST | `/api/knowledge/ai-draft` | **AI 起草资料**：`brand`+`category`+`points` → 返回 `{ draft{title,content,tags,keywords}, generationId, model, references }`；只返回草案，人工确认后再调 `POST /api/knowledge` |
 | POST | `/api/knowledge/ai-polish` | **AI 润色**（可作用于未保存的草稿）：`content`(+`brand`/`category`/`instruction`) → 返回润色后的 `content`，事实与数字不变 |

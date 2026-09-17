@@ -1,12 +1,30 @@
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { PlatformCode } from '@mediaflow/shared';
 import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { In, Repository } from 'typeorm';
+import {
+  ExportFormat,
+  FieldMapping,
+  KnowledgeTransferService,
+  MAPPING_TARGETS,
+  ParsedTable,
+  TransferEntry,
+  TARGET_LABELS,
+  autoMapColumns,
+} from './knowledge.transfer.service';
 import { AiService } from '../ai/ai.service';
 import { KnowledgeDraft } from '../ai/ai.types';
 import { AuditService } from '../../audit/audit.service';
+import { SettingsService } from '../settings/settings.service';
+import {
+  CATEGORY_SETTING_KEY,
+  KnowledgeCategoryDef,
+  normalizeCategories,
+  parseStoredCategories,
+  setCategoryCodes,
+} from './knowledge.categories';
 import { WorkspaceContextService } from '../../common/workspace-context.service';
 import {
   AiGenerateKnowledgeDto,
@@ -15,6 +33,7 @@ import {
   BatchDeleteKnowledgeDto,
   CommitImportDto,
   MatchKnowledgeDto,
+  SaveCategoriesDto,
   CreateKnowledgeDto,
   ImportKnowledgeDto,
   QueryKnowledgeDto,
@@ -97,7 +116,7 @@ const DEFAULT_LIMIT = 5;
  * 4. 引用明细写进 ai_generations.inputRefs，回答"AI 为什么这么写"。
  */
 @Injectable()
-export class KnowledgeService {
+export class KnowledgeService implements OnModuleInit {
   private readonly logger = new Logger(KnowledgeService.name);
 
   constructor(
@@ -107,6 +126,8 @@ export class KnowledgeService {
     private readonly workspaceContext: WorkspaceContextService,
     private readonly parser: DocumentParserService,
     private readonly ai: AiService,
+    private readonly settings: SettingsService,
+    private readonly transfer: KnowledgeTransferService,
   ) {}
 
   /** 上传目录：源文件留档，便于追溯每片资料来自哪个文档。 */
@@ -555,6 +576,75 @@ export class KnowledgeService {
     return this.knowledge.find({ where: { id: In(ids), workspaceId: scope.workspaceId } });
   }
 
+  /** 启动时把数据库里的分类加载进校验码表，DTO 校验才能接受自定义分类。 */
+  async onModuleInit(): Promise<void> {
+    try {
+      const list = await this.categories();
+      setCategoryCodes(list.map((item) => item.code));
+      this.logger.log(`知识库分类已加载：${list.map((item) => item.label).join('、')}`);
+    } catch (error) {
+      this.logger.warn(`知识库分类加载失败，使用默认分类：${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  /** 当前生效的分类配置（数据库优先，未配置时用默认分类）。 */
+  async categories(): Promise<KnowledgeCategoryDef[]> {
+    return parseStoredCategories(await this.settings.get(CATEGORY_SETTING_KEY));
+  }
+
+  /**
+   * 保存整套分类配置。为安全起见：正在被资料使用的分类不允许删除，
+   * 必须先把那些资料改到别的分类（或删除），避免出现"孤儿分类"。
+   */
+  async saveCategories(dto: SaveCategoriesDto, actor: KnowledgeActor): Promise<KnowledgeCategoryDef[]> {
+    const scope = await this.workspaceContext.current();
+    const next = normalizeCategories(dto.categories);
+    const current = await this.categories();
+    const nextCodes = new Set(next.map((item) => item.code));
+    const removed = current.filter((item) => !nextCodes.has(item.code));
+
+    if (removed.length > 0) {
+      const rows = await this.knowledge
+        .createQueryBuilder('knowledge')
+        .select('knowledge.category', 'category')
+        .addSelect('COUNT(*)', 'count')
+        .where('knowledge.workspaceId = :workspaceId', { workspaceId: scope.workspaceId })
+        .groupBy('knowledge.category')
+        .getRawMany<{ category: string; count: string }>();
+      const usage = new Map(rows.map((row) => [row.category, Number(row.count)]));
+      const blocking = removed
+        .map((item) => ({ label: item.label, count: usage.get(item.code) ?? 0 }))
+        .filter((item) => item.count > 0);
+      if (blocking.length > 0) {
+        throw new BadRequestException(
+          `以下分类还有资料在用，先把它们改到其他分类再删除：${blocking.map((item) => `${item.label}（${item.count} 条）`).join('、')}`,
+        );
+      }
+    }
+
+    await this.settings.updateMany(
+      [{ key: CATEGORY_SETTING_KEY, value: JSON.stringify(next) }],
+      { id: actor.id ?? null, name: actor.name ?? null },
+    );
+    setCategoryCodes(next.map((item) => item.code));
+    await this.record('knowledge.save_categories', '', actor, { count: next.length, codes: next.map((item) => item.code) });
+    this.logger.log(`知识库分类已更新：${next.map((item) => item.label).join('、')}`);
+    return next;
+  }
+
+  /** 分类使用情况（用于界面上提示每个分类有多少条资料）。 */
+  async categoryUsage(): Promise<Record<string, number>> {
+    const scope = await this.workspaceContext.current();
+    const rows = await this.knowledge
+      .createQueryBuilder('knowledge')
+      .select('knowledge.category', 'category')
+      .addSelect('COUNT(*)', 'count')
+      .where('knowledge.workspaceId = :workspaceId', { workspaceId: scope.workspaceId })
+      .groupBy('knowledge.category')
+      .getRawMany<{ category: string; count: string }>();
+    return Object.fromEntries(rows.map((row) => [row.category, Number(row.count)]));
+  }
+
   /** 检索测试台：喂一段标题/正文，看实际会引用哪几条资料、为什么命中。 */
   async match(dto: MatchKnowledgeDto): Promise<{ matches: KnowledgeMatch[] }> {
     return {
@@ -563,6 +653,193 @@ export class KnowledgeService {
         dto.limit ?? DEFAULT_LIMIT,
       ),
     };
+  }
+
+  /**
+   * 导出知识库。json 是原生格式（含分类配置，可整站迁移），csv/markdown 用于对外交换。
+   */
+  async exportEntries(format: ExportFormat, query: { brand?: string; category?: string; includeInactive?: boolean }): Promise<{ fileName: string; mimeType: string; content: string }> {
+    const scope = await this.workspaceContext.current();
+    const builder = this.knowledge
+      .createQueryBuilder('knowledge')
+      .where('knowledge.workspaceId = :workspaceId', { workspaceId: scope.workspaceId })
+      .orderBy('knowledge.priority', 'DESC')
+      .addOrderBy('knowledge.createdAt', 'ASC');
+    if (query.brand) builder.andWhere('knowledge.brand = :brand', { brand: query.brand });
+    if (query.category) builder.andWhere('knowledge.category = :category', { category: query.category });
+    if (!query.includeInactive) builder.andWhere('knowledge.isActive = true');
+
+    const rows = await builder.getMany();
+    const entries: TransferEntry[] = rows.map((row) => ({
+      brand: row.brand,
+      category: row.category,
+      title: row.title,
+      content: row.content,
+      tags: row.tags,
+      keywords: row.keywords,
+      priority: row.priority,
+      isActive: row.isActive,
+      aiGenerated: row.aiGenerated,
+      platforms: row.platforms,
+    }));
+
+    const stamp = new Date().toISOString().slice(0, 10);
+    if (format === 'csv') {
+      return { fileName: `知识库导出-${stamp}.csv`, mimeType: 'text/csv;charset=utf-8', content: this.transfer.toCsv(entries) };
+    }
+    if (format === 'markdown') {
+      const categories = await this.categories();
+      const labels = new Map(categories.map((item) => [item.code, item.label]));
+      return { fileName: `知识库导出-${stamp}.md`, mimeType: 'text/markdown;charset=utf-8', content: this.transfer.toMarkdown(entries, labels) };
+    }
+
+    const payload = {
+      format: 'mediaflow.knowledge',
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      /** 分类配置一并导出：换一套系统/换一家公司时可以直接带过去。 */
+      categories: await this.categories(),
+      items: entries,
+    };
+    return { fileName: `知识库导出-${stamp}.json`, mimeType: 'application/json;charset=utf-8', content: JSON.stringify(payload, null, 2) };
+  }
+
+  /** 导入第一步：解析文件 + 自动识别字段映射，不写库。 */
+  async previewImport(file: { originalname: string; buffer: Buffer }): Promise<{
+    fileName: string;
+    format: ParsedTable['format'];
+    columns: string[];
+    mapping: FieldMapping;
+    unmappedTargets: Array<{ target: string; label: string }>;
+    preview: Array<Record<string, string>>;
+    /** 解析出的全部行（上限 2000），前端确认映射后原样回传给提交接口 */
+    rows: Array<Record<string, string>>;
+    total: number;
+    warnings: string[];
+  }> {
+    const fileName = KnowledgeService.normalizeFileName(file.originalname);
+    const parsed = await this.transfer.parseFile(fileName, file.buffer);
+    const mapping = autoMapColumns(parsed.columns);
+    return {
+      fileName,
+      format: parsed.format,
+      columns: parsed.columns,
+      mapping,
+      unmappedTargets: MAPPING_TARGETS.filter((target) => !mapping[target]).map((target) => ({ target, label: TARGET_LABELS[target] })),
+      preview: parsed.rows.slice(0, 5),
+      rows: parsed.rows.slice(0, 2000),
+      total: parsed.rows.length,
+      warnings: parsed.rows.length > 2000 ? [...parsed.warnings, '文件行数超过 2000，仅载入前 2000 行'] : parsed.warnings,
+    };
+  }
+
+  /**
+   * 导入第二步：按确认后的映射入库。
+   * 默认按"品牌+标题+正文前 200 字"去重，避免同一份文件重复导入把知识库灌两遍。
+   */
+  async commitImportData(
+    dto: {
+      rows: Array<Record<string, string>>;
+      mapping: FieldMapping;
+      brand: string;
+      category: string;
+      priority?: number;
+      isActive?: boolean;
+      skipDuplicates?: boolean;
+      sourceFileName?: string;
+      categories?: unknown;
+      applyCategories?: boolean;
+    },
+    actor: KnowledgeActor,
+  ): Promise<{ created: number; skipped: Array<{ row: number; reason: string }>; duplicates: number; categoriesApplied: boolean }> {
+    const scope = await this.workspaceContext.current();
+    if (dto.rows.length === 0) throw new BadRequestException('没有可导入的数据行');
+    if (dto.rows.length > 2000) throw new BadRequestException('单次最多导入 2000 条，请拆分文件后分批导入');
+
+    let categoriesApplied = false;
+    if (dto.applyCategories && dto.categories) {
+      await this.saveCategories({ categories: dto.categories as never }, actor);
+      categoriesApplied = true;
+    }
+
+    const { entries, skipped } = this.transfer.buildEntries(dto.rows, dto.mapping, {
+      brand: dto.brand,
+      category: dto.category,
+      priority: dto.priority ?? 0,
+      isActive: dto.isActive ?? true,
+    });
+
+    if (entries.length === 0) {
+      throw new BadRequestException(`没有可入库的内容：${skipped.slice(0, 3).map((item) => `第 ${item.row} 行 ${item.reason}`).join('；')}`);
+    }
+
+    const skipDuplicates = dto.skipDuplicates ?? true;
+    const existing = skipDuplicates
+      ? new Set(
+          (
+            await this.knowledge.find({ where: { workspaceId: scope.workspaceId }, select: ['brand', 'title', 'content'] })
+          ).map((row) => this.transfer.signature(row)),
+        )
+      : new Set<string>();
+
+    const seen = new Set<string>();
+    const toSave: TransferEntry[] = [];
+    let duplicates = 0;
+    for (const entry of entries) {
+      const signature = this.transfer.signature(entry);
+      if (existing.has(signature) || seen.has(signature)) {
+        duplicates += 1;
+        continue;
+      }
+      seen.add(signature);
+      toSave.push(entry);
+    }
+    if (toSave.length === 0) {
+      throw new BadRequestException(`全部 ${duplicates} 条都与现有资料重复，已跳过（如确认要导入，请关闭「跳过重复」）`);
+    }
+
+    const tags = dto.sourceFileName ? [`来源：${dto.sourceFileName}`] : [];
+    const created = await this.persistEntries(toSave, { tenantId: scope.tenantId, workspaceId: scope.workspaceId, tags });
+    await this.record('knowledge.import_data', created[0] ?? '', actor, {
+      rows: dto.rows.length,
+      created: created.length,
+      duplicates,
+      skipped: skipped.length,
+      sourceFileName: dto.sourceFileName ?? '',
+    });
+    this.logger.log(`知识库导入完成：新增 ${created.length} 条，重复跳过 ${duplicates} 条，无效 ${skipped.length} 条`);
+    return { created: created.length, skipped, duplicates, categoriesApplied };
+  }
+
+  /** 批量写入"完整字段"的资料（导入/恢复用，区别于文档切片）。 */
+  private async persistEntries(
+    entries: TransferEntry[],
+    scope: { tenantId: string; workspaceId: string; tags: string[] },
+  ): Promise<string[]> {
+    const created: string[] = [];
+    for (const entry of entries) {
+      const saved = await this.knowledge.save(
+        this.knowledge.create({
+          tenantId: scope.tenantId,
+          workspaceId: scope.workspaceId,
+          brand: entry.brand,
+          category: entry.category,
+          title: entry.title.slice(0, 200),
+          content: entry.content,
+          tags: [...new Set([...(entry.tags ?? []), ...scope.tags])].slice(0, 20),
+          keywords: (entry.keywords ?? []).slice(0, 20),
+          priority: entry.priority,
+          platforms: entry.platforms ?? [],
+          sourceUrl: '',
+          isActive: entry.isActive,
+          usageCount: 0,
+          lastUsedAt: null,
+          aiGenerated: entry.aiGenerated ?? false,
+        }),
+      );
+      created.push(saved.id);
+    }
+    return created;
   }
 
   /**

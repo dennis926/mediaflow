@@ -19,7 +19,7 @@ export interface AiTestResult {
   error?: string;
 }
 
-const DEFAULT_MODEL = 'deepseek-v4-flash-0731';
+const DEFAULT_MODEL = 'deepseek-flash';
 
 /**
  * Builds the AI client from the runtime configuration (database first, then .env) and caches it
@@ -56,7 +56,8 @@ export class AiProviderFactory {
         task: 'generate',
         system: '你是连接测试助手，只回复两个字。',
         user: '请回复：连接正常',
-        maxTokens: 16,
+        // Reasoning models need headroom for the thinking pass before the answer.
+        maxTokens: 512,
         temperature: 0,
       });
       return {

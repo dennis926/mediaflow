@@ -382,13 +382,23 @@ export class AiService {
     return typeof parsed.review === 'string' ? parsed.review : text.slice(0, 500);
   }
 
+  /** Models sometimes wrap JSON in prose or code fences; salvage the object before failing. */
   private parseJson(text: string): Record<string, unknown> {
-    try {
-      const parsed = JSON.parse(text) as unknown;
-      if (typeof parsed !== 'object' || parsed === null) throw new Error('not an object');
-      return parsed as Record<string, unknown>;
-    } catch {
-      throw new Error('AI 返回的内容不是合法 JSON');
+    const candidates = [text.trim()];
+    const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    if (fenced) candidates.push(fenced[1].trim());
+    const first = text.indexOf('{');
+    const last = text.lastIndexOf('}');
+    if (first !== -1 && last > first) candidates.push(text.slice(first, last + 1));
+
+    for (const candidate of candidates) {
+      try {
+        const parsed = JSON.parse(candidate) as unknown;
+        if (typeof parsed === 'object' && parsed !== null) return parsed as Record<string, unknown>;
+      } catch {
+        // try the next candidate
+      }
     }
+    throw new Error('AI 返回的内容不是合法 JSON');
   }
 }

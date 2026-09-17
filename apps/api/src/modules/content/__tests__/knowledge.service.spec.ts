@@ -2,6 +2,8 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { ObjectLiteral, Repository } from 'typeorm';
 import { describe, expect, it, vi } from 'vitest';
 import { AiService } from '../../ai/ai.service';
+import { SettingsService } from '../../settings/settings.service';
+import { KnowledgeTransferService } from '../knowledge.transfer.service';
 import { AuditService } from '../../../audit/audit.service';
 import { WorkspaceContextService } from '../../../common/workspace-context.service';
 import { PlatformCode } from '@mediaflow/shared';
@@ -79,7 +81,9 @@ function buildService(pool: BrandKnowledge[], content: Partial<Content> | null =
     })),
     polishKnowledge: vi.fn(async () => ({ content: '润色后的正文内容（足够长以便通过校验）', generationId: 'gen-2' })),
   } as unknown as AiService;
-  return { service: new KnowledgeService(knowledge, contents, audit, workspaceContext, parser, ai), knowledge, contents, audit, parser, ai };
+  const settings = { get: vi.fn(async () => null), updateMany: vi.fn(async () => []) } as unknown as SettingsService;
+  const transfer = new KnowledgeTransferService();
+  return { service: new KnowledgeService(knowledge, contents, audit, workspaceContext, parser, ai, settings, transfer), knowledge, contents, audit, parser, ai, settings, transfer };
 }
 
 describe('KnowledgeService 检索', () => {

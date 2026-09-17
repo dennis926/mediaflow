@@ -24,7 +24,10 @@ import {
   AiPolishKnowledgeDto,
   BatchActivateDto,
   BatchDeleteKnowledgeDto,
+  CommitImportDataDto,
+  ExportKnowledgeDto,
   MatchKnowledgeDto,
+  SaveCategoriesDto,
   CommitImportDto,
   CreateKnowledgeDto,
   ImportKnowledgeDto,
@@ -68,6 +71,44 @@ export class KnowledgeController {
   @Get('audit')
   audit() {
     return this.knowledgeService.auditReport();
+  }
+
+  /** 导出知识库（json 原生格式 / csv / markdown），返回文件内容由前端下载 */
+  @Post('export')
+  export(@Body() dto: ExportKnowledgeDto) {
+    return this.knowledgeService.exportEntries(dto.format ?? 'json', { brand: dto.brand, category: dto.category, includeInactive: dto.includeInactive });
+  }
+
+  /** 导入第一步：解析文件并自动识别字段映射（不写库） */
+  @Roles('owner', 'admin', 'editor')
+  @Post('import-data/preview')
+  @UseInterceptors(FileInterceptor('file', { storage: memoryStorage(), limits: { fileSize: MAX_DOCUMENT_BYTES } }))
+  previewImport(
+    @UploadedFile(new ParseFilePipe({ validators: [new MaxFileSizeValidator({ maxSize: MAX_DOCUMENT_BYTES })] }))
+    file: Express.Multer.File,
+  ) {
+    return this.knowledgeService.previewImport({ originalname: file.originalname, buffer: file.buffer });
+  }
+
+  /** 导入第二步：按确认后的映射入库（默认跳过重复） */
+  @Roles('owner', 'admin', 'editor')
+  @Post('import-data/commit')
+  commitImportData(@Body() dto: CommitImportDataDto, @CurrentUser() user?: AuthUser) {
+    return this.knowledgeService.commitImportData(dto, toActor(user));
+  }
+
+  /** 当前生效的分类配置 + 每个分类的资料数（所有登录角色可读，界面渲染要用） */
+  @Get('categories')
+  async categories(): Promise<{ categories: Array<{ code: string; label: string; tone: string; description?: string; count: number }> }> {
+    const [list, usage] = await Promise.all([this.knowledgeService.categories(), this.knowledgeService.categoryUsage()]);
+    return { categories: list.map((item) => ({ ...item, count: usage[item.code] ?? 0 })) };
+  }
+
+  /** 保存分类配置（owner/admin/editor）；被资料使用的分类不允许删除 */
+  @Roles('owner', 'admin', 'editor')
+  @Put('categories')
+  saveCategories(@Body() dto: SaveCategoriesDto, @CurrentUser() user?: AuthUser) {
+    return this.knowledgeService.saveCategories(dto, toActor(user));
   }
 
   @Get(':id')

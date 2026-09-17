@@ -213,6 +213,40 @@ export interface ImportChunkPreview {
   preview: string;
 }
 
+export interface KnowledgeExportFile {
+  fileName: string;
+  mimeType: string;
+  content: string;
+}
+
+export interface KnowledgeImportPreview {
+  fileName: string;
+  format: 'tabular' | 'json' | 'markdown';
+  columns: string[];
+  mapping: Record<string, string | undefined>;
+  unmappedTargets: Array<{ target: string; label: string }>;
+  preview: Array<Record<string, string>>;
+  rows: Array<Record<string, string>>;
+  total: number;
+  warnings: string[];
+}
+
+export interface KnowledgeImportResult {
+  created: number;
+  skipped: Array<{ row: number; reason: string }>;
+  duplicates: number;
+  categoriesApplied: boolean;
+}
+
+export interface KnowledgeCategoryView {
+  code: string;
+  label: string;
+  tone: string;
+  description?: string;
+  /** 该分类下已有多少条资料（用于删除前的提示） */
+  count: number;
+}
+
 export interface KnowledgeDraft {
   title: string;
   content: string;

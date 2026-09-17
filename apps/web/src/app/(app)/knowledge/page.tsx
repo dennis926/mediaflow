@@ -13,16 +13,18 @@ import { Pagination } from '../../../components/ui/Pagination';
 import { SkeletonRows } from '../../../components/ui/Skeleton';
 import { Tag } from '../../../components/ui/Tag';
 import { ApiError } from '../../../lib/api/client';
-import { knowledgeApi } from '../../../lib/api/endpoints';
+import { authApi, knowledgeApi } from '../../../lib/api/endpoints';
 import type { KnowledgeItem } from '../../../lib/api/types';
 import { formatDateTime } from '../../../lib/format';
 import { KnowledgeIcon, PlusIcon } from '../../../lib/icons';
-import { CATEGORY_LABELS, CATEGORY_TONES, sourceFileName } from '../../../lib/knowledge';
+import { sourceFileName, useKnowledgeCategories } from '../../../lib/knowledge';
 import { SparkleIcon } from '../../../lib/icons';
 import { AuditPanel } from './AuditPanel';
+import { CategoriesPanel } from './CategoriesPanel';
 import { ImportReviewDialog } from './ImportReviewDialog';
 import { MatchPanel } from './MatchPanel';
 import { SourcesPanel } from './SourcesPanel';
+import { TransferPanel } from './TransferPanel';
 import styles from './page.module.css';
 
 type KnowledgeCategory = KnowledgeItem['category'];
@@ -62,13 +64,17 @@ export default function KnowledgePage() {
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [pendingDelete, setPendingDelete] = useState<KnowledgeItem | null>(null);
   const [importOpen, setImportOpen] = useState(false);
-  const [tab, setTab] = useState<'list' | 'sources' | 'match' | 'audit'>('list');
+  const [tab, setTab] = useState<'list' | 'sources' | 'match' | 'audit' | 'categories' | 'transfer'>('list');
   const [aiPoints, setAiPoints] = useState('');
   const [aiNote, setAiNote] = useState('');
   const [aiDrafted, setAiDrafted] = useState(false);
   /** 最近一次导入的来源文件，用于一键定位这批资料。 */
   const [lastImported, setLastImported] = useState<string[]>([]);
   const [feedback, setFeedback] = useState<{ tone: 'success' | 'danger' | 'info'; text: string } | null>(null);
+
+  const { categories, label: categoryLabel, tone: categoryTone } = useKnowledgeCategories();
+  const me = useQuery({ queryKey: ['auth', 'me'], queryFn: () => authApi.me(), staleTime: 300_000 });
+  const canEditCategories = (me.data?.roles ?? []).some((role) => ['owner', 'admin', 'editor'].includes(role));
 
   const list = useQuery({
     queryKey: ['knowledge', { appliedKeyword, brand, category, status, page }],
@@ -220,7 +226,7 @@ export default function KnowledgePage() {
       render: (row) => (
         <div className={styles.tags}>
           <Tag tone="default">{row.brand}</Tag>
-          <Tag tone={CATEGORY_TONES[row.category] ?? 'default'}>{CATEGORY_LABELS[row.category] ?? row.category}</Tag>
+          <Tag tone={categoryTone(row.category)}>{categoryLabel(row.category)}</Tag>
         </div>
       ),
     },
@@ -333,6 +339,8 @@ export default function KnowledgePage() {
           { key: 'sources', label: '来源管理' },
           { key: 'match', label: '检索测试' },
           { key: 'audit', label: '质量体检' },
+          { key: 'categories', label: '分类设置' },
+          { key: 'transfer', label: '导入导出' },
         ] as const).map((item) => (
           <button
             key={item.key}
@@ -348,6 +356,8 @@ export default function KnowledgePage() {
       {tab === 'sources' ? <SourcesPanel onOpenItem={(name) => { setTab('list'); setKeyword(name); setAppliedKeyword(name); setPage(1); }} /> : null}
       {tab === 'match' ? <MatchPanel /> : null}
       {tab === 'audit' ? <AuditPanel onOpenItem={(title) => { setTab('list'); setKeyword(title); setAppliedKeyword(title); setPage(1); }} /> : null}
+      {tab === 'categories' ? <CategoriesPanel canEdit={canEditCategories} /> : null}
+      {tab === 'transfer' ? <TransferPanel /> : null}
 
       {tab === 'list' ? (
       <Card flush>
@@ -380,7 +390,7 @@ export default function KnowledgePage() {
             <Select
               label="分类"
               name="category"
-              options={[{ value: '', label: '全部分类' }, ...Object.entries(CATEGORY_LABELS).map(([value, label]) => ({ value, label }))]}
+              options={[{ value: '', label: '全部分类' }, ...categories.map((item) => ({ value: item.code, label: `${item.label}${item.count ? `（${item.count}）` : ''}` }))]}
               value={category}
               onChange={(event) => { setCategory(event.target.value); setPage(1); }}
             />
@@ -499,7 +509,7 @@ export default function KnowledgePage() {
             <Select
               label="分类"
               name="category"
-              options={Object.entries(CATEGORY_LABELS).map(([value, label]) => ({ value, label }))}
+              options={categories.map((item) => ({ value: item.code, label: item.label }))}
               value={form.category}
               onChange={(event) => setForm({ ...form, category: event.target.value as KnowledgeCategory })}
             />

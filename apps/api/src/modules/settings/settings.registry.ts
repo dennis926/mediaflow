@@ -1,4 +1,4 @@
-export type SettingGroup = 'ai' | 'platform' | 'publish';
+export type SettingGroup = 'ai' | 'platform' | 'publish' | 'knowledge';
 
 export interface SettingDefinition {
   key: string;
@@ -55,6 +55,15 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
     secret: false,
     envKey: 'AI_API_BASE',
     placeholder: 'https://api.deepseek.com',
+  },
+  {
+    key: 'KB_CATEGORIES',
+    group: 'knowledge',
+    label: '知识库分类配置',
+    description: 'JSON 数组。平时不用手改——在「知识库管理 → 分类设置」里增删改即可，这里显示当前值，也方便整包配置导入导出',
+    secret: false,
+    envKey: 'KB_CATEGORIES',
+    placeholder: '[{"code":"product","label":"产品卖点","tone":"success","description":"配方、规格、工艺"}]',
   },
   {
     key: 'WECHAT_MP_APP_ID',
@@ -153,4 +162,5 @@ export const SETTING_GROUP_LABELS: Record<SettingGroup, string> = {
   ai: 'AI 服务',
   platform: '平台密钥',
   publish: '发布队列',
+  knowledge: '知识库',
 };

@@ -6,6 +6,7 @@ import {
   IsBoolean,
   IsIn,
   IsInt,
+  IsObject,
   IsOptional,
   IsString,
   IsUUID,
@@ -15,16 +16,17 @@ import {
   Min,
 } from 'class-validator';
 import { PlatformCode } from '@mediaflow/shared';
+import { DEFAULT_KNOWLEDGE_CATEGORIES, IsKnowledgeCategory, type KnowledgeCategoryDef } from '../knowledge.categories';
 
-export const KNOWLEDGE_CATEGORIES = ['brand', 'product', 'ingredient', 'compliance', 'faq', 'tone'] as const;
+export const KNOWLEDGE_CATEGORY_CODES = DEFAULT_KNOWLEDGE_CATEGORIES.map((item) => item.code);
 
 export class CreateKnowledgeDto {
   @IsString()
   @Length(1, 80)
   brand!: string;
 
-  @IsIn(KNOWLEDGE_CATEGORIES, { message: '分类不合法' })
-  category!: (typeof KNOWLEDGE_CATEGORIES)[number];
+  @IsKnowledgeCategory()
+  category!: string;
 
   @IsString()
   @Length(1, 200)
@@ -87,8 +89,8 @@ export class QueryKnowledgeDto {
   brand?: string;
 
   @IsOptional()
-  @IsIn(KNOWLEDGE_CATEGORIES)
-  category?: (typeof KNOWLEDGE_CATEGORIES)[number];
+  @IsKnowledgeCategory()
+  category?: string;
 
   @IsOptional()
   @IsIn(['true', 'false'])
@@ -113,8 +115,8 @@ export class ImportKnowledgeDto {
   @Length(1, 80)
   brand!: string;
 
-  @IsIn(KNOWLEDGE_CATEGORIES, { message: '分类不合法' })
-  category!: (typeof KNOWLEDGE_CATEGORIES)[number];
+  @IsKnowledgeCategory()
+  category!: string;
 
   @IsOptional()
   @Type(() => Number)
@@ -158,8 +160,8 @@ export class CommitImportDto {
   @Length(1, 100)
   brand!: string;
 
-  @IsIn(KNOWLEDGE_CATEGORIES)
-  category!: (typeof KNOWLEDGE_CATEGORIES)[number];
+  @IsKnowledgeCategory()
+  category!: string;
 
   @IsOptional()
   @IsInt()
@@ -196,8 +198,8 @@ export class AiGenerateKnowledgeDto {
   @Length(1, 80)
   brand!: string;
 
-  @IsIn(KNOWLEDGE_CATEGORIES, { message: '分类不合法' })
-  category!: (typeof KNOWLEDGE_CATEGORIES)[number];
+  @IsKnowledgeCategory()
+  category!: string;
 
   /** 运营给的要点，几行都行。 */
   @IsString()
@@ -221,8 +223,8 @@ export class AiPolishKnowledgeDto {
   brand?: string;
 
   @IsOptional()
-  @IsIn(KNOWLEDGE_CATEGORIES)
-  category?: (typeof KNOWLEDGE_CATEGORIES)[number];
+  @IsKnowledgeCategory()
+  category?: string;
 
   @IsString()
   @Length(20, 5000)
@@ -270,6 +272,102 @@ export class BatchDeleteKnowledgeDto {
   @ArrayMaxSize(100)
   @IsUUID('4', { each: true })
   ids!: string[];
+}
+
+/** 保存整套分类配置（新增/改名/调色/排序/删除一次性提交）。 */
+export class SaveCategoriesDto {
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(30)
+  @ValidateNested({ each: true })
+  @Type(() => KnowledgeCategoryDto)
+  categories!: KnowledgeCategoryDto[];
+}
+
+export class KnowledgeCategoryDto {
+  @IsString()
+  @Length(1, 30)
+  code!: string;
+
+  @IsString()
+  @Length(1, 20)
+  label!: string;
+
+  @IsIn(['brand', 'success', 'info', 'warning', 'danger', 'default'])
+  tone!: KnowledgeCategoryDef['tone'];
+
+  @IsOptional()
+  @IsString()
+  @Length(0, 100)
+  description?: string;
+}
+
+export class ExportKnowledgeDto {
+  @IsOptional()
+  @IsIn(['json', 'csv', 'markdown'])
+  format?: 'json' | 'csv' | 'markdown';
+
+  @IsOptional()
+  @IsString()
+  @Length(1, 80)
+  brand?: string;
+
+  @IsOptional()
+  @IsString()
+  @Length(1, 60)
+  category?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  includeInactive?: boolean;
+}
+
+/** 导入第二步：行数据 + 字段映射 + 缺省值。 */
+export class CommitImportDataDto {
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(2000)
+  rows!: Array<Record<string, string>>;
+
+  @IsObject()
+  mapping!: Record<string, string | undefined>;
+
+  @IsString()
+  @Length(1, 80)
+  brand!: string;
+
+  @IsString()
+  @Length(1, 60)
+  category!: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(100)
+  priority?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  isActive?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  skipDuplicates?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @Length(1, 255)
+  sourceFileName?: string;
+
+  /** 原生 JSON 里带的分类配置 */
+  @IsOptional()
+  @IsArray()
+  categories?: unknown[];
+
+  @IsOptional()
+  @IsBoolean()
+  applyCategories?: boolean;
 }
 
 export class BatchActivateDto {

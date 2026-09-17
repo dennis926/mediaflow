@@ -1,7 +1,7 @@
 import { AiCompletionRequest, AiCompletionResult, AiProvider } from '../ai.types';
 
 interface ChatCompletionResponse {
-  choices?: Array<{ message?: { content?: string } }>;
+  choices?: Array<{ message?: { content?: string; reasoning_content?: string }; finish_reason?: string }>;
   usage?: { prompt_tokens?: number; completion_tokens?: number };
   error?: { message?: string };
   model?: string;
@@ -53,7 +53,9 @@ export class DeepSeekProvider implements AiProvider {
             { role: 'user', content: request.user },
           ],
           temperature: request.temperature ?? 0.7,
-          max_tokens: request.maxTokens ?? 2048,
+          // Reasoning models (deepseek-flash) spend tokens on thinking first, so the
+          // budget must leave room for the answer; JSON answers need the most.
+          max_tokens: request.maxTokens ?? (request.json ? 4096 : 2048),
           ...(request.json ? { response_format: { type: 'json_object' } } : {}),
         }),
         signal: controller.signal,
@@ -63,8 +65,17 @@ export class DeepSeekProvider implements AiProvider {
       if (!response.ok) {
         throw new Error(`DeepSeek 接口返回 HTTP ${response.status}：${payload.error?.message ?? '未知错误'}`);
       }
-      const text = payload.choices?.[0]?.message?.content;
-      if (!text) throw new Error('DeepSeek 未返回内容');
+      const choice = payload.choices?.[0];
+      const text = choice?.message?.content;
+      if (!text) {
+        const truncated = choice?.finish_reason === 'length';
+        const thought = (choice?.message?.reasoning_content ?? '').length;
+        throw new Error(
+          truncated
+            ? `DeepSeek 只返回了思考过程（${thought} 字）就被 max_tokens 截断，未产出正文：请提高最大输出长度后重试`
+            : 'DeepSeek 未返回内容',
+        );
+      }
 
       return {
         text,

@@ -15,6 +15,10 @@ import type {
   ContentVariant,
   ImportResult,
   KnowledgeAuditReport,
+  KnowledgeCategoryView,
+  KnowledgeExportFile,
+  KnowledgeImportPreview,
+  KnowledgeImportResult,
   KnowledgeDraft,
   KnowledgeItem,
   KnowledgeMatchItem,
@@ -216,6 +220,30 @@ export const knowledgeApi = {
   batchActivate: (ids: string[], isActive: boolean) =>
     api.post<{ updated: number }>('/knowledge/batch-activate', { ids, isActive }),
   batchRemove: (ids: string[]) => api.post<{ removed: number }>('/knowledge/batch-delete', { ids }),
+  /** 分类是配置项：下拉、标签、配色都从这里取 */
+  categories: () => api.get<{ categories: KnowledgeCategoryView[] }>('/knowledge/categories'),
+  saveCategories: (categories: Array<{ code: string; label: string; tone: string; description?: string }>) =>
+    api.put<Array<{ code: string; label: string; tone: string }>>('/knowledge/categories', { categories }),
+  /** 导出知识库：json（原生，含分类配置）/ csv / markdown */
+  exportData: (payload: { format: 'json' | 'csv' | 'markdown'; brand?: string; category?: string; includeInactive?: boolean }) =>
+    api.post<KnowledgeExportFile>('/knowledge/export', payload),
+  /** 导入第一步：解析文件并自动识别字段映射（不写库） */
+  previewImportData: (file: File) => {
+    const form = new FormData();
+    form.append('file', file);
+    return apiUpload<KnowledgeImportPreview>('/knowledge/import-data/preview', form);
+  },
+  /** 导入第二步：按确认后的映射入库（默认跳过重复） */
+  commitImportData: (payload: {
+    rows: Array<Record<string, string>>;
+    mapping: Record<string, string | undefined>;
+    brand: string;
+    category: string;
+    priority?: number;
+    isActive?: boolean;
+    skipDuplicates?: boolean;
+    sourceFileName?: string;
+  }) => api.post<KnowledgeImportResult>('/knowledge/import-data/commit', payload),
   /** 按来源文件分组（导入的资料可按文件整批管理） */
   sources: () => api.get<KnowledgeSourceGroup[]>('/knowledge/sources'),
   /** 知识库体检：重复条目 + 欠打磨条目 */

@@ -1,7 +1,7 @@
 'use client';
 
 import { useMutation } from '@tanstack/react-query';
-import { PLATFORM_LABELS, PlatformCode } from '@mediaflow/shared';
+import { PLATFORM_LABELS } from '@mediaflow/shared';
 import { useState } from 'react';
 import { Banner } from '../../../components/ui/Banner';
 import { Button } from '../../../components/ui/Button';
@@ -11,6 +11,7 @@ import { Input, Select, Textarea } from '../../../components/ui/Field';
 import { Tag } from '../../../components/ui/Tag';
 import { ApiError } from '../../../lib/api/client';
 import { knowledgeApi } from '../../../lib/api/endpoints';
+import { useKnowledgeCategories } from '../../../lib/knowledge';
 import type { KnowledgeMatchItem } from '../../../lib/api/types';
 import { SearchIcon } from '../../../lib/icons';
 import styles from './page.module.css';
@@ -20,6 +21,7 @@ export function MatchPanel() {
   const [form, setForm] = useState({ title: '', body: '', tags: '', platform: '', limit: 5 });
   const [matches, setMatches] = useState<KnowledgeMatchItem[] | null>(null);
   const [error, setError] = useState('');
+  const { label: categoryLabel } = useKnowledgeCategories();
 
   const run = useMutation({
     mutationFn: () =>
@@ -90,7 +92,7 @@ export function MatchPanel() {
                   <div className={styles.chunkHead}>
                     <span className={styles.titleStrong}>{match.title}</span>
                     <Tag tone="brand">{match.brand}</Tag>
-                    <Tag tone="default">{CATEGORY_LABEL[match.category] ?? match.category}</Tag>
+                    <Tag tone="default">{categoryLabel(match.category)}</Tag>
                     <Tag tone="success">得分 {match.score}</Tag>
                   </div>
                   <div className={styles.tags}>
@@ -111,13 +113,3 @@ export function MatchPanel() {
   );
 }
 
-const CATEGORY_LABEL: Record<string, string> = {
-  brand: '品牌定位',
-  product: '产品卖点',
-  ingredient: '成分说明',
-  compliance: '合规红线',
-  faq: '常见问答',
-  tone: '话术基调',
-};
-
-export const MATCH_PLATFORMS = PlatformCode;
