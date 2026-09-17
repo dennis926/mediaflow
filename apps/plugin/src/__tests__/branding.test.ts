@@ -1,5 +1,6 @@
-import { DEFAULT_PLUGIN_BRANDING, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { DEFAULT_PLUGIN_BRANDING, manifestConfig, resolvePluginBranding } from '../manifest.config';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 /** The file shipped next to apps/plugin/package.json. */
