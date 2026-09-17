@@ -3,6 +3,7 @@ import { AuthUser } from '../modules/auth/auth.types';
 import { CurrentUser } from '../modules/auth/current-user.decorator';
 import { toActor } from '../modules/auth/actor.util';
 import { Public } from '../modules/auth/public.decorator';
+import { Roles } from '../modules/auth/roles.decorator';
 import { AdapterDescriptor, PublishService, PublishTaskPage } from './publish.service';
 import { CreatePublishTaskDto } from './dto/create-publish-task.dto';
 import { QueryPublishTaskDto } from './dto/query-publish-task.dto';
@@ -19,6 +20,7 @@ export class PublishController {
     return this.publishService.listAdapters();
   }
 
+  // 队列长度属于只读聚合数据，所有登录角色都可看（下拉选择/工作台需要）
   @Get('queue/stats')
   queueStats(): Promise<{ length: number; pending: number; consumers: number }> {
     return this.publishService.queueStats();
@@ -39,11 +41,13 @@ export class PublishController {
     return this.publishService.get(id);
   }
 
+  @Roles('owner', 'admin', 'editor')
   @Post('tasks/:id/retry')
   retry(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user?: AuthUser): Promise<PublishTask> {
     return this.publishService.retry(id, toActor(user));
   }
 
+  @Roles('owner', 'admin', 'editor')
   @Post('tasks')
   create(@Body() dto: CreatePublishTaskDto, @CurrentUser() user?: AuthUser): Promise<PublishTask[]> {
     return this.publishService.createTasks(dto, toActor(user));

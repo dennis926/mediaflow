@@ -1,7 +1,7 @@
 import { ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { AiFlagType, ContentStatus, PlatformCode, appendAiDisclosure } from '@mediaflow/shared';
-import { Repository } from 'typeorm';
+import { DataSource, EntityManager, Repository } from 'typeorm';
 import { AuditService } from '../../audit/audit.service';
 import { WorkspaceContextService } from '../../common/workspace-context.service';
 import { AiService } from '../ai/ai.service';
@@ -40,6 +40,7 @@ export class ContentService {
     private readonly aiService: AiService,
     private readonly audit: AuditService,
     private readonly workspaceContext: WorkspaceContextService,
+    private readonly dataSource: DataSource,
   ) {}
 
   async create(dto: CreateContentDto, actor: ContentActor): Promise<Content> {
@@ -147,7 +148,11 @@ export class ContentService {
   /** Soft delete: the row is kept, only deleted_at is set, and it disappears from every query. */
   async remove(id: string, actor: ContentActor): Promise<{ id: string; deletedAt: Date }> {
     const content = await this.get(id);
-    await this.contents.softDelete({ id: content.id });
+    // 级联软删平台版本，避免内容删了但版本还留在库里造成统计漂移。
+    await this.dataSource.transaction(async (manager: EntityManager) => {
+      await manager.softDelete(Content, { id: content.id });
+      await manager.softDelete(ContentVariant, { contentId: content.id });
+    });
     await this.record(content, 'content.delete', actor, {});
     const deletedAt = new Date();
     this.logger.log(`已软删除内容：${content.title}`);

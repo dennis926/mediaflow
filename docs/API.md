@@ -130,6 +130,45 @@
 - 保存动作写入审计日志，只记录改了哪些 key，不记录值
 - 角色不足返回 `40300`
 
+### 3.6 用户与角色（仅 owner / admin）
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/users` | 成员列表：`keyword`、`status`、`role`、分页 |
+| GET | `/api/users/roles` | 角色字典（含各角色在用人数） |
+| GET | `/api/users/:id` | 成员详情 |
+| POST | `/api/users` | 创建成员（不传密码则生成临时密码，返回一次） |
+| POST | `/api/users/invite` | 邀请成员（生成一次性临时密码，默认 editor 角色） |
+| PUT | `/api/users/:id` | 修改姓名/手机/头像 |
+| DELETE | `/api/users/:id` | 软删除（仅 owner；保留审计痕迹） |
+| PATCH | `/api/users/:id/roles` | 分配角色（仅 owner） |
+| PATCH | `/api/users/:id/reset-password` | 重置密码（默认生成临时密码并要求首次登录修改） |
+| PATCH | `/api/users/:id/status` | 启用/停用 |
+| POST | `/api/auth/change-password` | 用户自助改密（≥8 位且含字母+数字） |
+
+**防锁死规则**：不能删除/停用自己、不能取消自己的 owner 角色、不能删除或停用最后一个管理员（返回 400/403 并说明原因）。
+
+### 3.7 内容审核工作流
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| POST | `/api/reviews/submit` | 提交审核（标题/正文不能为空；同一内容不允许重复待审） |
+| GET | `/api/reviews` | 审核列表：`status` 筛选，返回内容标题与 `pendingCount` |
+| GET | `/api/reviews/:id` | 审核详情（按工作区过滤） |
+| PUT | `/api/reviews/:id` | 审核决定：`approved` / `rejected` / `changes_requested`（驳回必填原因；**不能审核自己提交的内容**） |
+| GET | `/api/reviews/history/:contentId` | 内容的审核历史（按轮次倒序） |
+| GET | `/api/reviews/checklist` | 检查项字典（合规表述/AI 标识/事实准确性/文字差错/品牌口吻） |
+
+**闭环规则**：审核通过 → 内容变「已通过」；驳回/要求修改 → 退回草稿；已通过的内容被再次编辑 → 自动退回草稿（原审核结论失效）；系统设置开启「发布前必须审核通过」后，未通过的内容不能创建发布任务。
+
+### 3.8 其它
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET/PATCH/POST | `/api/notifications` | 站内通知列表、标记已读、全部已读（发布失败/待人工/审核变动） |
+| GET | `/api/accounts/oauth/:platform/authorize` | 生成平台授权链接（需先配置 AppID） |
+| GET | `/api/accounts/oauth/:platform/callback` | 平台回调：换 token、加密入库、跳回前端 |
+
 ## 4. 任务状态机
 
 ```

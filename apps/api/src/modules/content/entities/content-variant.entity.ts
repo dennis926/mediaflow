@@ -1,4 +1,4 @@
-import { Column, Entity, Index, ManyToOne } from 'typeorm';
+import { Column, DeleteDateColumn, Entity, Index, ManyToOne } from 'typeorm';
 import { AiFlagType, ContentStatus, PlatformCode } from '@mediaflow/shared';
 import { BaseEntity } from '../../../database/base.entity';
 import { Content } from './content.entity';
@@ -42,4 +42,8 @@ export class ContentVariant extends BaseEntity {
 
   @Column({ type: 'jsonb', default: () => "'{}'" })
   extra!: Record<string, unknown>;
+
+  /** 随内容一起软删除，保持父子数据一致。 */
+  @DeleteDateColumn({ type: 'timestamptz' })
+  deletedAt!: Date | null;
 }

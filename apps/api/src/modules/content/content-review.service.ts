@@ -1,7 +1,7 @@
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { ContentStatus } from '@mediaflow/shared';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { AuditService } from '../../audit/audit.service';
 import { WorkspaceContextService } from '../../common/workspace-context.service';
 import { NotificationService } from '../notification/notification.service';
@@ -43,6 +43,7 @@ export class ContentReviewService {
     private readonly audit: AuditService,
     private readonly notifications: NotificationService,
     private readonly workspaceContext: WorkspaceContextService,
+    private readonly dataSource: DataSource,
   ) {}
 
   /** 提交审核：内容必须非空；同一内容不允许存在多条待审核记录。 */
@@ -161,13 +162,19 @@ export class ContentReviewService {
     review.reviewerName = actor.name ?? null;
     review.checklist = (dto.checklist ?? review.checklist ?? {}) as Record<string, boolean>;
     review.decidedAt = new Date();
-    const saved = await this.reviews.save(review);
+
+    const nextStatus =
+      dto.decision === 'approved' ? ContentStatus.Approved : dto.decision === 'rejected' ? ContentStatus.Rejected : ContentStatus.Draft;
+
+    // 审核记录与内容状态必须同时生效，否则会出现"审核已通过但内容仍是草稿"这类不一致。
+    const saved = await this.dataSource.transaction(async (manager) => {
+      const persisted = await manager.save(review);
+      await manager.update(Content, { id: review.contentId }, { status: nextStatus });
+      return persisted;
+    });
 
     const content = await this.contents.findOne({ where: { id: review.contentId } });
     if (content) {
-      const nextStatus =
-        dto.decision === 'approved' ? ContentStatus.Approved : dto.decision === 'rejected' ? ContentStatus.Rejected : ContentStatus.Draft;
-      await this.contents.update({ id: content.id }, { status: nextStatus });
 
       await this.notifications.notify({
         type: `review.${dto.decision}`,

@@ -46,7 +46,17 @@ function buildService(options: { existingVariants?: Partial<ContentVariant>[] } 
     current: vi.fn(async () => ({ tenantId: TENANT_ID, workspaceId: WORKSPACE_ID })),
   } as unknown as WorkspaceContextService;
 
-  return { service: new ContentService(contents, variants, ai, audit, workspaceContext), contents, variants, ai };
+  const manager = { softDelete: vi.fn(async () => ({ affected: 1 })) };
+  const dataSource = {
+    transaction: async (work: (m: typeof manager) => Promise<unknown>) => work(manager),
+  } as unknown as import('typeorm').DataSource;
+  return {
+    service: new ContentService(contents, variants, ai, audit, workspaceContext, dataSource),
+    contents,
+    variants,
+    ai,
+    manager,
+  };
 }
 
 describe('ContentService disclosure', () => {
@@ -93,13 +103,17 @@ describe('ContentService disclosure', () => {
 
   it('soft deletes instead of removing the row', async () => {
     const content = { id: 'c1', title: '标题', tenantId: TENANT_ID, workspaceId: WORKSPACE_ID } as Content;
-    const { service, contents } = buildService();
-    (contents.findOne as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(content);
+    const { service, manager } = buildService();
+    (service as unknown as { contents: { findOne: unknown } }).contents;
+    const contentsRepo = (service as unknown as { contents: { findOne: ReturnType<typeof vi.fn> } }).contents;
+    contentsRepo.findOne.mockResolvedValue(content);
 
     const result = await service.remove('c1', { name: 'tester' });
 
     expect(result.id).toBe('c1');
-    expect(contents.softDelete).toHaveBeenCalledWith({ id: 'c1' });
+    // 内容与其平台版本在同一个事务中软删
+    expect(manager.softDelete).toHaveBeenCalledWith(expect.anything(), { id: 'c1' });
+    expect(manager.softDelete).toHaveBeenCalledWith(expect.anything(), { contentId: 'c1' });
   });
 });
 

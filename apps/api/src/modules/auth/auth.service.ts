@@ -1,10 +1,12 @@
-import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
 import * as bcrypt from 'bcrypt';
 import { Repository } from 'typeorm';
+import { Inject, Injectable, Logger, UnauthorizedException } from '@nestjs/common';
+import Redis from 'ioredis';
 import { AuditService } from '../../audit/audit.service';
+import { REDIS_CLIENT } from '../../redis/redis.constants';
 import { RoleCode } from '../workspace/entities/role.entity';
 import { User } from '../workspace/entities/user.entity';
 import { AuthUser, LoginResult } from './auth.types';
@@ -18,9 +20,38 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly config: ConfigService,
     private readonly audit: AuditService,
+    @Inject(REDIS_CLIENT) private readonly redis: Redis,
   ) {}
 
+  private static readonly MAX_FAILURES = 5;
+  private static readonly LOCK_SECONDS = 15 * 60;
+
+  private failureKey(email: string): string {
+    return `auth:fail:${email.toLowerCase()}`;
+  }
+
+  /** 连续失败锁定，避免密码被暴力破解（此前无任何限流）。 */
+  private async assertNotLocked(email: string): Promise<void> {
+    const raw = await this.redis.get(this.failureKey(email)).catch(() => null);
+    const failures = Number(raw ?? 0);
+    if (failures >= AuthService.MAX_FAILURES) {
+      const ttl = await this.redis.ttl(this.failureKey(email)).catch(() => 0);
+      throw new UnauthorizedException(`连续登录失败次数过多，请 ${Math.max(Math.ceil(ttl / 60), 1)} 分钟后再试`);
+    }
+  }
+
+  private async recordFailure(email: string): Promise<void> {
+    const key = this.failureKey(email);
+    await this.redis
+      .multi()
+      .incr(key)
+      .expire(key, AuthService.LOCK_SECONDS)
+      .exec()
+      .catch(() => undefined);
+  }
+
   async login(email: string, password: string, meta: { ip?: string | null; userAgent?: string | null }): Promise<LoginResult> {
+    await this.assertNotLocked(email);
     const user = await this.users
       .createQueryBuilder('user')
       .addSelect('user.passwordHash')
@@ -29,9 +60,11 @@ export class AuthService {
 
     // Same error for unknown account and wrong password: no account enumeration.
     if (!user || !(await bcrypt.compare(password, user.passwordHash))) {
+      await this.recordFailure(email);
       this.logger.warn(`登录失败：${email}`);
       throw new UnauthorizedException('邮箱或密码不正确');
     }
+    await this.redis.del(this.failureKey(email)).catch(() => undefined);
     if (user.status !== 'active') throw new UnauthorizedException('账号已被禁用，请联系管理员');
 
     await this.users.update({ id: user.id }, { lastLoginAt: new Date() });

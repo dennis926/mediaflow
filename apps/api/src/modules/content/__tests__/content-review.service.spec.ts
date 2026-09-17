@@ -51,7 +51,21 @@ function buildService(options: { content?: Partial<Content> | null; pending?: Pa
     current: vi.fn(async () => ({ tenantId: TENANT_ID, workspaceId: WORKSPACE_ID })),
   } as unknown as WorkspaceContextService;
 
-  return { service: new ContentReviewService(contents, reviews, audit, notifications, workspaceContext), contents, reviews, audit, notifications };
+  const manager = {
+    save: vi.fn(async (value: unknown) => ({ ...(value as object), id: 'review-1' })),
+    update: vi.fn(async () => ({ affected: 1 })),
+  };
+  const dataSource = {
+    transaction: async (work: (m: typeof manager) => Promise<unknown>) => work(manager),
+  } as unknown as import('typeorm').DataSource;
+  return {
+    service: new ContentReviewService(contents, reviews, audit, notifications, workspaceContext, dataSource),
+    contents,
+    reviews,
+    audit,
+    notifications,
+    manager,
+  };
 }
 
 const draft = { id: 'c1', title: '标题', body: '正文', status: 'draft', workspaceId: WORKSPACE_ID } as unknown as Content;
@@ -105,18 +119,20 @@ describe('ContentReviewService 审核决定', () => {
   });
 
   it('通过后内容状态变为已通过并通知提交人', async () => {
-    const { service, contents, notifications } = buildService({ content: draft, review: pendingReview() });
+    const { service, manager, notifications } = buildService({ content: draft, review: pendingReview() });
     await service.decide('r1', { decision: 'approved' }, { id: 'reviewer-1', name: '审核人' });
 
-    expect(contents.update).toHaveBeenCalledWith({ id: 'c1' }, { status: 'approved' });
+    // 审核记录与内容状态在同一个事务里更新
+    expect(manager.save).toHaveBeenCalled();
+    expect(manager.update).toHaveBeenCalledWith(expect.anything(), { id: 'c1' }, { status: 'approved' });
     expect(notifications.notify).toHaveBeenCalledWith(expect.objectContaining({ type: 'review.approved' }));
   });
 
   it('要求修改会把内容退回草稿', async () => {
-    const { service, contents } = buildService({ content: draft, review: pendingReview() });
+    const { service, manager } = buildService({ content: draft, review: pendingReview() });
     await service.decide('r1', { decision: 'changes_requested', comments: '请补充数据来源' }, { id: 'reviewer-1', name: '审核人' });
 
-    expect(contents.update).toHaveBeenCalledWith({ id: 'c1' }, { status: 'draft' });
+    expect(manager.update).toHaveBeenCalledWith(expect.anything(), { id: 'c1' }, { status: 'draft' });
   });
 
   it('已处理的审核记录不能重复处理', async () => {

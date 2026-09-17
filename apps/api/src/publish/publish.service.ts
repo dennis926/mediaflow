@@ -112,11 +112,17 @@ export class PublishService {
       const adapter = this.adapterFor(platform);
       if (dto.socialAccountId) await this.requireAccount(dto.socialAccountId, platform, scope.workspaceId);
 
+      // 优先使用该平台的 AI 适配版本（没有则回落到主内容），否则多平台适配等于白做。
+      const variant = await this.variants.findOne({
+        where: { contentId: content.id, platform, workspaceId: scope.workspaceId },
+      });
+
       const isFuture = Boolean(scheduledAt && scheduledAt.getTime() > Date.now());
       const task = this.tasks.create({
         tenantId: scope.tenantId,
         workspaceId: scope.workspaceId,
         contentId: content.id,
+        contentVariantId: variant?.id ?? null,
         platform,
         publishMode: adapter.capabilities.mode,
         socialAccountId: dto.socialAccountId ?? null,
@@ -140,7 +146,12 @@ export class PublishService {
         actorName: actor.name ?? null,
         ip: actor.ip ?? null,
         userAgent: actor.userAgent ?? null,
-        payload: { platform, contentId: content.id, scheduledAt: saved.scheduledAt?.toISOString() ?? null },
+        payload: {
+          platform,
+          contentId: content.id,
+          variantId: variant?.id ?? null,
+          scheduledAt: saved.scheduledAt?.toISOString() ?? null,
+        },
       });
       created.push(saved);
     }
