@@ -23,11 +23,20 @@ function SourceTag({ item }: { item: SettingView }) {
   return <Tag tone="warning">未配置</Tag>;
 }
 
+/** JSON 类配置的提示：告诉运营"还有更友好的界面"或者"怎么改"。 */
+const JSON_HINTS: Record<string, string> = {
+  COMPLIANCE_RULES: 'JSON 数组：每项含 category/terms/reason/suggestion/penalty',
+  AI_PLATFORM_GUIDANCE: 'JSON 对象：平台代码 → 写作要求',
+  KB_CATEGORIES: '也可在「知识库管理 → 分类设置」里可视化编辑',
+};
+
 export default function SettingsPage() {
   const queryClient = useQueryClient();
   const [draft, setDraft] = useState<RowState>({});
   const [feedback, setFeedback] = useState<{ tone: 'success' | 'danger' | 'info'; text: string } | null>(null);
   const [testResult, setTestResult] = useState<AiTestResult | null>(null);
+  /** 配置项变多后按分组切换，避免一页滚动几千像素 */
+  const [activeGroup, setActiveGroup] = useState('');
 
   const settings = useQuery({ queryKey: ['settings'], queryFn: () => settingsApi.list() });
 
@@ -112,7 +121,23 @@ export default function SettingsPage() {
           <SkeletonRows rows={6} />
         </Card>
       ) : (
-        settings.data?.map((group) => (
+        <>
+          <div className={styles.tabs}>
+            {(settings.data ?? []).map((group) => (
+              <button
+                key={group.group}
+                type="button"
+                className={`${styles.tab} ${(activeGroup || settings.data?.[0]?.group) === group.group ? styles.tabActive : ''}`}
+                onClick={() => setActiveGroup(group.group)}
+              >
+                {group.label}
+                {dirtyItems.some((item) => group.items.some((entry) => entry.key === item.key)) ? ' •' : ''}
+              </button>
+            ))}
+          </div>
+          {(settings.data ?? [])
+            .filter((group) => group.group === (activeGroup || settings.data?.[0]?.group))
+            .map((group) => (
           <Card
             key={group.group}
             title={group.label}
@@ -152,15 +177,14 @@ export default function SettingsPage() {
                         onChange={(event) => setDraft({ ...draft, [item.key]: event.target.value })}
                       />
                     )}
-                    {item.key === 'PUBLISH_WORKER_ENABLED' || item.key === 'PUBLISH_RETRY_INTERVAL_MS' ? (
-                      <Tag tone="warning">重启后生效</Tag>
-                    ) : null}
+                    {JSON_HINTS[item.key] ? <Tag tone="info">{JSON_HINTS[item.key]}</Tag> : null}
                   </div>
                 </div>
               ))}
             </div>
           </Card>
-        ))
+            ))}
+        </>
       )}
 
       {testResult?.ok ? (

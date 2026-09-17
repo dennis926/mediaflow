@@ -59,3 +59,33 @@
     gap: var(--mf-space-2);
   }
 }
+
+.tabs {
+  display: flex;
+  gap: var(--mf-space-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--mf-space-4);
+}
+
+.tab {
+  min-height: var(--mf-size-touch-min);
+  padding: 0 var(--mf-space-4);
+  border: 1px solid var(--mf-color-border-subtle);
+  border-radius: var(--mf-radius-md);
+  background: var(--mf-color-surface-raised);
+  color: var(--mf-color-text-secondary);
+  font-size: var(--mf-font-size-sm);
+  cursor: pointer;
+}
+
+.tab:hover {
+  border-color: var(--mf-color-brand-500);
+  color: var(--mf-color-brand-600);
+}
+
+.tabActive {
+  border-color: var(--mf-color-brand-500);
+  background: var(--mf-color-brand-50);
+  color: var(--mf-color-brand-700);
+  font-weight: var(--mf-font-weight-medium);
+}
