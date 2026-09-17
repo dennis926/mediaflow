@@ -590,7 +590,7 @@ function ContentEditor({ mode }: { mode: 'new' | 'edit' }): React.JSX.Element {
           ) : (
             <Banner tone="warning">
               <span>
-                没有匹配到品牌资料。可到「品牌知识库」补充该主题的标签/关键词，或提高资料优先级，AI 就会照着品牌口径写。
+                没有匹配到品牌资料。可到「知识库管理」补充该主题的标签/关键词，或提高资料优先级，AI 就会照着品牌口径写。
               </span>
             </Banner>
           )}
