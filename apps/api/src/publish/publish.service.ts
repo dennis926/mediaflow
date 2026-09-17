@@ -418,6 +418,51 @@ export class PublishService {
     return this.get(task.id);
   }
 
+  /**
+   * Cancel a task that has not been published yet. Tasks in flight must not be cancelled
+   * (the worker may already have called the platform) and published ones are final.
+   */
+  async cancel(id: string, actor: PublishActor): Promise<PublishTask> {
+    const task = await this.tasks.findOne({ where: { id } });
+    if (!task) throw new NotFoundException('发布任务不存在');
+
+    const cancelable: PublishTaskStatus[] = [
+      PublishTaskStatus.Pending,
+      PublishTaskStatus.Scheduled,
+      PublishTaskStatus.Failed,
+      PublishTaskStatus.ManualRequired,
+    ];
+    if (!cancelable.includes(task.status)) {
+      throw new BadRequestException(`当前状态（${task.status}）不能取消：发布中或已发布的任务无法取消`);
+    }
+
+    const previousStatus = task.status;
+    await this.tasks.save({
+      ...task,
+      status: PublishTaskStatus.Canceled,
+      finishedAt: new Date(),
+      lockedBy: null,
+      lockedAt: null,
+      errorMessage: null,
+    });
+
+    await this.audit.record({
+      action: 'publish_task.cancel',
+      resourceType: 'publish_task',
+      resourceId: task.id,
+      tenantId: task.tenantId,
+      workspaceId: task.workspaceId,
+      actorId: actor.id ?? null,
+      actorName: actor.name ?? null,
+      ip: actor.ip ?? null,
+      userAgent: actor.userAgent ?? null,
+      payload: { platform: task.platform, previousStatus },
+    });
+
+    this.logger.log(`任务 ${task.id} 已取消（原状态 ${previousStatus}）`);
+    return this.get(task.id);
+  }
+
   /** Tasks the sweeper must re-enqueue: due scheduled tasks and pending tasks that are not waiting for a human. */
   async findDueTasks(limit = 20): Promise<PublishTask[]> {
     const now = new Date();

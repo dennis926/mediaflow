@@ -136,3 +136,55 @@ describe('PublishService guards', () => {
     expect(() => service.adapterFor(PlatformCode.Baijiahao)).not.toThrow();
   });
 });
+
+describe('PublishService cancel', () => {
+  it('cancels a task that has not been published yet', async () => {
+    const { service, tasks } = buildService({ content: null });
+    (tasks.findOne as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: 'task-9',
+      status: PublishTaskStatus.Scheduled,
+      platform: PlatformCode.WechatMp,
+      tenantId: TENANT_ID,
+      workspaceId: WORKSPACE_ID,
+      extra: {},
+    } as unknown as PublishTask);
+    (tasks.findOne as unknown as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({
+        id: 'task-9',
+        status: PublishTaskStatus.Scheduled,
+        platform: PlatformCode.WechatMp,
+        tenantId: TENANT_ID,
+        workspaceId: WORKSPACE_ID,
+        extra: {},
+      } as unknown as PublishTask)
+      // second call is the service reloading the row after saving
+      .mockResolvedValueOnce({
+        id: 'task-9',
+        status: PublishTaskStatus.Canceled,
+        platform: PlatformCode.WechatMp,
+        tenantId: TENANT_ID,
+        workspaceId: WORKSPACE_ID,
+        extra: {},
+      } as unknown as PublishTask);
+
+    const result = await service.cancel('task-9', { id: 'u1', name: '运营' });
+
+    expect(tasks.save).toHaveBeenCalledWith(expect.objectContaining({ status: PublishTaskStatus.Canceled }));
+    expect(result.status).toBe(PublishTaskStatus.Canceled);
+  });
+
+  it('refuses to cancel a task that is already in flight', async () => {
+    const { service, tasks } = buildService({ content: null });
+    (tasks.findOne as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: 'task-10',
+      status: PublishTaskStatus.Publishing,
+      platform: PlatformCode.Douyin,
+      tenantId: TENANT_ID,
+      workspaceId: WORKSPACE_ID,
+      extra: {},
+    } as unknown as PublishTask);
+
+    await expect(service.cancel('task-10', { id: 'u1' })).rejects.toBeInstanceOf(BadRequestException);
+    expect(tasks.save).not.toHaveBeenCalled();
+  });
+});

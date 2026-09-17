@@ -56,6 +56,7 @@
 | GET | `/api/publish/tasks` | 任务列表，支持 `status`、`platform`、`page`、`pageSize` |
 | GET | `/api/publish/tasks/:id` | 任务详情（含内容、平台版本） |
 | POST | `/api/publish/tasks` | 创建发布任务（支持多平台、定时） |
+| DELETE | `/api/publish/tasks/:id` | **取消发布任务**（owner/admin/editor）；待发布/排期中/失败/待人工发布可取消，发布中或已发布返回 400 |
 | POST | `/api/publish/tasks/:id/retry` | 重试任务（failed / manual_required / canceled / pending 可重试）：重置状态与尝试次数并重新入队 |
 
 `POST /api/publish/tasks` 请求体：

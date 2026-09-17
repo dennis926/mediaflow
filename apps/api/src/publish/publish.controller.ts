@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
 import { AuthUser } from '../modules/auth/auth.types';
 import { CurrentUser } from '../modules/auth/current-user.decorator';
 import { toActor } from '../modules/auth/actor.util';
@@ -45,6 +45,13 @@ export class PublishController {
   @Post('tasks/:id/retry')
   retry(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user?: AuthUser): Promise<PublishTask> {
     return this.publishService.retry(id, toActor(user));
+  }
+
+  /** 取消尚未发布的任务（发布中/已发布的不可取消）。 */
+  @Roles('owner', 'admin', 'editor')
+  @Delete('tasks/:id')
+  cancel(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user?: AuthUser): Promise<PublishTask> {
+    return this.publishService.cancel(id, toActor(user));
   }
 
   @Roles('owner', 'admin', 'editor')

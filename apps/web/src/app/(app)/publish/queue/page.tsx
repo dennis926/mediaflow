@@ -27,6 +27,14 @@ const TABS: Array<{ key: string; label: string; status?: PublishTaskStatus }> = 
   { key: 'manual', label: '待人工发布', status: PublishTaskStatus.ManualRequired },
   { key: 'published', label: '已发布', status: PublishTaskStatus.Published },
   { key: 'failed', label: '失败', status: PublishTaskStatus.Failed },
+  { key: 'canceled', label: '已取消', status: PublishTaskStatus.Canceled },
+];
+
+const CANCELABLE: string[] = [
+  PublishTaskStatus.Pending,
+  PublishTaskStatus.Scheduled,
+  PublishTaskStatus.Failed,
+  PublishTaskStatus.ManualRequired,
 ];
 
 const RETRYABLE: string[] = [
@@ -47,6 +55,18 @@ export default function PublishQueuePage() {
   const tasks = useQuery({
     queryKey: ['publish', 'queue', tab.key, page],
     queryFn: () => publishApi.tasks({ status: tab.status, page, pageSize: 10 }),
+  });
+
+  const cancel = useMutation({
+    mutationFn: (id: string) => publishApi.cancel(id),
+    onSuccess: (task) => {
+      setFeedback({ tone: 'info', text: '任务已取消，发布任务不会再执行' });
+      setDetail(task);
+      void queryClient.invalidateQueries({ queryKey: ['publish', 'queue'] });
+      void queryClient.invalidateQueries({ queryKey: ['publish', 'calendar'] });
+    },
+    onError: (error: unknown) =>
+      setFeedback({ tone: 'danger', text: error instanceof ApiError ? error.message : '取消失败' }),
   });
 
   const retry = useMutation({
@@ -93,7 +113,7 @@ export default function PublishQueuePage() {
     {
       key: 'actions',
       title: '操作',
-      width: '170px',
+      width: '220px',
       align: 'right',
       render: (row) => (
         <div className={styles.actions}>
@@ -109,6 +129,15 @@ export default function PublishQueuePage() {
             onClick={() => retry.mutate(row.id)}
           >
             重试
+          </Button>
+          <Button
+            variant="text"
+            size="sm"
+            disabled={!CANCELABLE.includes(row.status)}
+            loading={cancel.isPending && cancel.variables === row.id}
+            onClick={() => cancel.mutate(row.id)}
+          >
+            取消
           </Button>
         </div>
       ),
@@ -184,6 +213,14 @@ export default function PublishQueuePage() {
           <>
             <Button variant="secondary" onClick={() => setDetail(null)}>
               关闭
+            </Button>
+            <Button
+              variant="secondary"
+              loading={cancel.isPending}
+              disabled={!detail || !CANCELABLE.includes(detail.status)}
+              onClick={() => detail && cancel.mutate(detail.id)}
+            >
+              取消任务
             </Button>
             <Button
               loading={retry.isPending}

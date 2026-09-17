@@ -111,6 +111,7 @@ export const publishApi = {
     api.post<PublishTask[]>('/publish/tasks', payload),
   adapters: () => api.get<AdapterDescriptor[]>('/publish/adapters'),
   retry: (id: string) => api.post<PublishTask>(`/publish/tasks/${id}/retry`),
+  cancel: (id: string) => api.delete<PublishTask>(`/publish/tasks/${id}`),
   calendar: (weekStart?: string) => api.get<CalendarDay[]>('/publish/calendar', { weekStart }),
   queueStats: () => api.get<QueueStats>('/publish/queue/stats'),
 };

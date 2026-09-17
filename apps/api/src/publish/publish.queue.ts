@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import Redis from 'ioredis';
 import { REDIS_CLIENT } from '../redis/redis.constants';
 
@@ -35,10 +35,24 @@ function parseStreamEntries(raw: unknown): StreamEntry[] {
 }
 
 @Injectable()
-export class PublishQueueService {
+export class PublishQueueService implements OnModuleDestroy {
   private readonly logger = new Logger(PublishQueueService.name);
+  /** Reads block up to BLOCK_MS; on the shared connection that would stall every other Redis command. */
+  private readonly reader: Redis;
 
-  constructor(@Inject(REDIS_CLIENT) private readonly redis: Redis) {}
+  constructor(@Inject(REDIS_CLIENT) private readonly redis: Redis) {
+    const duplicate = (this.redis as { duplicate?: () => Redis }).duplicate;
+    this.reader = typeof duplicate === 'function' ? this.redis.duplicate() : this.redis;
+  }
+
+  async onModuleDestroy(): Promise<void> {
+    if (this.reader === this.redis) return;
+    try {
+      await this.reader.quit();
+    } catch {
+      this.reader.disconnect();
+    }
+  }
 
   async ensureGroup(): Promise<void> {
     try {
@@ -56,7 +70,7 @@ export class PublishQueueService {
   }
 
   async read(consumer: string, count: number, blockMs: number): Promise<StreamEntry[]> {
-    const raw = await this.redis.xreadgroup('GROUP', PUBLISH_GROUP, consumer, 'COUNT', count, 'BLOCK', blockMs, 'STREAMS', PUBLISH_STREAM, '>');
+    const raw = await this.reader.xreadgroup('GROUP', PUBLISH_GROUP, consumer, 'COUNT', count, 'BLOCK', blockMs, 'STREAMS', PUBLISH_STREAM, '>');
     return parseStreamEntries(raw);
   }
 
