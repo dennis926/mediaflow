@@ -2,6 +2,7 @@ import { PlatformCode, PublishMode } from '@mediaflow/shared';
 import { requestJson } from '../http';
 import {
   AdapterCapabilities,
+  AdapterProfile,
   AdapterContext,
   AdapterCredentials,
   AnalyticsSnapshot,
@@ -64,15 +65,30 @@ export class DouyinAdapter implements ChannelAdapter {
 
   constructor(private readonly context: AdapterContext = {}) {}
 
-  buildAuthorizeUrl(redirectUri: string, state: string): string {
+  buildAuthorizeUrl(appId: string, redirectUri: string, state: string): string {
     const query = new URLSearchParams({
-      client_key: 'CLIENT_KEY_PLACEHOLDER',
+      client_key: appId,
       response_type: 'code',
       scope: 'user_info,video.create',
       redirect_uri: redirectUri,
       state,
     });
     return `${DOUYIN_API}/platform/oauth/connect/?${query.toString()}`;
+  }
+
+  async fetchProfile(credentials: AdapterCredentials): Promise<AdapterProfile> {
+    if (!credentials.accessToken || !credentials.openId) throw new Error('缺少 access_token 或 open_id，无法获取抖音账号资料');
+    const response = await requestJson<TokenEnvelope<{ data?: { nickname?: string; avatar?: string }; description?: string }>>(
+      this.context,
+      `${DOUYIN_API}/oauth/userinfo/`,
+      { query: { open_id: credentials.openId, access_token: credentials.accessToken } },
+    );
+    const data = (response.data as { data?: { nickname?: string; avatar?: string } } | undefined)?.data;
+    return {
+      platformAccountId: credentials.openId,
+      accountName: data?.nickname ?? '抖音账号',
+      avatarUrl: data?.avatar,
+    };
   }
 
   async auth(credentials: AdapterCredentials): Promise<AdapterCredentials> {

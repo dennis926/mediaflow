@@ -2,6 +2,7 @@ import { PlatformCode, PublishMode } from '@mediaflow/shared';
 import { requestJson } from '../http';
 import {
   AdapterCapabilities,
+  AdapterProfile,
   AdapterContext,
   AdapterCredentials,
   AnalyticsSnapshot,
@@ -71,6 +72,36 @@ export class WechatMpAdapter implements ChannelAdapter {
   };
 
   constructor(private readonly context: AdapterContext = {}) {}
+
+  /**
+   * 微信网页授权（服务号，需已认证）。这是「微信快捷登录」的入口，
+   * 平台只校验域名归属文件，不要求域名备案。
+   */
+  buildAuthorizeUrl(appId: string, redirectUri: string, state: string): string {
+    const query = new URLSearchParams({
+      appid: appId,
+      redirect_uri: redirectUri,
+      response_type: 'code',
+      scope: 'snsapi_userinfo',
+      state,
+    });
+    return `https://open.weixin.qq.com/connect/oauth2/authorize?${query.toString()}#wechat_redirect`;
+  }
+
+  async fetchProfile(credentials: AdapterCredentials): Promise<AdapterProfile> {
+    if (!credentials.accessToken || !credentials.openId) throw new Error('缺少 access_token 或 openid，无法获取微信用户资料');
+    const response = await requestJson<{ openid?: string; nickname?: string; headimgurl?: string; errcode?: number; errmsg?: string }>(
+      this.context,
+      `${WECHAT_API}/sns/userinfo`,
+      { query: { access_token: credentials.accessToken, openid: credentials.openId, lang: 'zh_CN' } },
+    );
+    this.assertOk(response.errcode, response.errmsg);
+    return {
+      platformAccountId: response.openid ?? credentials.openId,
+      accountName: response.nickname ?? '微信公众号用户',
+      avatarUrl: response.headimgurl,
+    };
+  }
 
   async auth(credentials: AdapterCredentials): Promise<AdapterCredentials> {
     if (!credentials.code) throw new Error('缺少 OAuth code，无法完成公众号授权');

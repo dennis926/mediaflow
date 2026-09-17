@@ -24,6 +24,7 @@ import { SettingsService } from '../modules/settings/settings.service';
 import { ContentVariant } from '../modules/content/entities/content-variant.entity';
 import { Content } from '../modules/content/entities/content.entity';
 import { SocialAccount } from '../modules/platform/entities/social-account.entity';
+import { SocialAccountService } from '../modules/platform/social-account.service';
 import { PublishTask } from '../modules/publish/entities/publish-task.entity';
 import { CHANNEL_REGISTRY } from './channel-registry.provider';
 import { CreatePublishTaskDto } from './dto/create-publish-task.dto';
@@ -58,6 +59,7 @@ export class PublishService {
     @InjectRepository(Content) private readonly contents: Repository<Content>,
     @InjectRepository(ContentVariant) private readonly variants: Repository<ContentVariant>,
     @InjectRepository(SocialAccount) private readonly accounts: Repository<SocialAccount>,
+    private readonly socialAccounts: SocialAccountService,
     @Inject(CHANNEL_REGISTRY) private readonly registry: ChannelAdapterRegistry,
     private readonly queue: PublishQueueService,
     private readonly audit: AuditService,
@@ -242,20 +244,15 @@ export class PublishService {
     const appSecret = await this.credential(platform, 'appSecret');
     if (!socialAccountId) return { appId, appSecret };
 
-    const account = await this.accounts
-      .createQueryBuilder('account')
-      .addSelect(['account.accessToken', 'account.refreshToken'])
-      .where('account.id = :id', { id: socialAccountId })
-      .getOne();
-    if (!account) throw new NotFoundException('绑定的平台账号不存在');
-
-    const openId = typeof account.extra?.openId === 'string' ? account.extra.openId : undefined;
+    // Tokens are stored encrypted, so decrypt before handing them to the adapter.
+    const stored = await this.socialAccounts.credentialsOf(socialAccountId);
+    const openId = typeof stored.extra?.openId === 'string' ? stored.extra.openId : undefined;
     return {
       appId,
       appSecret,
-      accessToken: account.accessToken ?? undefined,
-      refreshToken: account.refreshToken ?? undefined,
-      expiresAt: account.tokenExpiresAt?.toISOString(),
+      accessToken: stored.accessToken ?? undefined,
+      refreshToken: stored.refreshToken ?? undefined,
+      expiresAt: stored.expiresAt?.toISOString(),
       openId,
     };
   }

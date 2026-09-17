@@ -4,6 +4,7 @@ import { ObjectLiteral, Repository } from 'typeorm';
 import { describe, expect, it, vi } from 'vitest';
 import { AuditService } from '../../audit/audit.service';
 import { SettingsService } from '../../modules/settings/settings.service';
+import { SocialAccountService } from '../../modules/platform/social-account.service';
 import { WorkspaceContextService } from '../../common/workspace-context.service';
 import { ContentVariant } from '../../modules/content/entities/content-variant.entity';
 import { Content } from '../../modules/content/entities/content.entity';
@@ -38,6 +39,9 @@ function buildService(options: {
     get: vi.fn(() => ({ platform: PlatformCode.WechatMp, capabilities: { mode: 'manual' } })),
     list: vi.fn(() => []),
   };
+  const socialAccounts = {
+    credentialsOf: vi.fn(async () => ({ accessToken: null, refreshToken: null, expiresAt: null, extra: {} })),
+  } as unknown as SocialAccountService;
   const settings = {
     get: vi.fn(async () => null),
     getNumber: vi.fn(async (_key: string, fallback: number) => fallback),
@@ -49,6 +53,7 @@ function buildService(options: {
     contents,
     variants,
     accounts,
+    socialAccounts,
     registry as never,
     queue,
     audit,

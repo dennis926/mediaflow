@@ -1,8 +1,10 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useSearchParams } from 'next/navigation';
+import { Suspense } from 'react';
 import { PLATFORM_LABELS, PlatformCode, PublishMode } from '@mediaflow/shared';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Banner } from '../../../components/ui/Banner';
 import { Button } from '../../../components/ui/Button';
 import { Card } from '../../../components/ui/Card';
@@ -29,9 +31,14 @@ const MODE_LABELS: Record<PublishMode, string> = {
   [PublishMode.Manual]: '人工发布',
 };
 
-export default function AccountsPage() {
+/** Platforms that support the browser OAuth flow; others bind with the extension or a manual token. */
+const OAUTH_PLATFORMS: PlatformCode[] = [PlatformCode.WechatMp, PlatformCode.Douyin, PlatformCode.Xiaohongshu];
+
+function AccountsPageInner() {
   const queryClient = useQueryClient();
+  const searchParams = useSearchParams();
   const [bindOpen, setBindOpen] = useState(false);
+  const [oauthOpen, setOauthOpen] = useState(false);
   const [pendingUnbind, setPendingUnbind] = useState<AccountView | null>(null);
   const [feedback, setFeedback] = useState<{ tone: 'success' | 'danger' | 'info'; text: string } | null>(null);
   const [form, setForm] = useState({
@@ -43,6 +50,28 @@ export default function AccountsPage() {
   });
 
   const accounts = useQuery({ queryKey: ['accounts'], queryFn: () => accountsApi.list() });
+
+  useEffect(() => {
+    const result = searchParams.get('oauth');
+    if (!result) return;
+    const platform = searchParams.get('platform') ?? '';
+    const message = searchParams.get('message') ?? '';
+    setFeedback(
+      result === 'ok'
+        ? { tone: 'success', text: `${PLATFORM_LABELS[platform as PlatformCode] ?? platform} 授权成功：${message}` }
+        : { tone: 'danger', text: `授权未完成：${message || '请重试'}` },
+    );
+    void queryClient.invalidateQueries({ queryKey: ['accounts'] });
+  }, [searchParams, queryClient]);
+
+  const authorize = useMutation({
+    mutationFn: (platform: string) => accountsApi.oauthAuthorize(platform),
+    onSuccess: (result) => {
+      window.location.href = result.authorizeUrl;
+    },
+    onError: (error: unknown) =>
+      setFeedback({ tone: 'danger', text: error instanceof ApiError ? error.message : '无法发起授权' }),
+  });
 
   const bind = useMutation({
     mutationFn: () =>
@@ -92,9 +121,14 @@ export default function AccountsPage() {
       <Card
         title="已绑定平台账号"
         extra={
-          <Button size="sm" icon={<PlusIcon width={15} height={15} />} onClick={() => setBindOpen(true)}>
-            绑定账号
-          </Button>
+          <div style={{ display: 'flex', gap: 'var(--mf-space-2)', flexWrap: 'wrap' }}>
+            <Button size="sm" variant="secondary" onClick={() => setOauthOpen(true)}>
+              平台授权绑定
+            </Button>
+            <Button size="sm" icon={<PlusIcon width={15} height={15} />} onClick={() => setBindOpen(true)}>
+              手动填写令牌
+            </Button>
+          </div>
         }
       >
         {accounts.isLoading ? (
@@ -119,6 +153,16 @@ export default function AccountsPage() {
                   {account.tokenExpiresAt ? `令牌到期：${formatDateTime(account.tokenExpiresAt)}` : '绑定时间：' + formatDateTime(account.createdAt)}
                 </span>
                 <div className={styles.actions}>
+                  {OAUTH_PLATFORMS.includes(account.platform) ? (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      loading={authorize.isPending && authorize.variables === account.platform}
+                      onClick={() => authorize.mutate(account.platform)}
+                    >
+                      重新授权
+                    </Button>
+                  ) : null}
                   <Button
                     size="sm"
                     variant="text"
@@ -141,13 +185,51 @@ export default function AccountsPage() {
             description="绑定后发布任务才能带账号执行：公众号用于取数，抖音/小红书用于 API 发布。"
             icon={<AccountIcon width={22} height={22} />}
             action={
-              <Button size="sm" icon={<PlusIcon width={15} height={15} />} onClick={() => setBindOpen(true)}>
-                绑定账号
-              </Button>
+              <div style={{ display: 'flex', gap: 'var(--mf-space-2)' }}>
+                <Button size="sm" variant="secondary" onClick={() => setOauthOpen(true)}>
+                  平台授权绑定
+                </Button>
+                <Button size="sm" icon={<PlusIcon width={15} height={15} />} onClick={() => setBindOpen(true)}>
+                  手动填写令牌
+                </Button>
+              </div>
             }
           />
         )}
       </Card>
+
+      <Dialog
+        open={oauthOpen}
+        title="平台授权绑定"
+        onClose={() => setOauthOpen(false)}
+        footer={
+          <Button variant="secondary" onClick={() => setOauthOpen(false)}>
+            关闭
+          </Button>
+        }
+      >
+        <Banner tone="info">
+          <span>
+            点击平台后会跳转到官方授权页，授权成功后自动回到本页并绑定账号。需先在「系统设置 → 平台密钥」填写对应平台的 AppID/Secret；
+            平台后台登记的回调地址为：<code>{`{站点地址}/api/accounts/oauth/<平台>/callback`}</code>
+          </span>
+        </Banner>
+        {OAUTH_PLATFORMS.map((platform) => (
+          <div key={platform} className={styles.oauthRow}>
+            <span>{PLATFORM_LABELS[platform]}</span>
+            <Button
+              size="sm"
+              loading={authorize.isPending && authorize.variables === platform}
+              onClick={() => authorize.mutate(platform)}
+            >
+              去授权
+            </Button>
+          </div>
+        ))}
+        <Banner tone="warning">
+          <span>公众号只能人工发布（平台规则），授权用于取数；抖音/小红书授权后可直接发布；视频号等仍走浏览器插件。</span>
+        </Banner>
+      </Dialog>
 
       <Dialog
         open={bindOpen}
@@ -229,5 +311,13 @@ export default function AccountsPage() {
         <span>解绑后，该账号的发布任务将无法执行，已发布内容不受影响。确定解绑「{pendingUnbind?.accountName}」吗？</span>
       </Dialog>
     </>
+  );
+}
+
+export default function AccountsPage() {
+  return (
+    <Suspense fallback={<Card title="已绑定平台账号"><SkeletonRows rows={3} /></Card>}>
+      <AccountsPageInner />
+    </Suspense>
   );
 }

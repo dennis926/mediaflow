@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
+import { ScheduleModule } from '@nestjs/schedule';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuditModule } from './audit/audit.module';
@@ -16,6 +17,7 @@ import { ContentModule } from './modules/content/content.module';
 import { buildNestDataSourceOptions } from './database/database.config';
 import { DatabaseModule } from './database/database.module';
 import { HealthController } from './health/health.controller';
+import { ChannelModule } from './publish/channel.module';
 import { PublishModule } from './publish/publish.module';
 import { RedisModule } from './redis/redis.module';
 
@@ -29,10 +31,12 @@ import { RedisModule } from './redis/redis.module';
       inject: [ConfigService],
       useFactory: buildNestDataSourceOptions,
     }),
+    ScheduleModule.forRoot(),
     DatabaseModule,
     RedisModule,
     CommonModule,
     AuditModule,
+    ChannelModule,
     PublishModule,
     AiModule,
     ContentModule,

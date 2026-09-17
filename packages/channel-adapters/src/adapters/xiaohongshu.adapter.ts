@@ -2,6 +2,7 @@ import { PlatformCode, PublishMode } from '@mediaflow/shared';
 import { requestJson } from '../http';
 import {
   AdapterCapabilities,
+  AdapterProfile,
   AdapterContext,
   AdapterCredentials,
   AnalyticsSnapshot,
@@ -51,6 +52,26 @@ export class XiaohongshuAdapter implements ChannelAdapter {
     private readonly context: AdapterContext = {},
     private readonly baseUrl?: string,
   ) {}
+
+  buildAuthorizeUrl(appId: string, redirectUri: string, state: string): string {
+    const query = new URLSearchParams({ app_id: appId, redirect_uri: redirectUri, response_type: 'code', state });
+    return `${this.requireBaseUrl()}/api/v1/oauth/authorize?${query.toString()}`;
+  }
+
+  async fetchProfile(credentials: AdapterCredentials): Promise<AdapterProfile> {
+    if (!credentials.accessToken) throw new Error('缺少 access_token，无法获取小红书账号资料');
+    const response = await requestJson<{ data?: { user_id?: string; nickname?: string; avatar?: string }; msg?: string }>(
+      this.context,
+      `${this.requireBaseUrl()}/api/v1/user/info`,
+      { method: 'POST', body: { access_token: credentials.accessToken } },
+    );
+    const data = response.data;
+    return {
+      platformAccountId: data?.user_id ?? 'unknown',
+      accountName: data?.nickname ?? '小红书账号',
+      avatarUrl: data?.avatar,
+    };
+  }
 
   async auth(credentials: AdapterCredentials): Promise<AdapterCredentials> {
     if (!credentials.code) throw new Error('缺少 OAuth code，无法完成小红书授权');

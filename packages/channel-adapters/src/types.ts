@@ -75,6 +75,12 @@ export interface AdapterContext {
   now?: () => Date;
 }
 
+export interface AdapterProfile {
+  platformAccountId: string;
+  accountName: string;
+  avatarUrl?: string;
+}
+
 /** Every platform integration must implement this contract. */
 export interface ChannelAdapter {
   readonly platform: PlatformCode;
@@ -84,4 +90,9 @@ export interface ChannelAdapter {
   refreshToken(credentials: AdapterCredentials): Promise<AdapterCredentials>;
   publish(payload: PublishPayload, credentials: AdapterCredentials): Promise<PublishResult>;
   fetchAnalytics(postId: string, credentials: AdapterCredentials): Promise<AnalyticsSnapshot>;
+
+  /** Platforms with an OAuth flow expose the authorize URL so the UI can offer「去授权」. */
+  buildAuthorizeUrl?(appId: string, redirectUri: string, state: string): string;
+  /** Reads the bound account profile right after the code exchange. */
+  fetchProfile?(credentials: AdapterCredentials): Promise<AdapterProfile>;
 }

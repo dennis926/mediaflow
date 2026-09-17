@@ -96,3 +96,14 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+.oauthRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--mf-space-3);
+  padding: var(--mf-space-3) var(--mf-space-4);
+  border: 1px solid var(--mf-color-border-base);
+  border-radius: var(--mf-radius-md);
+  font-size: var(--mf-font-size-md);
+}

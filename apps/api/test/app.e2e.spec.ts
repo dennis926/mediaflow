@@ -11,7 +11,16 @@ import { ResponseInterceptor } from '../src/common/interceptors/response.interce
  * End-to-end flow against the real database and Redis:
  * login -> create content -> AI adapt -> create publish task -> read queue status -> notifications.
  */
-describe('MediaFlow 端到端流程', () => {
+/**
+ * Credentials never live in the repository: export them before running the suite, e.g.
+ *   E2E_ADMIN_EMAIL=you@example.com E2E_ADMIN_PASSWORD=... pnpm --filter @mediaflow/api test
+ * Without them the suite is skipped (unit tests still run).
+ */
+const ADMIN_EMAIL = process.env.E2E_ADMIN_EMAIL ?? '';
+const ADMIN_PASSWORD = process.env.E2E_ADMIN_PASSWORD ?? '';
+const credentialsReady = Boolean(ADMIN_EMAIL && ADMIN_PASSWORD);
+
+describe.skipIf(!credentialsReady)('MediaFlow 端到端流程', () => {
   let app: INestApplication;
   let token = '';
   let contentId = '';
@@ -42,7 +51,7 @@ describe('MediaFlow 端到端流程', () => {
 
     const login = await request(app.getHttpServer())
       .post('/api/auth/login')
-      .send({ email: 'admin@mediaflow.local', password: '4S4shpgCFHyCFM' })
+      .send({ email: ADMIN_EMAIL, password: ADMIN_PASSWORD })
       .expect(201);
     expect(login.body.data.accessToken).toBeTruthy();
     token = login.body.data.accessToken as string;

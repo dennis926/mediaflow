@@ -113,7 +113,16 @@ export const analyticsApi = {
     ),
 };
 
+export interface OAuthAuthorizeResult {
+  platform: string;
+  authorizeUrl: string;
+  state: string;
+  redirectUri: string;
+}
+
 export const accountsApi = {
+  /** Returns the platform authorize URL to open (needs the AppID configured in 系统设置). */
+  oauthAuthorize: (platform: string) => api.get<OAuthAuthorizeResult>(`/accounts/oauth/${platform}/authorize`),
   list: (platform?: string) => api.get<AccountView[]>('/accounts', { platform }),
   bind: (payload: {
     platform: string;

@@ -118,6 +118,36 @@ location ^~ / {
 | `AUTH_ENFORCED` | 生产保持 `true` |
 | `PUBLISH_WORKER_ENABLED` | 是否启动发布 Worker |
 
+## 6.5 OAuth 授权绑定配置
+
+1. 在平台后台创建应用并在「回调/授权域名」处登记（每个平台一条）：
+   - 微信服务号：公众号后台 → 设置与开发 → 网页授权域名（上传 `MP_verify_xxx.txt` 到站点根目录，**不校验 ICP 备案**）
+   - 抖音开放平台：应用 → 授权回调地址（**要求域名已备案**）
+   - 小红书开放平台：应用 → 回调地址
+2. 回调地址格式：`https://<站点>/api/accounts/oauth/<平台>/callback`
+   - 平台标识：`wechat_mp`、`douyin`、`xiaohongshu`
+3. `.env` 里的 `OAUTH_CALLBACK_BASE` 必须与平台登记的一致（默认取站点地址）；换域名只改这一行 + 平台后台。
+4. 令牌刷新任务每 30 分钟检查一次即将过期的账号（`@nestjs/schedule`）。
+
+> 域名建议：微信网页授权不要求备案，用香港站域名即可；**抖音要求回调域名备案**，
+> 这种场景把回调域名换成已备案域名（如 `mf.liangyijianye.com`），只改 `OAUTH_CALLBACK_BASE` 与平台后台即可。
+
+## 6.6 nginx 缓存（重要坑）
+
+宝塔的 `/www/server/nginx/conf/proxy.conf` 在 **http 层全局开启了 `proxy_cache cache_one`**，
+而 Next 的静态页响应头是 `s-maxage=31536000` → **nginx 会把整页缓存一年**，表现为"部署了新版本但页面还是旧的"。
+
+本项目已在 vhost 中显式关闭：
+
+```nginx
+location ^~ /api/ { proxy_cache off; proxy_no_cache 1; proxy_cache_bypass 1; ... }
+location ^~ /   { proxy_cache off; proxy_no_cache 1; proxy_cache_bypass 1; ... }
+```
+
+同时 `next.config.mjs` 里加了响应头策略：页面 `no-store`，`/_next/static/**` `immutable`。
+
+发布后若仍看到旧页面：`rm -rf /www/server/nginx/proxy_cache_dir/*` 然后 `nginx -s reload`。
+
 ## 7. 升级与回滚
 
 ```bash
@@ -139,6 +169,8 @@ curl -s https://<域名>/api/health
 tail -f /var/log/mediaflow-api.log
 curl -s -H "Authorization: Bearer <token>" https://<域名>/api/publish/queue/stats   # 队列长度/未确认/消费者
 pnpm check:secrets            # 发布仓库前的密钥自检
+# 端到端测试需要管理员凭据（仓库里不含密码）：
+E2E_ADMIN_EMAIL=you@example.com E2E_ADMIN_PASSWORD=... pnpm --filter @mediaflow/api test
 ```
 
 | 现象 | 排查 |
