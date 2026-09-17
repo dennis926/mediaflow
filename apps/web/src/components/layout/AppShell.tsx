@@ -10,13 +10,16 @@ import {
   AnalyticsIcon,
   CalendarIcon,
   ContentIcon,
+  ReviewIcon,
   DashboardIcon,
   LogoutIcon,
   MenuIcon,
   PublishIcon,
+  WarningIcon,
   SettingsIcon,
 } from '../../lib/icons';
 import { NotificationBell } from './NotificationBell';
+import { PasswordDialog } from './PasswordDialog';
 import { Sidebar, type SidebarItem } from '../ui/Sidebar';
 import { Button } from '../ui/Button';
 import styles from './AppShell.module.css';
@@ -26,13 +29,17 @@ const NAV_ITEMS: SidebarItem[] = [
   { href: '/content', label: '内容中心', icon: <ContentIcon /> },
   { href: '/publish/queue', label: '发布队列', icon: <PublishIcon /> },
   { href: '/publish/calendar', label: '排期日历', icon: <CalendarIcon /> },
+  { href: '/reviews', label: '内容审核', icon: <ReviewIcon /> },
   { href: '/analytics', label: '数据中心', icon: <AnalyticsIcon /> },
   { href: '/accounts', label: '账号管理', icon: <AccountIcon /> },
+  { href: '/users', label: '用户管理', icon: <AccountIcon /> },
   { href: '/settings', label: '系统设置', icon: <SettingsIcon /> },
 ];
 
 const PAGE_META: Array<{ prefix: string; title: string; subtitle: string }> = [
   { prefix: '/settings', title: '系统设置', subtitle: 'AI 与平台密钥、发布队列参数' },
+  { prefix: '/reviews', title: '内容审核', subtitle: '提交审核与审核决定' },
+  { prefix: '/users', title: '用户管理', subtitle: '成员、角色与密码管理' },
   { prefix: '/analytics', title: '数据中心', subtitle: '核心指标、趋势与账号排行' },
   { prefix: '/accounts', title: '账号管理', subtitle: '绑定与管理平台账号' },
   { prefix: '/dashboard', title: '工作台', subtitle: '内容与发布整体概况' },
@@ -53,6 +60,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [ready, setReady] = useState(false);
+  const [passwordOpen, setPasswordOpen] = useState(false);
   const meta = resolveMeta(pathname);
 
   useEffect(() => {
@@ -92,6 +100,18 @@ export function AppShell({ children }: { children: ReactNode }) {
         </>
       ) : null}
 
+      {user?.mustChangePassword ? (
+        <div className={styles.mustChange}>
+          <WarningIcon width={16} height={16} />
+          <span>你正在使用管理员分配的临时密码，请立即修改后再继续使用。</span>
+          <Button size="sm" onClick={() => setPasswordOpen(true)}>
+            立即修改
+          </Button>
+        </div>
+      ) : null}
+
+      <PasswordDialog open={passwordOpen} onClose={() => setPasswordOpen(false)} />
+
       <div className={styles.main}>
         <header className={styles.topbar}>
           <button type="button" className={styles.menuButton} onClick={() => setDrawerOpen(true)} aria-label="打开导航">
@@ -110,6 +130,9 @@ export function AppShell({ children }: { children: ReactNode }) {
               </span>
               <span className={styles.avatar}>{(user?.displayName ?? 'M').slice(0, 1)}</span>
             </span>
+            <Button variant="secondary" size="sm" onClick={() => setPasswordOpen(true)}>
+              修改密码
+            </Button>
             <Button variant="secondary" size="sm" icon={<LogoutIcon width={16} height={16} />} onClick={signOut}>
               退出
             </Button>

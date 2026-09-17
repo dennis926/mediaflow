@@ -44,6 +44,7 @@ export class AuthService {
       workspaceId: user.workspaceId,
       roles,
       isSuperAdmin: user.isSuperAdmin,
+      mustChangePassword: user.mustChangePassword,
     };
 
     const expiresIn = this.config.get<string>('JWT_ACCESS_EXPIRES') ?? '2h';
@@ -88,6 +89,7 @@ export class AuthService {
       workspaceId: user.workspaceId,
       roles: await this.roleCodesOf(user.id),
       isSuperAdmin: user.isSuperAdmin,
+      mustChangePassword: user.mustChangePassword,
     };
   }
 

@@ -1,4 +1,4 @@
-import { Column, Entity, Index, JoinTable, ManyToMany, ManyToOne } from 'typeorm';
+import { Column, DeleteDateColumn, Entity, Index, JoinTable, ManyToMany, ManyToOne } from 'typeorm';
 import { BaseEntity } from '../../../database/base.entity';
 import { Role } from './role.entity';
 import { Workspace } from './workspace.entity';
@@ -32,6 +32,17 @@ export class User extends BaseEntity {
 
   @Column({ type: 'timestamptz', nullable: true })
   lastLoginAt!: Date | null;
+
+  /** Set when an admin creates/resets a password: the user must change it on first login. */
+  @Column({ type: 'boolean', default: false })
+  mustChangePassword!: boolean;
+
+  @Column({ type: 'uuid', nullable: true })
+  invitedBy!: string | null;
+
+  /** Soft delete: the row stays for audit purposes but the account can no longer log in. */
+  @DeleteDateColumn({ type: 'timestamptz' })
+  deletedAt!: Date | null;
 
   @ManyToOne(() => Workspace, (workspace) => workspace.users, { onDelete: 'CASCADE' })
   workspace?: Workspace;

@@ -43,6 +43,7 @@ export class JwtAuthGuard implements CanActivate {
           workspaceId: payload.workspaceId,
           roles: payload.roles,
           isSuperAdmin: payload.isSuperAdmin,
+          mustChangePassword: false,
         };
         return true;
       } catch {

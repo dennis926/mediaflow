@@ -164,3 +164,18 @@
     display: none;
   }
 }
+
+.mustChange {
+  display: flex;
+  align-items: center;
+  gap: var(--mf-space-3);
+  padding: var(--mf-space-3) var(--mf-space-6);
+  background: var(--mf-color-warning-50);
+  border-bottom: 1px solid var(--mf-color-warning-500);
+  color: var(--mf-color-warning-700);
+  font-size: var(--mf-font-size-sm);
+}
+
+.mustChange > span {
+  flex: 1;
+}

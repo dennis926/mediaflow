@@ -13,8 +13,22 @@ export class ContentReview extends BaseEntity {
   @Column({ type: 'uuid' })
   contentId!: string;
 
+  /** Who submitted the content; used to block self-review (职责分离). */
+  @Column({ type: 'uuid', nullable: true })
+  submittedBy!: string | null;
+
+  @Column({ type: 'varchar', length: 80, nullable: true })
+  submittedByName!: string | null;
+
+  /** Who made the decision; used to block self-review (职责分离). */
   @Column({ type: 'uuid', nullable: true })
   reviewerId!: string | null;
+
+  @Column({ type: 'varchar', length: 80, nullable: true })
+  reviewerName!: string | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  decidedAt!: Date | null;
 
   @Column({ type: 'int', default: 1 })
   round!: number;

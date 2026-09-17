@@ -2,6 +2,9 @@ import type { AiFlagType, ContentStatus, PlatformCode, PublishTaskStatus } from 
 import { api } from './client';
 import type {
   AccountRankingRow,
+  ReviewItem,
+  RoleItem,
+  UserItem,
   AccountView,
   AdaptResult,
   CalendarDay,
@@ -23,9 +26,38 @@ import type {
   QueueStats,
 } from './types';
 
+export const usersApi = {
+  list: (query: { keyword?: string; status?: string; role?: string; page?: number; pageSize?: number }) =>
+    api.get<Paged<UserItem>>('/users', { ...query }),
+  roles: () => api.get<RoleItem[]>('/users/roles'),
+  create: (payload: { email: string; displayName: string; phone?: string; roleCodes?: string[] }) =>
+    api.post<{ user: UserItem; tempPassword: string | null }>('/users', payload),
+  invite: (payload: { email: string; displayName: string; roleCodes?: string[] }) =>
+    api.post<{ user: UserItem; tempPassword: string }>('/users/invite', payload),
+  update: (id: string, payload: { displayName?: string; phone?: string; avatarUrl?: string }) =>
+    api.put<UserItem>(`/users/${id}`, payload),
+  remove: (id: string) => api.delete<{ id: string }>(`/users/${id}`),
+  updateRoles: (id: string, roleCodes: string[]) => api.patch<UserItem>(`/users/${id}/roles`, { roleCodes }),
+  resetPassword: (id: string) => api.patch<{ success: true; tempPassword: string | null }>(`/users/${id}/reset-password`, {}),
+  updateStatus: (id: string, status: 'active' | 'disabled') => api.patch<UserItem>(`/users/${id}/status`, { status }),
+};
+
+export const reviewsApi = {
+  list: (query: { status?: string; page?: number; pageSize?: number } = {}) =>
+    api.get<Paged<ReviewItem> & { pendingCount: number }>('/reviews', { ...query }),
+  detail: (id: string) => api.get<ReviewItem>(`/reviews/${id}`),
+  history: (contentId: string) => api.get<ReviewItem[]>(`/reviews/history/${contentId}`),
+  submit: (contentId: string, comments?: string) => api.post<ReviewItem>('/reviews/submit', { contentId, comments }),
+  decide: (id: string, payload: { decision: 'approved' | 'rejected' | 'changes_requested'; comments?: string; checklist?: Record<string, boolean> }) =>
+    api.put<ReviewItem>(`/reviews/${id}`, payload),
+  checklist: () => api.get<{ labels: Record<string, string> }>('/reviews/checklist'),
+};
+
 export const authApi = {
   login: (email: string, password: string) => api.post<LoginResult>('/auth/login', { email, password }),
   me: () => api.get<AuthUser>('/auth/me'),
+  changePassword: (currentPassword: string, newPassword: string) =>
+    api.post<{ success: true }>('/auth/change-password', { currentPassword, newPassword }),
 };
 
 export interface ContentQuery {

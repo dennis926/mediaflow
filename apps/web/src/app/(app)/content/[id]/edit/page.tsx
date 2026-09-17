@@ -13,7 +13,7 @@ import { Input, Select, Textarea } from '../../../../../components/ui/Field';
 import { SkeletonRows } from '../../../../../components/ui/Skeleton';
 import { Tag } from '../../../../../components/ui/Tag';
 import { ApiError } from '../../../../../lib/api/client';
-import { aiApi, contentApi, publishApi } from '../../../../../lib/api/endpoints';
+import { aiApi, contentApi, publishApi, reviewsApi } from '../../../../../lib/api/endpoints';
 import type { ComplianceReport } from '../../../../../lib/api/types';
 import { AI_FLAG_LABELS, CONTENT_STATUS_LABELS, formatDateTime } from '../../../../../lib/format';
 import { CheckIcon, PlusIcon, SparkleIcon, TrashIcon, WarningIcon } from '../../../../../lib/icons';
@@ -78,6 +78,24 @@ function ContentEditor({ mode }: { mode: 'new' | 'edit' }): React.JSX.Element {
     queryKey: ['content', contentId],
     queryFn: () => contentApi.get(contentId as string),
     enabled: Boolean(contentId),
+  });
+
+  const reviews = useQuery({
+    queryKey: ['reviews', 'history', contentId],
+    queryFn: () => reviewsApi.history(contentId as string),
+    enabled: Boolean(contentId),
+  });
+
+  const submitReview = useMutation({
+    mutationFn: () => reviewsApi.submit(contentId as string, form.summary.trim() || undefined),
+    onSuccess: () => {
+      setFeedback({ tone: 'success', text: '已提交审核，审核人会收到通知' });
+      void queryClient.invalidateQueries({ queryKey: ['reviews', 'history', contentId] });
+      void queryClient.invalidateQueries({ queryKey: ['reviews'] });
+      void queryClient.invalidateQueries({ queryKey: ['content', contentId] });
+    },
+    onError: (error: unknown) =>
+      setFeedback({ tone: 'danger', text: error instanceof ApiError ? error.message : '提交审核失败' }),
   });
 
   const variants = useQuery({
@@ -317,6 +335,15 @@ function ContentEditor({ mode }: { mode: 'new' | 'edit' }): React.JSX.Element {
               <Button variant="secondary" icon={<PlusIcon width={16} height={16} />} onClick={() => setPublishOpen(true)} disabled={!contentId}>
                 创建发布任务
               </Button>
+              <Button
+                variant="secondary"
+                icon={<CheckIcon width={16} height={16} />}
+                loading={submitReview.isPending}
+                disabled={!contentId || content.data?.status === 'reviewing'}
+                onClick={() => submitReview.mutate()}
+              >
+                {content.data?.status === 'reviewing' ? '审核中…' : '提交审核'}
+              </Button>
               {content.data?.aiGenerated && !content.data.aiFlagChecked ? (
                 <Button variant="text" loading={flagCheck.isPending} onClick={() => flagCheck.mutate()}>
                   标记 AI 标识已复核
@@ -423,6 +450,30 @@ function ContentEditor({ mode }: { mode: 'new' | 'edit' }): React.JSX.Element {
               </div>
             </div>
           </Card>
+
+          {reviews.data && reviews.data.length > 0 ? (
+            <Card
+              title="审核记录"
+              extra={<Tag tone={content.data?.status === 'approved' ? 'success' : content.data?.status === 'rejected' ? 'danger' : 'warning'}>
+                {content.data?.status === 'approved' ? '已通过' : content.data?.status === 'rejected' ? '已驳回' : '进行中'}
+              </Tag>}
+            >
+              {reviews.data.slice(0, 3).map((review) => (
+                <div key={review.id} className={styles.historyItem}>
+                  <div style={{ display: 'flex', gap: 'var(--mf-space-2)', alignItems: 'center', flexWrap: 'wrap' }}>
+                    <Tag tone={review.status === 'approved' ? 'success' : review.status === 'rejected' ? 'danger' : 'info'}>
+                      第 {review.round} 轮 · {review.status === 'approved' ? '通过' : review.status === 'rejected' ? '驳回' : review.status === 'changes_requested' ? '要求修改' : '待审核'}
+                    </Tag>
+                    <span className={styles.counter}>
+                      {review.submittedByName ? `提交：${review.submittedByName}` : ''}
+                      {review.reviewerName ? ` · 审核：${review.reviewerName}` : ''}
+                    </span>
+                  </div>
+                  {review.comments ? <span className={styles.variantBody}>{review.comments}</span> : null}
+                </div>
+              ))}
+            </Card>
+          ) : null}
 
           <Card
             title="平台版本"

@@ -135,3 +135,42 @@ export interface AccountRankingRow {
   comments: number;
   shares: number;
 }
+
+export interface UserItem {
+  id: string;
+  email: string;
+  displayName: string;
+  phone: string | null;
+  avatarUrl: string | null;
+  status: 'active' | 'disabled';
+  isSuperAdmin: boolean;
+  mustChangePassword: boolean;
+  roles: string[];
+  lastLoginAt: string | null;
+  invitedBy: string | null;
+  createdAt: string;
+}
+
+export interface RoleItem {
+  code: string;
+  name: string;
+  description: string | null;
+  permissions: string[];
+  memberCount: number;
+}
+
+export interface ReviewItem {
+  id: string;
+  contentId: string;
+  contentTitle?: string;
+  round: number;
+  status: 'pending' | 'approved' | 'rejected' | 'changes_requested';
+  comments: string | null;
+  checklist: Record<string, boolean>;
+  submittedBy: string | null;
+  submittedByName: string | null;
+  reviewerId: string | null;
+  reviewerName: string | null;
+  decidedAt: string | null;
+  createdAt: string;
+}

@@ -10,6 +10,7 @@ import { RolesGuard } from './modules/auth/roles.guard';
 import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { NotificationModule } from './modules/notification/notification.module';
 import { PlatformModule } from './modules/platform/platform.module';
+import { WorkspaceModule } from './modules/workspace/workspace.module';
 import { SettingsModule } from './modules/settings/settings.module';
 import { CommonModule } from './common/common.module';
 import { AiModule } from './modules/ai/ai.module';
@@ -45,6 +46,7 @@ import { RedisModule } from './redis/redis.module';
     NotificationModule,
     AnalyticsModule,
     PlatformModule,
+    WorkspaceModule,
   ],
   controllers: [HealthController],
   providers: [

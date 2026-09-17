@@ -113,6 +113,18 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
     envKey: 'XIAOHONGSHU_API_BASE',
   },
   {
+    key: 'REQUIRE_CONTENT_APPROVAL',
+    group: 'publish',
+    label: '发布前必须审核通过',
+    description: '开启后，只有审核状态为「已通过」的内容才能创建发布任务',
+    secret: false,
+    envKey: 'REQUIRE_CONTENT_APPROVAL',
+    options: [
+      { value: 'true', label: '开启（推荐多人协作）' },
+      { value: 'false', label: '关闭（小团队直接发布）' },
+    ],
+  },
+  {
     key: 'PUBLISH_WORKER_ENABLED',
     group: 'publish',
     label: '启用发布 Worker',

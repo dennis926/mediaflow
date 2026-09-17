@@ -10,6 +10,7 @@ import {
 } from '@mediaflow/channel-adapters';
 import {
   AiFlagType,
+  ContentStatus,
   PlatformCode,
   PLATFORM_LABELS,
   PUBLISH_RETRY,
@@ -95,6 +96,11 @@ export class PublishService {
 
     if (content.aiGenerated && !content.aiFlagChecked) {
       throw new BadRequestException('AI 生成内容发布前必须通过 AI 标识校验（ai_flag_checked）');
+    }
+
+    // Optional gate: when enabled, only approved content may be published.
+    if ((await this.settings.getBoolean('REQUIRE_CONTENT_APPROVAL', false)) && content.status !== ContentStatus.Approved) {
+      throw new BadRequestException('该内容尚未审核通过，不能创建发布任务（可在系统设置中关闭「发布前必须审核通过」）');
     }
 
     const platforms = [...new Set(dto.platforms)];

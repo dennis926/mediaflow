@@ -43,6 +43,16 @@ export function PublishIcon(props: IconProps) {
   );
 }
 
+export function ReviewIcon(props: IconProps) {
+  return (
+    <svg {...BASE} {...props}>
+      <path d="M6 3h9l4 4v14H6z" />
+      <path d="M9 12.5l2 2 4-4" />
+      <path d="M9 18h6" />
+    </svg>
+  );
+}
+
 export function AnalyticsIcon(props: IconProps) {
   return (
     <svg {...BASE} {...props}>

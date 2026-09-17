@@ -1,0 +1,112 @@
+.toolbar {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--mf-space-3);
+  flex-wrap: wrap;
+}
+
+.search {
+  flex: 1 1 14rem;
+  min-width: 10rem;
+}
+
+.filter {
+  width: 9rem;
+}
+
+.spacer {
+  margin-left: auto;
+}
+
+.userCell {
+  display: flex;
+  align-items: center;
+  gap: var(--mf-space-3);
+}
+
+.avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--mf-space-8);
+  height: var(--mf-space-8);
+  border-radius: var(--mf-radius-full);
+  background: var(--mf-color-brand-50);
+  color: var(--mf-color-brand-600);
+  font-weight: var(--mf-font-weight-semibold);
+  flex-shrink: 0;
+}
+
+.meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.email {
+  font-size: var(--mf-font-size-xs);
+  color: var(--mf-color-text-tertiary);
+}
+
+.tags {
+  display: flex;
+  gap: var(--mf-space-2);
+  flex-wrap: wrap;
+}
+
+.actions {
+  display: flex;
+  gap: var(--mf-space-1);
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.roles {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--mf-space-3);
+  margin-top: var(--mf-space-4);
+}
+
+.roleCard {
+  padding: var(--mf-space-3) var(--mf-space-4);
+  border: 1px solid var(--mf-color-border-subtle);
+  border-radius: var(--mf-radius-md);
+  background: var(--mf-color-bg-body);
+  display: flex;
+  flex-direction: column;
+  gap: var(--mf-space-1);
+}
+
+.roleName {
+  font-weight: var(--mf-font-weight-medium);
+}
+
+.secret {
+  font-family: var(--mf-font-family-mono);
+  font-size: var(--mf-font-size-lg);
+  padding: var(--mf-space-2) var(--mf-space-3);
+  border-radius: var(--mf-radius-md);
+  background: var(--mf-color-bg-hover);
+  user-select: all;
+}
+
+@media (max-width: 1023px) {
+  .roles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .roles {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .filter {
+    width: 100%;
+  }
+  .spacer {
+    margin-left: 0;
+    width: 100%;
+  }
+}

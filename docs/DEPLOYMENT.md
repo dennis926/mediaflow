@@ -148,6 +148,11 @@ location ^~ /   { proxy_cache off; proxy_no_cache 1; proxy_cache_bypass 1; ... }
 
 发布后若仍看到旧页面：`rm -rf /www/server/nginx/proxy_cache_dir/*` 然后 `nginx -s reload`。
 
+## 6.7 用户与审核（迁移说明）
+
+`UserReviewEnhancements` 迁移新增：`users.must_change_password` / `users.invited_by` / `users.deleted_at`、`content_reviews.submitted_by` / `submitted_name` / `reviewer_name` / `decided_at`。
+升级后旧数据自动兼容（新列可空）。
+
 ## 7. 升级与回滚
 
 ```bash

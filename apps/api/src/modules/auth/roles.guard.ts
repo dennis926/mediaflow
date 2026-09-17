@@ -14,9 +14,10 @@ export class RolesGuard implements CanActivate {
 
     const request = context.switchToHttp().getRequest<{ user?: AuthUser }>();
     const user = request.user;
-    if (!user) throw new ForbiddenException('缺少登录信息');
+    if (!user) throw new ForbiddenException('缺少登录信息，请重新登录');
     if (user.isSuperAdmin) return true;
     if (user.roles.some((role) => required.includes(role))) return true;
-    throw new ForbiddenException('当前角色无权修改系统配置');
+    // 提示里带上需要的角色，方便排查（此前写死"无权修改系统配置"，在非设置类接口上会误导）
+    throw new ForbiddenException(`当前角色（${user.roles.join('、') || '无角色'}）无权执行该操作，需要：${required.join('、')}`);
   }
 }

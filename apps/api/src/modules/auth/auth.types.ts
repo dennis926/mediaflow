@@ -8,6 +8,8 @@ export interface AuthUser {
   workspaceId: string;
   roles: RoleCode[];
   isSuperAdmin: boolean;
+  /** true 时前端应提示用户立即修改密码（管理员重置/邀请生成的临时密码）。 */
+  mustChangePassword: boolean;
 }
 
 export interface LoginResult {

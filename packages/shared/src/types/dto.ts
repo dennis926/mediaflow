@@ -73,6 +73,8 @@ export interface AuthUserDto {
   workspaceId: string;
   roles: string[];
   isSuperAdmin: boolean;
+  /** 管理员重置/邀请生成的临时密码需要首次登录后修改。 */
+  mustChangePassword?: boolean;
 }
 
 export interface LoginResultDto {
