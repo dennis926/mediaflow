@@ -212,7 +212,7 @@ export interface ImportChunkPreview {
 }
 
 export interface ImportResult {
-  parsed: { fileName: string; fileType: string; charCount: number; warnings: string[] };
+  parsed: { fileName: string; fileType: string; charCount: number; warnings: string[]; ocrSections?: number };
   storedPath: string;
   chunks: ImportChunkPreview[];
   created: Array<{ id: string; title: string; isActive: boolean }>;

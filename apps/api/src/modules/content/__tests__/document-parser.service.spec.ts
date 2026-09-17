@@ -1,12 +1,15 @@
 import { BadRequestException } from '@nestjs/common';
 import { describe, expect, it } from 'vitest';
 import { DocumentParserService } from '../document-parser.service';
+import { OcrService } from '../ocr.service';
 
-const parser = new DocumentParserService();
+const ocr = new OcrService();
+const parser = new DocumentParserService(ocr);
 
 describe('DocumentParserService', () => {
-  it('拒绝不支持的类型与超大文件', () => {
+  it('拒绝不支持的类型、老版 .ppt 与超大文件', () => {
     expect(() => parser.assertSupported('a.exe', 100)).toThrow(BadRequestException);
+    expect(() => parser.assertSupported('slides.ppt', 100)).toThrow(/另存为 \.pptx/);
     expect(() => parser.assertSupported('a.pdf', 20 * 1024 * 1024)).toThrow(BadRequestException);
     expect(() => parser.assertSupported('a.txt', 0)).toThrow(BadRequestException);
   });
@@ -44,6 +47,32 @@ describe('DocumentParserService', () => {
       return chunk.content.startsWith(tail.slice(0, 50));
     });
     expect(overlapped).toBe(true);
+  });
+
+  it('解析 pptx：按页提取文本框文字', async () => {
+    const zip = new (await import('jszip')).default();
+    zip.file('ppt/slides/slide1.xml', '<p:sld xmlns:a="x"><a:t>卿尔美畅享版</a:t><a:t>五种益生元复配</a:t></p:sld>');
+    zip.file('ppt/slides/slide2.xml', '<p:sld xmlns:a="x"><a:t>规格 8 克乘 12 袋</a:t></p:sld>');
+    zip.file('ppt/presentation.xml', '<x/>');
+    const buffer = await zip.generateAsync({ type: 'nodebuffer' });
+
+    const result = await parser.parse('产品介绍.pptx', buffer);
+
+    expect(result.fileType).toBe('.pptx');
+    expect(result.text).toContain('第 1 页');
+    expect(result.text).toContain('五种益生元复配');
+    expect(result.text).toContain('第 2 页');
+  });
+
+  it('本地 OCR 能识别图片中的中文（不调用 AI）', async () => {
+    // 用 canvas 无关的最小 PNG 验证服务可用性：空白图应返回"未识别到文字"而不是崩溃
+    const png = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+      'base64',
+    );
+    const result = await ocr.recognize(png, 'unit-test');
+    expect(result.ok).toBe(false);
+    expect(result.error).toBeTruthy();
   });
 
   it('切片会生成可读标题', () => {

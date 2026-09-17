@@ -260,7 +260,7 @@ export class KnowledgeService {
     dto: ImportKnowledgeDto,
     actor: KnowledgeActor,
   ): Promise<{
-    parsed: Pick<ParsedDocument, 'fileName' | 'fileType' | 'charCount' | 'warnings'>;
+    parsed: Pick<ParsedDocument, 'fileName' | 'fileType' | 'charCount' | 'warnings' | 'ocrSections'>;
     storedPath: string;
     chunks: Array<KnowledgeChunk & { preview: string }>;
     created: Array<{ id: string; title: string; isActive: boolean }>;
@@ -316,6 +316,7 @@ export class KnowledgeService {
         fileType: parsed.fileType,
         charCount: parsed.charCount,
         warnings: parsed.warnings,
+        ocrSections: parsed.ocrSections,
       },
       storedPath: `uploads/knowledge/${storedName}`,
       chunks: chunks.map((chunk) => ({ ...chunk, preview: chunk.content.slice(0, 120) })),

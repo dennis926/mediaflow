@@ -173,10 +173,21 @@
 | PUT | `/api/knowledge/:id` | 更新（含 `isActive` 启停） |
 | DELETE | `/api/knowledge/:id` | 软删除 |
 
-| POST | `/api/knowledge/import` | **上传文档**（multipart，字段 `file` + `brand`、`category`、`priority?`、`autoActivate?`、`maxChunks?`）；支持 `.pdf/.docx/.xlsx/.xls/.csv/.txt/.md`，单文件 ≤10MB |
+| POST | `/api/knowledge/import` | **上传文档**（multipart，字段 `file` + `brand`、`category`、`priority?`、`autoActivate?`、`maxChunks?`）；支持 `.pdf/.docx/.pptx/.xlsx/.xls/.csv/.txt/.md`，单文件 ≤10MB。前端可多选文件后逐个调用，单个失败不影响其它文件 |
 | POST | `/api/knowledge/batch-activate` | 批量启用/停用：`{ ids: [], isActive: bool }`（导入后确认用） |
 
-**文档导入流程**：解析纯文本 → 按段落切 ~1200 字（重叠 200 字，最多 40 片）→ 每片生成一条资料（默认**停用草稿**）→ 人工确认后批量启用；原始文件留档在 `uploads/knowledge/`，路径记入资料的 `sourceUrl`，标签加「来源：文件名」。扫描版 PDF（无文字层）会明确报错，不会产生垃圾资料。
+**文档导入流程**：解析纯文本 → 按段落切 ~1200 字（重叠 200 字，最多 40 片）→ 每片生成一条资料（默认**停用草稿**）→ 人工确认后批量启用；原始文件留档在 `uploads/knowledge/`，路径记入资料的 `sourceUrl`，标签加「来源：文件名」。
+
+**图片文字处理（本地 OCR，不调用 AI）**：
+
+| 来源 | 处理方式 |
+| --- | --- |
+| `.pptx` | 按页提取文本框文字；`ppt/media` 里的图片逐张本地 OCR，追加到「幻灯片图片文字」 |
+| `.docx` | 正文用 mammoth 提取；`word/media` 图片本地 OCR，追加到「文档内图片文字」 |
+| `.pdf` | 优先用文字层；**没有文字层（扫描件）时自动把前 10 页渲染成图片做 OCR**（200 DPI） |
+| 老版 `.ppt` | 明确报错，提示另存为 `.pptx` |
+
+OCR 引擎为 **tesseract 5（chi_sim+eng）**，离线运行；两种版面模式（psm 3 / psm 6）各跑一次取中文识别更优的结果；单文档最多识别 20 张图片（PDF 最多 10 页），超限会在响应 `warnings` 里说明。响应中的 `parsed.ocrSections` 表示 OCR 贡献了几段文字。可用环境变量 `OCR_ENABLED=false` 关闭、`OCR_LANGUAGES` 调整语言。
 
 **检索与引用规则**：按内容的标题/正文/标签与资料的 `tags + keywords + brand` 做子串匹配（中文不分词），得分 = 命中维度数 ×10 + 优先级 + 引用次数微调；仅 `isActive` 的资料参与；每次生成默认注入 5 条，引用 id 写入 `ai_generations.inputRefs.knowledgeIds`（可追溯"AI 为什么这么写"），并累加该资料的 `usageCount` / `lastUsedAt`。
 

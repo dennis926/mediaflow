@@ -17,7 +17,6 @@ import { knowledgeApi } from '../../../lib/api/endpoints';
 import type { KnowledgeItem } from '../../../lib/api/types';
 import { formatDateTime } from '../../../lib/format';
 import { KnowledgeIcon, PlusIcon } from '../../../lib/icons';
-import type { ImportResult } from '../../../lib/api/types';
 import styles from './page.module.css';
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -39,6 +38,15 @@ const CATEGORY_TONES: Record<string, 'brand' | 'info' | 'success' | 'danger' | '
 };
 
 type KnowledgeCategory = KnowledgeItem['category'];
+
+interface ImportProgress {
+  name: string;
+  size: number;
+  status: 'pending' | 'running' | 'ok' | 'fail';
+  message: string;
+  ids: string[];
+  chunks: number;
+}
 
 interface FormState {
   brand: string;
@@ -75,9 +83,10 @@ export default function KnowledgePage() {
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [pendingDelete, setPendingDelete] = useState<KnowledgeItem | null>(null);
   const [importOpen, setImportOpen] = useState(false);
-  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importFiles, setImportFiles] = useState<File[]>([]);
   const [importForm, setImportForm] = useState({ brand: '', category: 'brand', priority: 6, autoActivate: false });
-  const [importResult, setImportResult] = useState<ImportResult | null>(null);
+  const [progress, setProgress] = useState<ImportProgress[]>([]);
+  const [importing, setImporting] = useState(false);
   const [feedback, setFeedback] = useState<{ tone: 'success' | 'danger' | 'info'; text: string } | null>(null);
 
   const list = useQuery({
@@ -155,29 +164,68 @@ export default function KnowledgePage() {
     onError: (error: unknown) => onError(error, '操作失败'),
   });
 
-  const importDoc = useMutation({
-    mutationFn: () =>
-      knowledgeApi.importDocument(importFile as File, {
-        brand: importForm.brand.trim(),
-        category: importForm.category,
-        priority: Number(importForm.priority) || 0,
-        autoActivate: importForm.autoActivate,
-      }),
-    onSuccess: (result) => {
-      setImportResult(result);
-      refresh();
-      void queryClient.invalidateQueries({ queryKey: ['knowledge', 'brands'] });
-    },
-    onError: (error: unknown) => onError(error, '导入失败'),
-  });
+  const runImport = async (): Promise<void> => {
+    const queue: ImportProgress[] = importFiles.map((file) => ({
+      name: file.name,
+      size: file.size,
+      status: 'pending',
+      message: '等待处理',
+      ids: [],
+      chunks: 0,
+    }));
+    setProgress(queue);
+    setImporting(true);
+
+    const createdIds: string[] = [];
+    for (let index = 0; index < importFiles.length; index += 1) {
+      const file = importFiles[index];
+      setProgress((prev) => prev.map((item, position) => (position === index ? { ...item, status: 'running', message: '解析中…' } : item)));
+      try {
+        const result = await knowledgeApi.importDocument(file, {
+          brand: importForm.brand.trim(),
+          category: importForm.category,
+          priority: Number(importForm.priority) || 0,
+          autoActivate: importForm.autoActivate,
+        });
+        createdIds.push(...result.created.map((item) => item.id));
+        setProgress((prev) =>
+          prev.map((item, position) =>
+            position === index
+              ? {
+                  ...item,
+                  status: 'ok',
+                  chunks: result.created.length,
+                  ids: result.created.map((entry) => entry.id),
+                  message: `${result.parsed.charCount} 字 → ${result.created.length} 条${result.created[0]?.isActive ? '（已启用）' : '草稿'}${
+                    result.parsed.ocrSections ? ` · 含 ${result.parsed.ocrSections} 段图片 OCR` : ''
+                  }${result.parsed.warnings.length ? ` · ${result.parsed.warnings[0]}` : ''}`,
+                }
+              : item,
+          ),
+        );
+      } catch (error) {
+        setProgress((prev) =>
+          prev.map((item, position) =>
+            position === index
+              ? { ...item, status: 'fail', message: error instanceof ApiError ? error.message : '解析失败' }
+              : item,
+          ),
+        );
+      }
+    }
+
+    setImporting(false);
+    refresh();
+    void queryClient.invalidateQueries({ queryKey: ['knowledge', 'brands'] });
+  };
 
   const activateImported = useMutation({
     mutationFn: (ids: string[]) => knowledgeApi.batchActivate(ids, true),
     onSuccess: (result) => {
       setFeedback({ tone: 'success', text: `已启用 ${result.updated} 条资料，AI 生成时会引用` });
       setImportOpen(false);
-      setImportResult(null);
-      setImportFile(null);
+      setImportFiles([]);
+      setProgress([]);
       refresh();
     },
     onError: (error: unknown) => onError(error, '启用失败'),
@@ -335,7 +383,7 @@ export default function KnowledgePage() {
             搜索
           </Button>
           <div className={styles.spacer} style={{ display: 'flex', gap: 'var(--mf-space-2)' }}>
-            <Button variant="secondary" onClick={() => { setImportOpen(true); setImportResult(null); setImportFile(null); }}>
+            <Button variant="secondary" onClick={() => { setImportOpen(true); setImportFiles([]); setProgress([]); }}>
               导入文档
             </Button>
             <Button icon={<PlusIcon width={16} height={16} />} onClick={() => { setEditing(null); setForm(EMPTY_FORM); setFormOpen(true); }}>
@@ -432,16 +480,19 @@ export default function KnowledgePage() {
         title="导入文档到知识库"
         onClose={() => setImportOpen(false)}
         footer={
-          importResult ? (
+          progress.length > 0 ? (
             <>
               <Button variant="secondary" onClick={() => setImportOpen(false)}>
                 稍后确认
               </Button>
               <Button
                 loading={activateImported.isPending}
-                onClick={() => activateImported.mutate(importResult.created.map((item) => item.id))}
+                disabled={importForm.autoActivate || progress.every((item) => item.ids.length === 0)}
+                onClick={() =>
+                  activateImported.mutate(progress.flatMap((item) => item.ids))
+                }
               >
-                全部启用（{importResult.created.length} 条）
+                全部启用（{progress.reduce((total, item) => total + item.ids.length, 0)} 条）
               </Button>
             </>
           ) : (
@@ -450,46 +501,42 @@ export default function KnowledgePage() {
                 取消
               </Button>
               <Button
-                loading={importDoc.isPending}
-                disabled={!importFile || !importForm.brand.trim()}
-                onClick={() => importDoc.mutate()}
+                loading={importing}
+                disabled={importFiles.length === 0 || !importForm.brand.trim()}
+                onClick={() => void runImport()}
               >
-                解析并入库
+                解析并入库（{importFiles.length || 0} 个文件）
               </Button>
             </>
           )
         }
       >
-        {importResult ? (
+        {progress.length > 0 ? (
           <div className={styles.form}>
-            <Banner tone={importResult.created[0]?.isActive ? 'success' : 'info'}>
+            <Banner tone={progress.some((item) => item.status === 'fail') ? 'warning' : 'info'}>
               <span>
-                已解析《{importResult.parsed.fileName}》（{importResult.parsed.charCount} 字），切成 {importResult.created.length} 条
-                {importResult.created[0]?.isActive ? '并已启用' : '草稿（默认停用，确认后才会被 AI 引用）'}。
+                共 {progress.length} 个文件：成功 {progress.filter((item) => item.status === 'ok').length} 个，
+                失败 {progress.filter((item) => item.status === 'fail').length} 个，
+                生成草稿/资料 {progress.reduce((total, item) => total + item.ids.length, 0)} 条
+                {importForm.autoActivate ? '（已直接启用）' : '（默认停用，确认后启用）'}。
               </span>
             </Banner>
-            {importResult.parsed.warnings.map((warning) => (
-              <Banner key={warning} tone="warning">
-                <span>{warning}</span>
-              </Banner>
-            ))}
-            <div style={{ maxHeight: '14rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 'var(--mf-space-2)' }}>
-              {importResult.chunks.slice(0, 8).map((chunk) => (
-                <div key={chunk.index} className={styles.variantItem}>
-                  <div style={{ display: 'flex', gap: 'var(--mf-space-2)', alignItems: 'center' }}>
-                    <Tag tone="info">#{chunk.index}</Tag>
-                    <span className={styles.titleStrong}>{chunk.title}</span>
-                    <span className={styles.meta}>{chunk.charCount} 字</span>
+            <div style={{ maxHeight: '16rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 'var(--mf-space-2)' }}>
+              {progress.map((item) => (
+                <div key={item.name} className={styles.variantItem}>
+                  <div style={{ display: 'flex', gap: 'var(--mf-space-2)', alignItems: 'center', flexWrap: 'wrap' }}>
+                    <Tag tone={item.status === 'ok' ? 'success' : item.status === 'fail' ? 'danger' : item.status === 'running' ? 'warning' : 'default'}>
+                      {item.status === 'ok' ? '成功' : item.status === 'fail' ? '失败' : item.status === 'running' ? '处理中' : '等待'}
+                    </Tag>
+                    <span className={styles.titleStrong}>{item.name}</span>
+                    <span className={styles.meta}>{(item.size / 1024).toFixed(0)} KB</span>
                   </div>
-                  <span className={styles.preview}>{chunk.preview}</span>
+                  <span className={styles.preview}>{item.message}</span>
                 </div>
               ))}
-              {importResult.chunks.length > 8 ? (
-                <span className={styles.meta}>还有 {importResult.chunks.length - 8} 片未展示…</span>
-              ) : null}
             </div>
             <Banner tone="warning">
-              <span>建议先抽查几片内容，确认没有解析错乱再批量启用；也可以在列表里逐条编辑标签、关键词后再启用。</span>
+              <span>建议抽查几条内容，确认没有解析错乱再启用；也可以在列表里逐条编辑标签、关键词后再启用。</span>
             </Banner>
           </div>
         ) : (
@@ -497,11 +544,28 @@ export default function KnowledgePage() {
             <label className={styles.filePicker}>
               <input
                 type="file"
-                accept=".pdf,.docx,.xlsx,.xls,.csv,.txt,.md,.markdown"
-                onChange={(event) => setImportFile(event.target.files?.[0] ?? null)}
+                multiple
+                accept=".pdf,.docx,.pptx,.xlsx,.xls,.csv,.txt,.md,.markdown"
+                onChange={(event) => {
+                  setImportFiles(Array.from(event.target.files ?? []));
+                  setProgress([]);
+                }}
               />
-              <span>{importFile ? `${importFile.name}（${(importFile.size / 1024).toFixed(0)} KB）` : '选择文件（PDF / Word / Excel / CSV / txt / md，≤10MB）'}</span>
+              <span>
+                {importFiles.length > 0
+                  ? `已选 ${importFiles.length} 个文件（合计 ${(importFiles.reduce((total, file) => total + file.size, 0) / 1024 / 1024).toFixed(1)} MB）`
+                  : '选择文件，可多选（PDF / Word / PPT / Excel / CSV / txt / md，单个 ≤10MB）'}
+              </span>
             </label>
+            {importFiles.length > 0 ? (
+              <div style={{ maxHeight: '7rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 'var(--mf-space-1)' }}>
+                {importFiles.map((file) => (
+                  <span key={file.name} className={styles.meta}>
+                    • {file.name}（{(file.size / 1024).toFixed(0)} KB）
+                  </span>
+                ))}
+              </div>
+            ) : null}
             <div className={styles.twoCol}>
               <Input label="品牌" name="importBrand" required placeholder="例如：卿尔美" value={importForm.brand} onChange={(event) => setImportForm({ ...importForm, brand: event.target.value })} />
               <Select
@@ -532,7 +596,10 @@ export default function KnowledgePage() {
               />
             </div>
             <Banner tone="info">
-              <span>系统会按段落自动切片（每片约 1200 字、带重叠），一片 = 一条资料；原文件会留档，便于追溯来源。</span>
+              <span>
+                系统会按段落自动切片（每片约 1200 字、带重叠），一片 = 一条资料；原文件会留档便于追溯。
+                <strong>PPT/Word 里的图片文字会用本地 OCR 识别（离线运行、不调用 AI 接口）</strong>，扫描版 PDF 也会自动走 OCR。
+              </span>
             </Banner>
           </div>
         )}
