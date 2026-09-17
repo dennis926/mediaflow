@@ -5,7 +5,7 @@ const METRICS_ALARM = 'mediaflow:metrics';
 /** Pulls tasks that need browser-extension assisted publishing. */
 async function fetchPluginTasks(): Promise<{ ok: boolean; items?: unknown[]; error?: string }> {
   const config = await loadConfig();
-  if (!config.token) return { ok: false, error: '尚未登录 MediaFlow' };
+  if (!config.token) return { ok: false, error: '尚未登录：请先在插件里配置接口地址与访问令牌' };
   try {
     const page = await api.pluginTasks();
     return { ok: true, items: page.items };

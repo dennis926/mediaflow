@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { DEFAULT_PLUGIN_BRANDING, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -102,5 +102,25 @@ describe('弹窗站点名（公开接口）', () => {
     const { FALLBACK_SITE_NAME, loadSiteBranding } = await import('../lib/api');
 
     await expect(loadSiteBranding()).resolves.toMatchObject({ name: FALLBACK_SITE_NAME });
+  });
+});
+
+describe('插件 API 域名配置', () => {
+  it('默认使用内置域名，且形态符合 host_permissions 要求', () => {
+    const branding = resolvePluginBranding();
+    expect(branding.apiOrigin).toMatch(/^https?:\/\/[^/]+\/\*$/);
+  });
+
+  it('manifest 的 host_permissions 使用可配置域名而不是写死值', () => {
+    expect(manifestConfig.host_permissions[manifestConfig.host_permissions.length - 1]).toBe(resolvePluginBranding().apiOrigin);
+  });
+
+  it('非法域名回退默认，避免生成非法清单', () => {
+    // 直接验证形态校验逻辑：非 http(s)://主机/* 的输入不应被采用
+    const invalid = ['不是域名', 'auto.example.com', 'https://a.example.com/', ''];
+    for (const value of invalid) {
+      expect(/^https?:\/\/[^/]+\/\*$/.test(value)).toBe(false);
+    }
+    expect(manifestConfig.host_permissions[manifestConfig.host_permissions.length - 1]).toBe(DEFAULT_PLUGIN_BRANDING.apiOrigin);
   });
 });

@@ -6,12 +6,15 @@ import { fileURLToPath } from 'node:url';
 export interface PluginBranding {
   name: string;
   description: string;
+  /** API 域名（含 /* 通配），不同公司部署到自己的域名时改这里 */
+  apiOrigin: string;
 }
 
 /** Built-in fallback: last resort when neither the JSON file nor the environment provides a value. */
 export const DEFAULT_PLUGIN_BRANDING: PluginBranding = {
   name: 'MediaFlow 助手',
   description: '内容分发与矩阵运营助手：自动填充内容，人工确认发布。',
+  apiOrigin: 'https://auto.liangyijianye.cn/*',
 };
 
 /** Per-deployment branding file, resolved relative to the plugin package root. */
@@ -21,6 +24,7 @@ export const PLUGIN_BRANDING_FILE = 'plugin.config.json';
 export const PLUGIN_BRANDING_ENV = {
   name: 'PLUGIN_NAME',
   description: 'PLUGIN_DESCRIPTION',
+  apiOrigin: 'PLUGIN_API_ORIGIN',
 } as const;
 
 function isFilled(value: unknown): value is string {
@@ -83,6 +87,7 @@ function readBrandingFile(): Partial<PluginBranding> {
       return {
         name: isFilled(record.name) ? record.name.trim() : undefined,
         description: isFilled(record.description) ? record.description.trim() : undefined,
+        apiOrigin: isFilled(record.apiOrigin) ? record.apiOrigin.trim() : undefined,
       };
     } catch {
       // Not readable or not valid JSON: try the next candidate, then fall back to the defaults.
@@ -99,9 +104,13 @@ export function resolvePluginBranding(): PluginBranding {
   const fromFile = readBrandingFile();
   const envName = process.env[PLUGIN_BRANDING_ENV.name];
   const envDescription = process.env[PLUGIN_BRANDING_ENV.description];
+  const envOrigin = process.env[PLUGIN_BRANDING_ENV.apiOrigin];
+  const apiOrigin = isFilled(envOrigin) ? envOrigin.trim() : (fromFile.apiOrigin ?? DEFAULT_PLUGIN_BRANDING.apiOrigin);
   return {
     name: isFilled(envName) ? envName.trim() : (fromFile.name ?? DEFAULT_PLUGIN_BRANDING.name),
     description: isFilled(envDescription) ? envDescription.trim() : (fromFile.description ?? DEFAULT_PLUGIN_BRANDING.description),
+    // host_permissions 只接受 http(s)://主机/* 形态，写错的配置直接回退默认，避免生成非法清单。
+    apiOrigin: /^https?:\/\/[^/]+\/\*$/.test(apiOrigin) ? apiOrigin : DEFAULT_PLUGIN_BRANDING.apiOrigin,
   };
 }
 
@@ -115,7 +124,8 @@ export const PLATFORM_HOSTS = [
   'https://baijiahao.baidu.com/*',
 ];
 
-export const MEDIAFLOW_API_ORIGIN = 'https://auto.liangyijianye.cn/*';
+/** 兼容旧引用；实际取值来自可配置的品牌信息。 */
+export const MEDIAFLOW_API_ORIGIN = branding.apiOrigin;
 
 export const manifestConfig = {
   manifest_version: 3 as const,
@@ -139,5 +149,5 @@ export const manifestConfig = {
   ],
   // Least privilege: no cookies, no webRequest, no <all_urls>.
   permissions: ['storage', 'tabs', 'activeTab', 'alarms'],
-  host_permissions: [...PLATFORM_HOSTS, MEDIAFLOW_API_ORIGIN],
+  host_permissions: [...PLATFORM_HOSTS, branding.apiOrigin],
 };

@@ -1,4 +1,5 @@
 {
   "name": "MediaFlow 助手",
-  "description": "内容分发与矩阵运营助手：自动填充内容，人工确认发布。"
+  "description": "内容分发与矩阵运营助手：自动填充内容，人工确认发布。",
+  "apiOrigin": "https://auto.liangyijianye.cn/*"
 }

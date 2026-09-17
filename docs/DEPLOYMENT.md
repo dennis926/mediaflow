@@ -224,5 +224,5 @@ E2E_ADMIN_EMAIL=you@example.com E2E_ADMIN_PASSWORD=... pnpm --filter @mediaflow/
 - 知识库还能整包迁移：导出 JSON（含分类配置）→ 新环境导入。
 
 ### 浏览器插件品牌
-- 插件名称/说明在 `apps/plugin/plugin.config.json`，或用环境变量 `PLUGIN_NAME` / `PLUGIN_DESCRIPTION` 覆盖后重新构建；
+- 插件名称、说明与 **API 域名**（`apiOrigin`，决定 host_permissions）都在 `apps/plugin/plugin.config.json`，或用环境变量 `PLUGIN_NAME` / `PLUGIN_DESCRIPTION` 覆盖后重新构建；
 - 插件弹窗里的站点名是运行时从 `/api/public/site-config` 读取的，改后台配置即可，不用重新打包。
