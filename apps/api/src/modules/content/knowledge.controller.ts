@@ -1,9 +1,26 @@
-import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Post, Put, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  MaxFileSizeValidator,
+  Param,
+  ParseFilePipe,
+  ParseUUIDPipe,
+  Post,
+  Put,
+  Query,
+  UploadedFile,
+  UseInterceptors,
+} from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 import { toActor } from '../auth/actor.util';
 import { AuthUser } from '../auth/auth.types';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { Roles } from '../auth/roles.decorator';
-import { CreateKnowledgeDto, PreviewKnowledgeDto, QueryKnowledgeDto, UpdateKnowledgeDto } from './dto/knowledge.dto';
+import { BatchActivateDto, CreateKnowledgeDto, ImportKnowledgeDto, PreviewKnowledgeDto, QueryKnowledgeDto, UpdateKnowledgeDto } from './dto/knowledge.dto';
+import { MAX_DOCUMENT_BYTES } from './document-parser.service';
 import { BrandKnowledge } from './entities/brand-knowledge.entity';
 import { KnowledgeMatch, KnowledgePage, KnowledgeService } from './knowledge.service';
 
@@ -31,6 +48,32 @@ export class KnowledgeController {
   @Get(':id')
   detail(@Param('id', ParseUUIDPipe) id: string): Promise<BrandKnowledge> {
     return this.knowledgeService.get(id);
+  }
+
+  /**
+   * 导入文档（PDF / Word / Excel / CSV / txt / md）→ 解析切片 → 落成资料草稿。
+   * 表单字段：brand、category、priority?、autoActivate?、maxChunks?
+   */
+  @Roles('owner', 'admin', 'editor')
+  @Post('import')
+  @UseInterceptors(FileInterceptor('file', { storage: memoryStorage(), limits: { fileSize: MAX_DOCUMENT_BYTES } }))
+  import(
+    @UploadedFile(new ParseFilePipe({ validators: [new MaxFileSizeValidator({ maxSize: MAX_DOCUMENT_BYTES })] }))
+    file: Express.Multer.File,
+    @Body() dto: ImportKnowledgeDto,
+    @CurrentUser() user?: AuthUser,
+  ) {
+    return this.knowledgeService.importDocument(
+      { originalname: file.originalname, buffer: file.buffer, size: file.size },
+      dto,
+      toActor(user),
+    );
+  }
+
+  @Roles('owner', 'admin', 'editor')
+  @Post('batch-activate')
+  batchActivate(@Body() dto: BatchActivateDto, @CurrentUser() user?: AuthUser): Promise<{ updated: number }> {
+    return this.knowledgeService.batchActivate(dto, toActor(user));
   }
 
   @Roles('owner', 'admin', 'editor')

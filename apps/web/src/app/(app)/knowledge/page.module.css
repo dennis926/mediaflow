@@ -89,3 +89,21 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+.filePicker {
+  display: flex;
+  align-items: center;
+  gap: var(--mf-space-3);
+  min-height: var(--mf-size-touch-min);
+  padding: var(--mf-space-3) var(--mf-space-4);
+  border: 1px dashed var(--mf-color-border-strong);
+  border-radius: var(--mf-radius-md);
+  font-size: var(--mf-font-size-sm);
+  color: var(--mf-color-text-secondary);
+  cursor: pointer;
+}
+
+.filePicker:hover {
+  border-color: var(--mf-color-brand-500);
+  color: var(--mf-color-brand-600);
+}

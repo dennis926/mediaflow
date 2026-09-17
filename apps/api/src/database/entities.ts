@@ -9,7 +9,6 @@ import { Content } from '../modules/content/entities/content.entity';
 import { Notification } from '../modules/notification/entities/notification.entity';
 import { Platform } from '../modules/platform/entities/platform.entity';
 import { SocialAccount } from '../modules/platform/entities/social-account.entity';
-import { Approval } from '../modules/publish/entities/approval.entity';
 import { PublishTask } from '../modules/publish/entities/publish-task.entity';
 import { SystemSetting } from '../modules/settings/entities/system-setting.entity';
 import { Role } from '../modules/workspace/entities/role.entity';
@@ -27,7 +26,6 @@ export * from '../modules/content/entities/content.entity';
 export * from '../modules/notification/entities/notification.entity';
 export * from '../modules/platform/entities/platform.entity';
 export * from '../modules/platform/entities/social-account.entity';
-export * from '../modules/publish/entities/approval.entity';
 export * from '../modules/publish/entities/publish-task.entity';
 export * from '../modules/settings/entities/system-setting.entity';
 export * from '../modules/workspace/entities/role.entity';
@@ -47,7 +45,6 @@ export const ALL_ENTITIES = [
   Notification,
   Platform,
   SocialAccount,
-  Approval,
   PublishTask,
   SystemSetting,
   Role,

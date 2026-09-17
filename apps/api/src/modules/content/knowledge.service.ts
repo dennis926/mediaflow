@@ -1,10 +1,13 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { PlatformCode } from '@mediaflow/shared';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { In, Repository } from 'typeorm';
 import { AuditService } from '../../audit/audit.service';
 import { WorkspaceContextService } from '../../common/workspace-context.service';
-import { CreateKnowledgeDto, QueryKnowledgeDto, UpdateKnowledgeDto } from './dto/knowledge.dto';
+import { BatchActivateDto, CreateKnowledgeDto, ImportKnowledgeDto, QueryKnowledgeDto, UpdateKnowledgeDto } from './dto/knowledge.dto';
+import { DocumentParserService, KnowledgeChunk, ParsedDocument } from './document-parser.service';
 import { BrandKnowledge, KnowledgeCategory } from './entities/brand-knowledge.entity';
 import { Content } from './entities/content.entity';
 
@@ -50,7 +53,21 @@ export class KnowledgeService {
     @InjectRepository(Content) private readonly contents: Repository<Content>,
     private readonly audit: AuditService,
     private readonly workspaceContext: WorkspaceContextService,
+    private readonly parser: DocumentParserService,
   ) {}
+
+  /** 上传目录：源文件留档，便于追溯每片资料来自哪个文档。 */
+  private readonly uploadDir = join(process.cwd(), '../../uploads/knowledge');
+
+  /**
+   * multer/busboy 按 latin1 解析 multipart 文件名，中文会变乱码；
+   * 这里按 UTF-8 重新解码一次（典型表现：出现 Ã/å 这类字符）。
+   */
+  static normalizeFileName(name: string): string {
+    if (!/[\u0080-\u00ff]/.test(name)) return name;
+    const decoded = Buffer.from(name, 'latin1').toString('utf8');
+    return decoded.includes('\uFFFD') ? name : decoded;
+  }
 
   async list(query: QueryKnowledgeDto): Promise<KnowledgePage> {
     const scope = await this.workspaceContext.current();
@@ -232,6 +249,91 @@ export class KnowledgeService {
       .catch((error: unknown) =>
         this.logger.warn(`更新资料引用次数失败：${error instanceof Error ? error.message : String(error)}`),
       );
+  }
+
+  /**
+   * 导入文档：解析 → 切片 → 生成资料草稿（默认停用，人工确认后启用）。
+   * 原始文件会留档到 uploads/knowledge，并记在资料的 sourceUrl 上。
+   */
+  async importDocument(
+    file: { originalname: string; buffer: Buffer; size: number },
+    dto: ImportKnowledgeDto,
+    actor: KnowledgeActor,
+  ): Promise<{
+    parsed: Pick<ParsedDocument, 'fileName' | 'fileType' | 'charCount' | 'warnings'>;
+    storedPath: string;
+    chunks: Array<KnowledgeChunk & { preview: string }>;
+    created: Array<{ id: string; title: string; isActive: boolean }>;
+  }> {
+    const scope = await this.workspaceContext.current();
+    const fileName = KnowledgeService.normalizeFileName(file.originalname);
+    const parsed = await this.parser.parse(fileName, file.buffer);
+    const chunks = this.parser.chunk(parsed.text, dto.maxChunks ?? 40);
+
+    mkdirSync(this.uploadDir, { recursive: true });
+    const safeName = fileName.replace(/[^\w.\u4e00-\u9fa5-]/g, '_').slice(-80);
+    const storedName = `${Date.now()}-${safeName}`;
+    const storedPath = join(this.uploadDir, storedName);
+    writeFileSync(storedPath, file.buffer);
+
+    const autoActivate = dto.autoActivate ?? false;
+    const created: Array<{ id: string; title: string; isActive: boolean }> = [];
+
+    for (const chunk of chunks) {
+      const saved = await this.knowledge.save(
+        this.knowledge.create({
+          tenantId: scope.tenantId,
+          workspaceId: scope.workspaceId,
+          brand: dto.brand,
+          category: dto.category,
+          title: chunk.title,
+          content: chunk.content,
+          tags: [`来源：${parsed.fileName}`],
+          keywords: [],
+          priority: dto.priority ?? 0,
+          platforms: [],
+          sourceUrl: `uploads/knowledge/${storedName}`,
+          isActive: autoActivate,
+          usageCount: 0,
+          lastUsedAt: null,
+        }),
+      );
+      created.push({ id: saved.id, title: saved.title, isActive: saved.isActive });
+    }
+
+    await this.record('knowledge.import', created[0]?.id ?? '', actor, {
+      fileName: parsed.fileName,
+      fileType: parsed.fileType,
+      charCount: parsed.charCount,
+      chunks: chunks.length,
+      autoActivate,
+    });
+    this.logger.log(`文档导入完成：${parsed.fileName} → ${chunks.length} 片（${autoActivate ? '已启用' : '草稿待确认'}）`);
+
+    return {
+      parsed: {
+        fileName: parsed.fileName,
+        fileType: parsed.fileType,
+        charCount: parsed.charCount,
+        warnings: parsed.warnings,
+      },
+      storedPath: `uploads/knowledge/${storedName}`,
+      chunks: chunks.map((chunk) => ({ ...chunk, preview: chunk.content.slice(0, 120) })),
+      created,
+    };
+  }
+
+  /** 导入后批量确认启用（或反向停用）。 */
+  async batchActivate(dto: BatchActivateDto, actor: KnowledgeActor): Promise<{ updated: number }> {
+    const scope = await this.workspaceContext.current();
+    const result = await this.knowledge
+      .createQueryBuilder()
+      .update(BrandKnowledge)
+      .set({ isActive: dto.isActive })
+      .where('workspace_id = :workspaceId AND id IN (:...ids)', { workspaceId: scope.workspaceId, ids: dto.ids })
+      .execute();
+    await this.record('knowledge.batch_activate', dto.ids[0] ?? '', actor, { count: dto.ids.length, isActive: dto.isActive });
+    return { updated: result.affected ?? 0 };
   }
 
   async findByIds(ids: string[]): Promise<BrandKnowledge[]> {

@@ -12,3 +12,6 @@ coverage/
 .cache/
 .DS_Store
 *.tsbuildinfo
+
+# 知识库导入的原始文件（本地留档，不入库）
+uploads/

@@ -1,7 +1,8 @@
 import type { AiFlagType, ContentStatus, PlatformCode, PublishTaskStatus } from '@mediaflow/shared';
-import { api } from './client';
+import { api, apiUpload } from './client';
 import type {
   AccountRankingRow,
+  ImportResult,
   KnowledgeItem,
   KnowledgeMatchItem,
   ReviewItem,
@@ -177,6 +178,22 @@ export const knowledgeApi = {
   create: (payload: Partial<KnowledgeItem>) => api.post<KnowledgeItem>('/knowledge', payload),
   update: (id: string, payload: Partial<KnowledgeItem>) => api.put<KnowledgeItem>(`/knowledge/${id}`, payload),
   remove: (id: string) => api.delete<{ id: string }>(`/knowledge/${id}`),
+  /** 上传文档（PDF/Word/Excel/CSV/txt/md）→ 解析切片 → 生成资料草稿 */
+  importDocument: (
+    file: File,
+    payload: { brand: string; category: string; priority?: number; autoActivate?: boolean },
+  ) => {
+    const form = new FormData();
+    form.append('file', file);
+    form.append('brand', payload.brand);
+    form.append('category', payload.category);
+    if (payload.priority !== undefined) form.append('priority', String(payload.priority));
+    form.append('autoActivate', payload.autoActivate ? 'true' : 'false');
+    return apiUpload<ImportResult>('/knowledge/import', form);
+  },
+  batchActivate: (ids: string[], isActive: boolean) =>
+    api.post<{ updated: number }>('/knowledge/batch-activate', { ids, isActive }),
+
   /** 预览本次 AI 生成会引用哪些品牌资料 */
   preview: (contentId: string, limit = 5) =>
     api.get<{ matches: KnowledgeMatchItem[] }>('/knowledge/preview', { contentId, limit }),

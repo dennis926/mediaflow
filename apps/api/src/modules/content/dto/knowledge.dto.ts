@@ -1,4 +1,4 @@
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   IsArray,
@@ -99,6 +99,45 @@ export class QueryKnowledgeDto {
   @Min(1)
   @Max(100)
   pageSize?: number = 20;
+}
+
+export class ImportKnowledgeDto {
+  @IsString()
+  @Length(1, 80)
+  brand!: string;
+
+  @IsIn(KNOWLEDGE_CATEGORIES, { message: '分类不合法' })
+  category!: (typeof KNOWLEDGE_CATEGORIES)[number];
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(100)
+  priority?: number;
+
+  /** 默认 false：导入先落成停用草稿，人工确认后再批量启用。 */
+  @IsOptional()
+  @Transform(({ value }) => value === true || value === 'true')
+  @IsBoolean()
+  autoActivate?: boolean;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(40)
+  maxChunks?: number;
+}
+
+export class BatchActivateDto {
+  @IsArray()
+  @ArrayMaxSize(100)
+  @IsUUID('4', { each: true })
+  ids!: string[];
+
+  @IsBoolean()
+  isActive!: boolean;
 }
 
 export class PreviewKnowledgeDto {

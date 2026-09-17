@@ -202,3 +202,18 @@ export interface KnowledgeMatchItem {
   matchedBy: string[];
   score: number;
 }
+
+export interface ImportChunkPreview {
+  index: number;
+  title: string;
+  content: string;
+  charCount: number;
+  preview: string;
+}
+
+export interface ImportResult {
+  parsed: { fileName: string; fileType: string; charCount: number; warnings: string[] };
+  storedPath: string;
+  chunks: ImportChunkPreview[];
+  created: Array<{ id: string; title: string; isActive: boolean }>;
+}

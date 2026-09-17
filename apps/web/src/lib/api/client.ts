@@ -81,6 +81,35 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
   return (payload?.data ?? null) as T;
 }
 
+/** Multipart upload: Content-Type must stay unset so the browser adds the boundary. */
+export async function apiUpload<T>(path: string, form: FormData): Promise<T> {
+  const token = getToken();
+  const response = await fetch(`/api${path}`, {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: form,
+  });
+  const text = await response.text();
+  let payload: ApiResponse<T> | null = null;
+  if (text) {
+    try {
+      payload = JSON.parse(text) as ApiResponse<T>;
+    } catch {
+      payload = null;
+    }
+  }
+  if (response.status === 401) {
+    setToken(null);
+    if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
+      window.location.href = '/login';
+    }
+  }
+  if (!response.ok || (payload && payload.code !== 0)) {
+    throw new ApiError(payload?.code ?? response.status, payload?.message ?? `上传失败（HTTP ${response.status}）`, response.status);
+  }
+  return (payload?.data ?? null) as T;
+}
+
 export const api = {
   get: <T>(path: string, query?: RequestOptions['query']) => apiRequest<T>(path, { query }),
   post: <T>(path: string, body?: unknown) => apiRequest<T>(path, { method: 'POST', body }),

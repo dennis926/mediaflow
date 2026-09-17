@@ -48,7 +48,17 @@ function buildService(pool: BrandKnowledge[], content: Partial<Content> | null =
   const workspaceContext = {
     current: vi.fn(async () => ({ tenantId: TENANT_ID, workspaceId: WORKSPACE_ID })),
   } as unknown as WorkspaceContextService;
-  return { service: new KnowledgeService(knowledge, contents, audit, workspaceContext), knowledge, contents, audit };
+  const parser = {
+    parse: vi.fn(async (fileName: string, buffer: Buffer) => ({
+      fileName,
+      fileType: '.txt',
+      text: buffer.toString('utf8'),
+      charCount: buffer.length,
+      warnings: [],
+    })),
+    chunk: vi.fn((text: string) => [{ index: 1, title: '片段标题', content: text, charCount: text.length }]),
+  } as unknown as import('../document-parser.service').DocumentParserService;
+  return { service: new KnowledgeService(knowledge, contents, audit, workspaceContext, parser), knowledge, contents, audit, parser };
 }
 
 describe('KnowledgeService 检索', () => {
@@ -110,6 +120,73 @@ describe('KnowledgeService 检索', () => {
     const { service, knowledge } = buildService([]);
     await service.markUsed([]);
     expect(knowledge.createQueryBuilder).not.toHaveBeenCalled();
+  });
+});
+
+describe('KnowledgeService 文件名解码', () => {
+  it('把 latin1 误读的中文文件名还原成 UTF-8', () => {
+    const mangled = Buffer.from('公司简介.pdf', 'utf8').toString('latin1');
+    expect(KnowledgeService.normalizeFileName(mangled)).toBe('公司简介.pdf');
+  });
+
+  it('纯英文文件名保持不变', () => {
+    expect(KnowledgeService.normalizeFileName('company-profile.pdf')).toBe('company-profile.pdf');
+  });
+
+  it('导入时使用还原后的文件名作为来源标签', async () => {
+    const { service } = buildService([]);
+    const mangled = Buffer.from('产品卖点.docx', 'utf8').toString('latin1');
+    const result = await service.importDocument(
+      { originalname: mangled, buffer: Buffer.from('卿尔美畅享版复配益生元相关内容内容'), size: 40 },
+      { brand: '卿尔美', category: 'product' },
+      { id: 'u1' },
+    );
+    expect(result.parsed.fileName).toBe('产品卖点.docx');
+    expect(result.storedPath).toContain('产品卖点');
+  });
+});
+
+describe('KnowledgeService 文档导入', () => {
+  it('导入生成停用草稿（默认不直接启用）', async () => {
+    const { service, knowledge } = buildService([]);
+    const result = await service.importDocument(
+      { originalname: '公司简介.txt', buffer: Buffer.from('卿尔美成立于某年，专注膳食纤维与益生元。'), size: 40 },
+      { brand: '卿尔美', category: 'brand', autoActivate: false },
+      { id: 'u1', name: '编辑' },
+    );
+
+    expect(result.created).toHaveLength(1);
+    expect(result.created[0].isActive).toBe(false);
+    expect(result.storedPath).toContain('uploads/knowledge/');
+    expect(knowledge.save).toHaveBeenCalledWith(
+      expect.objectContaining({ tags: expect.arrayContaining(['来源：公司简介.txt']), isActive: false }),
+    );
+  });
+
+  it('autoActivate 为 true 时直接启用', async () => {
+    const { service } = buildService([]);
+    const result = await service.importDocument(
+      { originalname: '简介.md', buffer: Buffer.from('内容内容内容内容内容内容'), size: 24 },
+      { brand: '卿尔美', category: 'brand', autoActivate: true },
+      { id: 'u1' },
+    );
+    expect(result.created[0].isActive).toBe(true);
+  });
+
+  it('批量启用/停用', async () => {
+    const { service, knowledge } = buildService([]);
+    const queryBuilder = {
+      update: vi.fn().mockReturnThis(),
+      set: vi.fn().mockReturnThis(),
+      where: vi.fn().mockReturnThis(),
+      execute: vi.fn(async () => ({ affected: 3 })),
+    };
+    (knowledge.createQueryBuilder as unknown as ReturnType<typeof vi.fn>).mockReturnValue(queryBuilder);
+
+    const result = await service.batchActivate({ ids: ['a', 'b', 'c'], isActive: true }, { id: 'u1' });
+
+    expect(result.updated).toBe(3);
+    expect(queryBuilder.set).toHaveBeenCalledWith({ isActive: true });
   });
 });
 

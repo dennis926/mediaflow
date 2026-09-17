@@ -173,6 +173,11 @@
 | PUT | `/api/knowledge/:id` | 更新（含 `isActive` 启停） |
 | DELETE | `/api/knowledge/:id` | 软删除 |
 
+| POST | `/api/knowledge/import` | **上传文档**（multipart，字段 `file` + `brand`、`category`、`priority?`、`autoActivate?`、`maxChunks?`）；支持 `.pdf/.docx/.xlsx/.xls/.csv/.txt/.md`，单文件 ≤10MB |
+| POST | `/api/knowledge/batch-activate` | 批量启用/停用：`{ ids: [], isActive: bool }`（导入后确认用） |
+
+**文档导入流程**：解析纯文本 → 按段落切 ~1200 字（重叠 200 字，最多 40 片）→ 每片生成一条资料（默认**停用草稿**）→ 人工确认后批量启用；原始文件留档在 `uploads/knowledge/`，路径记入资料的 `sourceUrl`，标签加「来源：文件名」。扫描版 PDF（无文字层）会明确报错，不会产生垃圾资料。
+
 **检索与引用规则**：按内容的标题/正文/标签与资料的 `tags + keywords + brand` 做子串匹配（中文不分词），得分 = 命中维度数 ×10 + 优先级 + 引用次数微调；仅 `isActive` 的资料参与；每次生成默认注入 5 条，引用 id 写入 `ai_generations.inputRefs.knowledgeIds`（可追溯"AI 为什么这么写"），并累加该资料的 `usageCount` / `lastUsedAt`。
 
 ### 3.9 其它

@@ -17,6 +17,7 @@ import { knowledgeApi } from '../../../lib/api/endpoints';
 import type { KnowledgeItem } from '../../../lib/api/types';
 import { formatDateTime } from '../../../lib/format';
 import { KnowledgeIcon, PlusIcon } from '../../../lib/icons';
+import type { ImportResult } from '../../../lib/api/types';
 import styles from './page.module.css';
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -73,6 +74,10 @@ export default function KnowledgePage() {
   const [formOpen, setFormOpen] = useState(false);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [pendingDelete, setPendingDelete] = useState<KnowledgeItem | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importForm, setImportForm] = useState({ brand: '', category: 'brand', priority: 6, autoActivate: false });
+  const [importResult, setImportResult] = useState<ImportResult | null>(null);
   const [feedback, setFeedback] = useState<{ tone: 'success' | 'danger' | 'info'; text: string } | null>(null);
 
   const list = useQuery({
@@ -148,6 +153,34 @@ export default function KnowledgePage() {
       refresh();
     },
     onError: (error: unknown) => onError(error, '操作失败'),
+  });
+
+  const importDoc = useMutation({
+    mutationFn: () =>
+      knowledgeApi.importDocument(importFile as File, {
+        brand: importForm.brand.trim(),
+        category: importForm.category,
+        priority: Number(importForm.priority) || 0,
+        autoActivate: importForm.autoActivate,
+      }),
+    onSuccess: (result) => {
+      setImportResult(result);
+      refresh();
+      void queryClient.invalidateQueries({ queryKey: ['knowledge', 'brands'] });
+    },
+    onError: (error: unknown) => onError(error, '导入失败'),
+  });
+
+  const activateImported = useMutation({
+    mutationFn: (ids: string[]) => knowledgeApi.batchActivate(ids, true),
+    onSuccess: (result) => {
+      setFeedback({ tone: 'success', text: `已启用 ${result.updated} 条资料，AI 生成时会引用` });
+      setImportOpen(false);
+      setImportResult(null);
+      setImportFile(null);
+      refresh();
+    },
+    onError: (error: unknown) => onError(error, '启用失败'),
   });
 
   const remove = useMutation({
@@ -301,7 +334,10 @@ export default function KnowledgePage() {
           <Button variant="secondary" onClick={() => { setAppliedKeyword(keyword.trim()); setPage(1); }}>
             搜索
           </Button>
-          <div className={styles.spacer}>
+          <div className={styles.spacer} style={{ display: 'flex', gap: 'var(--mf-space-2)' }}>
+            <Button variant="secondary" onClick={() => { setImportOpen(true); setImportResult(null); setImportFile(null); }}>
+              导入文档
+            </Button>
             <Button icon={<PlusIcon width={16} height={16} />} onClick={() => { setEditing(null); setForm(EMPTY_FORM); setFormOpen(true); }}>
               新增资料
             </Button>
@@ -389,6 +425,117 @@ export default function KnowledgePage() {
         <Banner tone="warning">
           <span>合规提醒：产品为食品，资料里不要写疾病治疗、疗效、绝对化或承诺性表述；这类内容会被合规检查拦下。</span>
         </Banner>
+      </Dialog>
+
+      <Dialog
+        open={importOpen}
+        title="导入文档到知识库"
+        onClose={() => setImportOpen(false)}
+        footer={
+          importResult ? (
+            <>
+              <Button variant="secondary" onClick={() => setImportOpen(false)}>
+                稍后确认
+              </Button>
+              <Button
+                loading={activateImported.isPending}
+                onClick={() => activateImported.mutate(importResult.created.map((item) => item.id))}
+              >
+                全部启用（{importResult.created.length} 条）
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button variant="secondary" onClick={() => setImportOpen(false)}>
+                取消
+              </Button>
+              <Button
+                loading={importDoc.isPending}
+                disabled={!importFile || !importForm.brand.trim()}
+                onClick={() => importDoc.mutate()}
+              >
+                解析并入库
+              </Button>
+            </>
+          )
+        }
+      >
+        {importResult ? (
+          <div className={styles.form}>
+            <Banner tone={importResult.created[0]?.isActive ? 'success' : 'info'}>
+              <span>
+                已解析《{importResult.parsed.fileName}》（{importResult.parsed.charCount} 字），切成 {importResult.created.length} 条
+                {importResult.created[0]?.isActive ? '并已启用' : '草稿（默认停用，确认后才会被 AI 引用）'}。
+              </span>
+            </Banner>
+            {importResult.parsed.warnings.map((warning) => (
+              <Banner key={warning} tone="warning">
+                <span>{warning}</span>
+              </Banner>
+            ))}
+            <div style={{ maxHeight: '14rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 'var(--mf-space-2)' }}>
+              {importResult.chunks.slice(0, 8).map((chunk) => (
+                <div key={chunk.index} className={styles.variantItem}>
+                  <div style={{ display: 'flex', gap: 'var(--mf-space-2)', alignItems: 'center' }}>
+                    <Tag tone="info">#{chunk.index}</Tag>
+                    <span className={styles.titleStrong}>{chunk.title}</span>
+                    <span className={styles.meta}>{chunk.charCount} 字</span>
+                  </div>
+                  <span className={styles.preview}>{chunk.preview}</span>
+                </div>
+              ))}
+              {importResult.chunks.length > 8 ? (
+                <span className={styles.meta}>还有 {importResult.chunks.length - 8} 片未展示…</span>
+              ) : null}
+            </div>
+            <Banner tone="warning">
+              <span>建议先抽查几片内容，确认没有解析错乱再批量启用；也可以在列表里逐条编辑标签、关键词后再启用。</span>
+            </Banner>
+          </div>
+        ) : (
+          <div className={styles.form}>
+            <label className={styles.filePicker}>
+              <input
+                type="file"
+                accept=".pdf,.docx,.xlsx,.xls,.csv,.txt,.md,.markdown"
+                onChange={(event) => setImportFile(event.target.files?.[0] ?? null)}
+              />
+              <span>{importFile ? `${importFile.name}（${(importFile.size / 1024).toFixed(0)} KB）` : '选择文件（PDF / Word / Excel / CSV / txt / md，≤10MB）'}</span>
+            </label>
+            <div className={styles.twoCol}>
+              <Input label="品牌" name="importBrand" required placeholder="例如：卿尔美" value={importForm.brand} onChange={(event) => setImportForm({ ...importForm, brand: event.target.value })} />
+              <Select
+                label="分类"
+                name="importCategory"
+                options={Object.entries(CATEGORY_LABELS).map(([value, label]) => ({ value, label }))}
+                value={importForm.category}
+                onChange={(event) => setImportForm({ ...importForm, category: event.target.value })}
+              />
+            </div>
+            <div className={styles.twoCol}>
+              <Input
+                label="优先级（0-100）"
+                name="importPriority"
+                type="number"
+                value={String(importForm.priority)}
+                onChange={(event) => setImportForm({ ...importForm, priority: Number(event.target.value) })}
+              />
+              <Select
+                label="入库方式"
+                name="importActivate"
+                options={[
+                  { value: 'false', label: '生成草稿，人工确认后启用（推荐）' },
+                  { value: 'true', label: '解析后直接启用' },
+                ]}
+                value={importForm.autoActivate ? 'true' : 'false'}
+                onChange={(event) => setImportForm({ ...importForm, autoActivate: event.target.value === 'true' })}
+              />
+            </div>
+            <Banner tone="info">
+              <span>系统会按段落自动切片（每片约 1200 字、带重叠），一片 = 一条资料；原文件会留档，便于追溯来源。</span>
+            </Banner>
+          </div>
+        )}
       </Dialog>
 
       <Dialog

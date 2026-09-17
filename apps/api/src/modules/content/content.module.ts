@@ -5,6 +5,7 @@ import { NotificationModule } from '../notification/notification.module';
 import { ContentController } from './content.controller';
 import { ContentReviewController } from './content-review.controller';
 import { ContentReviewService } from './content-review.service';
+import { DocumentParserService } from './document-parser.service';
 import { KnowledgeController } from './knowledge.controller';
 import { KnowledgeService } from './knowledge.service';
 import { ContentService } from './content.service';
@@ -17,7 +18,7 @@ import { Content } from './entities/content.entity';
 @Module({
   imports: [TypeOrmModule.forFeature([Content, ContentVariant, ContentReview, BrandKnowledge]), AiModule, NotificationModule],
   controllers: [ContentController, ContentVariantController, ContentReviewController, KnowledgeController],
-  providers: [ContentService, ContentReviewService, KnowledgeService],
+  providers: [ContentService, ContentReviewService, KnowledgeService, DocumentParserService],
   exports: [ContentService, ContentReviewService, KnowledgeService],
 })
 export class ContentModule {}
