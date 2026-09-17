@@ -59,6 +59,11 @@ export class CreateContentDto {
   brandKnowledgeId?: string;
 }
 
+export class ArchiveContentDto {
+  @IsBoolean()
+  archived!: boolean;
+}
+
 export class UpdateContentDto extends PartialType(CreateContentDto) {}
 
 export class QueryContentDto {

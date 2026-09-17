@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { AiGeneration } from '../modules/ai/entities/ai-generation.entity';
 import { ContentVariant } from '../modules/content/entities/content-variant.entity';
 import { Content } from '../modules/content/entities/content.entity';
 import { SocialAccount } from '../modules/platform/entities/social-account.entity';
@@ -14,7 +15,7 @@ import { PublishWorker } from './publish.worker';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([PublishTask, Content, ContentVariant, SocialAccount]),
+    TypeOrmModule.forFeature([PublishTask, Content, ContentVariant, SocialAccount, AiGeneration]),
     ChannelModule,
     SettingsModule,
     PlatformModule,

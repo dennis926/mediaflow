@@ -20,13 +20,20 @@ export interface SidebarProps {
   /** 站点名称与副标题来自后台配置（设置 → 站点信息） */
   siteName?: string;
   siteTagline?: string;
+  /** Logo 图片地址，留空用站点名首字 */
+  siteLogoUrl?: string;
 }
 
-export function Sidebar({ items, activeHref, footer, onNavigate, siteName = 'MediaFlow', siteTagline = '' }: SidebarProps) {
+export function Sidebar({ items, activeHref, footer, onNavigate, siteName = 'MediaFlow', siteTagline = '', siteLogoUrl = '' }: SidebarProps) {
   return (
     <nav className={styles.sidebar} aria-label="主导航">
       <div className={styles.brand}>
-        <span className={styles.brandMark}>{siteName.slice(0, 1).toUpperCase()}</span>
+        {siteLogoUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img className={styles.brandLogo} src={siteLogoUrl} alt={siteName} />
+        ) : (
+          <span className={styles.brandMark}>{siteName.slice(0, 1).toUpperCase()}</span>
+        )}
         <span className={styles.brandText}>
           <span className={styles.brandName}>{siteName}</span>
           {siteTagline ? <span className={styles.brandTag}>{siteTagline}</span> : null}

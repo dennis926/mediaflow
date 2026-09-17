@@ -18,6 +18,7 @@ import { memoryStorage } from 'multer';
 import { toActor } from '../auth/actor.util';
 import { AuthUser } from '../auth/auth.types';
 import { CurrentUser } from '../auth/current-user.decorator';
+import { Capability } from '../auth/capabilities';
 import { Roles } from '../auth/roles.decorator';
 import {
   AiGenerateKnowledgeDto,
@@ -80,7 +81,7 @@ export class KnowledgeController {
   }
 
   /** 导入第一步：解析文件并自动识别字段映射（不写库） */
-  @Roles('owner', 'admin', 'editor')
+  @Capability('knowledge.write')
   @Post('import-data/preview')
   @UseInterceptors(FileInterceptor('file', { storage: memoryStorage(), limits: { fileSize: MAX_DOCUMENT_BYTES } }))
   previewImport(
@@ -91,7 +92,7 @@ export class KnowledgeController {
   }
 
   /** 导入第二步：按确认后的映射入库（默认跳过重复） */
-  @Roles('owner', 'admin', 'editor')
+  @Capability('knowledge.write')
   @Post('import-data/commit')
   commitImportData(@Body() dto: CommitImportDataDto, @CurrentUser() user?: AuthUser) {
     return this.knowledgeService.commitImportData(dto, toActor(user));
@@ -105,7 +106,7 @@ export class KnowledgeController {
   }
 
   /** 保存分类配置（owner/admin/editor）；被资料使用的分类不允许删除 */
-  @Roles('owner', 'admin', 'editor')
+  @Capability('knowledge.write')
   @Put('categories')
   saveCategories(@Body() dto: SaveCategoriesDto, @CurrentUser() user?: AuthUser) {
     return this.knowledgeService.saveCategories(dto, toActor(user));
@@ -120,7 +121,7 @@ export class KnowledgeController {
    * 第一步：解析文档（PDF / Word / PPT / Excel / CSV / txt / md），**不入库**。
    * 返回切片（含 OCR 来源标记）供人工校对，原文件暂存 24 小时。
    */
-  @Roles('owner', 'admin', 'editor')
+  @Capability('knowledge.write')
   @Post('parse')
   @UseInterceptors(FileInterceptor('file', { storage: memoryStorage(), limits: { fileSize: MAX_DOCUMENT_BYTES } }))
   parse(
@@ -133,7 +134,7 @@ export class KnowledgeController {
   /**
    * 第三步：人工校对完成后提交入库（以提交的切片为准）。
    */
-  @Roles('owner', 'admin', 'editor')
+  @Capability('knowledge.write')
   @Post('commit')
   commit(@Body() dto: CommitImportDto, @CurrentUser() user?: AuthUser) {
     return this.knowledgeService.commitImport(dto, toActor(user));
@@ -144,7 +145,7 @@ export class KnowledgeController {
    * 旧接口：跳过人工校对直接入库，界面默认走 parse → commit。
    * 表单字段：brand、category、priority?、autoActivate?、maxChunks?
    */
-  @Roles('owner', 'admin', 'editor')
+  @Capability('knowledge.write')
   @Post('import')
   @UseInterceptors(FileInterceptor('file', { storage: memoryStorage(), limits: { fileSize: MAX_DOCUMENT_BYTES } }))
   import(
@@ -168,44 +169,44 @@ export class KnowledgeController {
   }
 
   /** AI 起草一条资料（只返回草案，人工确认后再保存） */
-  @Roles('owner', 'admin', 'editor')
+  @Capability('knowledge.write')
   @Post('ai-draft')
   aiDraft(@Body() dto: AiGenerateKnowledgeDto, @CurrentUser() user?: AuthUser) {
     return this.knowledgeService.aiDraft(dto, toActor(user));
   }
 
   /** AI 润色（可作用于未保存的草稿） */
-  @Roles('owner', 'admin', 'editor')
+  @Capability('knowledge.write')
   @Post('ai-polish')
   aiPolish(@Body() dto: AiPolishKnowledgeDto, @CurrentUser() user?: AuthUser) {
     return this.knowledgeService.aiPolish(dto, toActor(user));
   }
 
-  @Roles('owner', 'admin', 'editor')
+  @Capability('knowledge.write')
   @Post('batch-delete')
   batchRemove(@Body() dto: BatchDeleteKnowledgeDto, @CurrentUser() user?: AuthUser): Promise<{ removed: number }> {
     return this.knowledgeService.batchRemove(dto, toActor(user));
   }
 
-  @Roles('owner', 'admin', 'editor')
+  @Capability('knowledge.write')
   @Post('batch-activate')
   batchActivate(@Body() dto: BatchActivateDto, @CurrentUser() user?: AuthUser): Promise<{ updated: number }> {
     return this.knowledgeService.batchActivate(dto, toActor(user));
   }
 
-  @Roles('owner', 'admin', 'editor')
+  @Capability('knowledge.write')
   @Post()
   create(@Body() dto: CreateKnowledgeDto, @CurrentUser() user?: AuthUser): Promise<BrandKnowledge> {
     return this.knowledgeService.create(dto, toActor(user));
   }
 
-  @Roles('owner', 'admin', 'editor')
+  @Capability('knowledge.write')
   @Put(':id')
   update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateKnowledgeDto, @CurrentUser() user?: AuthUser): Promise<BrandKnowledge> {
     return this.knowledgeService.update(id, dto, toActor(user));
   }
 
-  @Roles('owner', 'admin', 'editor')
+  @Capability('knowledge.write')
   @Delete(':id')
   remove(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user?: AuthUser): Promise<{ id: string }> {
     return this.knowledgeService.remove(id, toActor(user));

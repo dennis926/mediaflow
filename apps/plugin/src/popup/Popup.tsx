@@ -2,7 +2,18 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import type { PlatformCode } from '@mediaflow/shared';
-import { DEFAULT_API_BASE, api, loadConfig, platformName, saveConfig, type PluginAccount, type PluginTask } from '../lib/api';
+import {
+  DEFAULT_API_BASE,
+  FALLBACK_SITE_NAME,
+  FALLBACK_SITE_TAGLINE,
+  api,
+  loadConfig,
+  loadSiteBranding,
+  platformName,
+  saveConfig,
+  type PluginAccount,
+  type PluginTask,
+} from '../lib/api';
 
 const EDITOR_URLS: Record<string, string> = {
   wechat_video: 'https://channels.weixin.qq.com/platform/post/create',
@@ -16,6 +27,10 @@ export function Popup() {
   const [loggedIn, setLoggedIn] = useState(false);
   const [userName, setUserName] = useState('');
   const [apiBase, setApiBase] = useState(DEFAULT_API_BASE);
+  // Branding is fetched from the backend so resellers can rename the product; the
+  // fallback keeps the popup renderable while the request is in flight or failing.
+  const [siteName, setSiteName] = useState(FALLBACK_SITE_NAME);
+  const [siteTagline, setSiteTagline] = useState(FALLBACK_SITE_TAGLINE);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [tasks, setTasks] = useState<PluginTask[]>([]);
@@ -27,6 +42,10 @@ export function Popup() {
   const refresh = useCallback(async () => {
     const config = await loadConfig();
     setApiBase(config.apiBase);
+    // Branding comes from the public endpoint; it never throws, so it cannot break the popup.
+    const branding = await loadSiteBranding();
+    setSiteName(branding.name);
+    setSiteTagline(branding.tagline);
     setLoggedIn(Boolean(config.token));
     if (!config.token) {
       setTasks([]);
@@ -49,6 +68,11 @@ export function Popup() {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  // Keep the popup document title in sync with the configured site name.
+  useEffect(() => {
+    document.title = siteName;
+  }, [siteName]);
 
   const signIn = async (): Promise<void> => {
     setBusy(true);
@@ -114,10 +138,10 @@ export function Popup() {
   return (
     <div className="app">
       <header className="header">
-        <span className="mark">M</span>
+        <span className="mark">{siteName.slice(0, 1) || 'M'}</span>
         <span className="headerText">
-          <strong>MediaFlow 助手</strong>
-          <small>自动填充 · 人工发布</small>
+          <strong>{siteName}</strong>
+          <small>{siteTagline}</small>
         </span>
       </header>
 
@@ -126,7 +150,7 @@ export function Popup() {
 
         {!loggedIn ? (
           <div className="card">
-            <span className="muted">登录 MediaFlow 后即可拉取待发布任务</span>
+            <span className="muted">登录 {siteName} 后即可拉取待发布任务</span>
             <div className="field">
               <span className="muted">服务地址</span>
               <input value={apiBase} onChange={(event) => setApiBase(event.target.value)} />

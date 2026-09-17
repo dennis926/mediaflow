@@ -15,6 +15,10 @@ export interface SiteConfig {
   tagline: string;
   company: string;
   supportEmail: string;
+  /** 品牌主色（十六进制）；界面据此推导整套色阶 */
+  brandColor: string;
+  /** 侧边栏 Logo 地址，留空则用站点名首字 */
+  logoUrl: string;
   /** 列表默认每页条数 */
   pageSize: number;
   /** AI 生成内容的显式标识后缀（法定要求，可改文案但别关） */
@@ -47,6 +51,10 @@ export interface AiRuntimeConfig {
   /** 计价（元/百万 token），用于统计花费；填 0 表示不统计 */
   priceInputPerMTok: number;
   priceOutputPerMTok: number;
+  /** 每分钟最多生成次数，0 = 不限 */
+  rateLimitPerMinute: number;
+  /** 每日 token 上限，0 = 不限 */
+  dailyTokenQuota: number;
 }
 
 /** 按 token 用量与配置单价估算花费（元），保留 6 位小数。 */
@@ -70,6 +78,13 @@ export interface ComplianceRule {
 }
 
 export interface PublishRuntimeConfig {
+  /** Redis Stream 名称与消费组名（换环境可用独立队列） */
+  streamName: string;
+  groupName: string;
+  /** 站内通知保留天数，0 = 永久保留 */
+  notificationRetentionDays: number;
+  /** 发布时是否写入 AI 生成标识元数据 */
+  aiMetadataEnabled: boolean;
   readBlockMs: number;
   readCount: number;
   claimIdleMs: number;
@@ -78,12 +93,28 @@ export interface PublishRuntimeConfig {
   workerEnabled: boolean;
 }
 
+export interface PermissionsRuntimeConfig {
+  /** 能力点 → 允许的角色代码（见 auth/capabilities.ts） */
+  matrix: Record<string, string[]>;
+  /** 角色代码 → 显示名（可按公司习惯改） */
+  roleLabels: Record<string, string>;
+}
+
+export interface AuthRuntimeConfig {
+  /** 访问令牌有效期（如 2h） */
+  accessExpires: string;
+  /** 刷新令牌有效期（如 7d） */
+  refreshExpires: string;
+}
+
 export interface RuntimeConfig {
   site: SiteConfig;
+  auth: AuthRuntimeConfig;
   knowledge: KnowledgeRuntimeConfig;
   ai: AiRuntimeConfig;
   compliance: ComplianceRule[];
   publish: PublishRuntimeConfig;
+  permissions: PermissionsRuntimeConfig;
 }
 
 export const DEFAULT_SITE: SiteConfig = {
@@ -91,6 +122,8 @@ export const DEFAULT_SITE: SiteConfig = {
   tagline: '内容分发与矩阵运营',
   company: '',
   supportEmail: '',
+  brandColor: '#4F6BFF',
+  logoUrl: '',
   pageSize: 10,
   aiDisclosureSuffix: '（本文由 AI 辅助生成）',
 };
@@ -125,6 +158,8 @@ export const DEFAULT_AI_RUNTIME: AiRuntimeConfig = {
   maxTokens: 4096,
   priceInputPerMTok: 0,
   priceOutputPerMTok: 0,
+  rateLimitPerMinute: 0,
+  dailyTokenQuota: 0,
 };
 
 export const DEFAULT_COMPLIANCE_RULES: ComplianceRule[] = [
@@ -159,6 +194,10 @@ export const DEFAULT_COMPLIANCE_RULES: ComplianceRule[] = [
 ];
 
 export const DEFAULT_PUBLISH_RUNTIME: PublishRuntimeConfig = {
+  streamName: 'mediaflow:publish:tasks',
+  groupName: 'publish-workers',
+  notificationRetentionDays: 90,
+  aiMetadataEnabled: true,
   readBlockMs: 5_000,
   readCount: 5,
   claimIdleMs: 60_000,
@@ -167,12 +206,39 @@ export const DEFAULT_PUBLISH_RUNTIME: PublishRuntimeConfig = {
   workerEnabled: true,
 };
 
+export const DEFAULT_PERMISSION_MATRIX_RUNTIME: Record<string, string[]> = {
+  'settings.write': ['owner', 'admin'],
+  'users.manage': ['owner', 'admin'],
+  'users.privileged': ['owner'],
+  'content.write': ['owner', 'admin', 'editor'],
+  'content.review': ['owner', 'admin', 'reviewer'],
+  'publish.execute': ['owner', 'admin', 'editor'],
+  'knowledge.write': ['owner', 'admin', 'editor'],
+  'platform.bind': ['owner', 'admin'],
+  'analytics.sync': ['owner', 'admin'],
+};
+
+export const DEFAULT_ROLE_LABELS_RUNTIME: Record<string, string> = {
+  owner: '所有者',
+  admin: '管理员',
+  editor: '内容编辑',
+  reviewer: '审核员',
+  viewer: '只读',
+};
+
+export const DEFAULT_AUTH_RUNTIME: AuthRuntimeConfig = { accessExpires: '2h', refreshExpires: '7d' };
+
 const snapshot: RuntimeConfig = {
   site: { ...DEFAULT_SITE },
+  auth: { ...DEFAULT_AUTH_RUNTIME },
   knowledge: { ...DEFAULT_KNOWLEDGE_RUNTIME },
   ai: { ...DEFAULT_AI_RUNTIME, platformGuidance: { ...DEFAULT_AI_RUNTIME.platformGuidance } },
   compliance: DEFAULT_COMPLIANCE_RULES.map((rule) => ({ ...rule, terms: [...rule.terms] })),
   publish: { ...DEFAULT_PUBLISH_RUNTIME },
+  permissions: {
+    matrix: { ...DEFAULT_PERMISSION_MATRIX_RUNTIME },
+    roleLabels: { ...DEFAULT_ROLE_LABELS_RUNTIME },
+  },
 };
 
 /** 全局同步读取当前配置（默认值 + 后台覆盖）。 */
@@ -197,6 +263,12 @@ function float(raw: string | undefined, fallback: number, min: number, max: numb
 function bool(raw: string | undefined, fallback: boolean): boolean {
   if (raw === undefined || raw.trim() === '') return fallback;
   return ['true', '1', 'yes', 'on', '是', '启用'].includes(raw.trim().toLowerCase());
+}
+
+/** 只接受 3/6 位十六进制颜色，其它一律回退默认（防止脏配置把界面搞成不可读）。 */
+function color(raw: string | undefined, fallback: string): string {
+  const value = raw?.trim() ?? '';
+  return /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(value) ? value.toUpperCase() : fallback;
 }
 
 function text(raw: string | undefined, fallback: string): string {
@@ -224,6 +296,8 @@ export function applyRuntimeConfig(flat: Record<string, string | undefined>, onE
     tagline: text(flat.SITE_TAGLINE, DEFAULT_SITE.tagline),
     company: text(flat.COMPANY_NAME, DEFAULT_SITE.company),
     supportEmail: text(flat.SUPPORT_EMAIL, DEFAULT_SITE.supportEmail),
+    brandColor: color(flat.SITE_BRAND_COLOR, DEFAULT_SITE.brandColor),
+    logoUrl: text(flat.SITE_LOGO_URL, DEFAULT_SITE.logoUrl),
     pageSize: num(flat.UI_PAGE_SIZE, DEFAULT_SITE.pageSize, 5, 100),
     aiDisclosureSuffix: text(flat.AI_DISCLOSURE_SUFFIX, DEFAULT_SITE.aiDisclosureSuffix),
   };
@@ -249,6 +323,8 @@ export function applyRuntimeConfig(flat: Record<string, string | undefined>, onE
     maxTokens: num(flat.AI_MAX_TOKENS, DEFAULT_AI_RUNTIME.maxTokens, 256, 32_000),
     priceInputPerMTok: float(flat.AI_PRICE_INPUT_PER_MTOK, DEFAULT_AI_RUNTIME.priceInputPerMTok, 0, 10_000),
     priceOutputPerMTok: float(flat.AI_PRICE_OUTPUT_PER_MTOK, DEFAULT_AI_RUNTIME.priceOutputPerMTok, 0, 10_000),
+    rateLimitPerMinute: num(flat.AI_RATE_LIMIT_PER_MINUTE, DEFAULT_AI_RUNTIME.rateLimitPerMinute, 0, 10_000),
+    dailyTokenQuota: num(flat.AI_DAILY_TOKEN_QUOTA, DEFAULT_AI_RUNTIME.dailyTokenQuota, 0, 1_000_000_000),
   };
 
   const parsedRules = parseJson<ComplianceRule[]>(flat.COMPLIANCE_RULES, DEFAULT_COMPLIANCE_RULES, onError);
@@ -268,7 +344,34 @@ export function applyRuntimeConfig(flat: Record<string, string | undefined>, onE
     snapshot.compliance = DEFAULT_COMPLIANCE_RULES.map((rule) => ({ ...rule, terms: [...rule.terms] }));
   }
 
+  snapshot.auth = {
+    accessExpires: text(flat.AUTH_ACCESS_EXPIRES, DEFAULT_AUTH_RUNTIME.accessExpires),
+    refreshExpires: text(flat.AUTH_REFRESH_EXPIRES, DEFAULT_AUTH_RUNTIME.refreshExpires),
+  };
+
+  const parsedMatrix = parseJson<Record<string, string[]>>(flat.PERMISSION_MATRIX, DEFAULT_PERMISSION_MATRIX_RUNTIME, onError);
+  const parsedLabels = parseJson<Record<string, string>>(flat.ROLE_LABELS, DEFAULT_ROLE_LABELS_RUNTIME, onError);
+  snapshot.permissions = {
+    matrix:
+      parsedMatrix && typeof parsedMatrix === 'object' && Object.keys(parsedMatrix).length > 0
+        ? Object.fromEntries(
+            Object.entries(parsedMatrix).map(([capability, roles]) => [
+              capability,
+              Array.isArray(roles) ? roles.map((role) => String(role)) : [],
+            ]),
+          )
+        : { ...DEFAULT_PERMISSION_MATRIX_RUNTIME },
+    roleLabels:
+      parsedLabels && typeof parsedLabels === 'object' && Object.keys(parsedLabels).length > 0
+        ? Object.fromEntries(Object.entries(parsedLabels).map(([code, label]) => [code, String(label)]))
+        : { ...DEFAULT_ROLE_LABELS_RUNTIME },
+  };
+
   snapshot.publish = {
+    streamName: text(flat.PUBLISH_STREAM_NAME, DEFAULT_PUBLISH_RUNTIME.streamName),
+    groupName: text(flat.PUBLISH_GROUP_NAME, DEFAULT_PUBLISH_RUNTIME.groupName),
+    notificationRetentionDays: num(flat.NOTIFICATION_RETENTION_DAYS, DEFAULT_PUBLISH_RUNTIME.notificationRetentionDays, 0, 3650),
+    aiMetadataEnabled: bool(flat.AI_METADATA_ENABLED, DEFAULT_PUBLISH_RUNTIME.aiMetadataEnabled),
     readBlockMs: num(flat.PUBLISH_READ_BLOCK_MS, DEFAULT_PUBLISH_RUNTIME.readBlockMs, 200, 60_000),
     readCount: num(flat.PUBLISH_READ_COUNT, DEFAULT_PUBLISH_RUNTIME.readCount, 1, 100),
     claimIdleMs: num(flat.PUBLISH_CLAIM_IDLE_MS, DEFAULT_PUBLISH_RUNTIME.claimIdleMs, 5_000, 3_600_000),
@@ -282,9 +385,14 @@ export function applyRuntimeConfig(flat: Record<string, string | undefined>, onE
 export function defaultConfigSnapshot(): RuntimeConfig {
   return {
     site: { ...DEFAULT_SITE },
+    auth: { ...DEFAULT_AUTH_RUNTIME },
     knowledge: { ...DEFAULT_KNOWLEDGE_RUNTIME },
     ai: { ...DEFAULT_AI_RUNTIME, platformGuidance: { ...DEFAULT_AI_RUNTIME.platformGuidance } },
     compliance: DEFAULT_COMPLIANCE_RULES.map((rule) => ({ ...rule, terms: [...rule.terms] })),
     publish: { ...DEFAULT_PUBLISH_RUNTIME },
+    permissions: {
+      matrix: { ...DEFAULT_PERMISSION_MATRIX_RUNTIME },
+      roleLabels: { ...DEFAULT_ROLE_LABELS_RUNTIME },
+    },
   };
 }

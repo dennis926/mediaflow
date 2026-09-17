@@ -21,6 +21,11 @@ export interface PublishPayload {
   coverUrl?: string;
   scheduledAt?: string;
   aiGenerated: boolean;
+  /**
+   * AI 生成内容的隐式标识元数据（《人工智能生成合成内容标识办法》要求）。
+   * 插件/适配器在写图片或视频元数据时使用；未开启时为空。
+   */
+  aiMetadata?: Record<string, string>;
 }
 
 export type PublishOutcome = 'published' | 'manual_required' | 'pending' | 'failed';

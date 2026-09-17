@@ -759,12 +759,17 @@ export class KnowledgeService implements OnModuleInit {
       categoriesApplied = true;
     }
 
-    const { entries, skipped } = this.transfer.buildEntries(dto.rows, dto.mapping, {
-      brand: dto.brand,
-      category: dto.category,
-      priority: dto.priority ?? 0,
-      isActive: dto.isActive ?? true,
-    });
+    const { entries, skipped } = this.transfer.buildEntries(
+      dto.rows,
+      dto.mapping,
+      {
+        brand: dto.brand,
+        category: dto.category,
+        priority: dto.priority ?? 0,
+        isActive: dto.isActive ?? true,
+      },
+      await this.categories(),
+    );
 
     if (entries.length === 0) {
       throw new BadRequestException(`没有可入库的内容：${skipped.slice(0, 3).map((item) => `第 ${item.row} 行 ${item.reason}`).join('；')}`);
@@ -982,7 +987,7 @@ export class KnowledgeService implements OnModuleInit {
 
   /** 归一化文本的 3-gram 集合（去空白与标点）。 */
   private static grams(text: string): Set<string> {
-    const normalized = text.replace(/[\s，。、；：！？,.;:!?"'（）()【】\[\]-]/g, '');
+    const normalized = text.replace(/[\s，。、；：！？,.;:!?"'（）()【】[\]-]/g, '');
     const grams = new Set<string>();
     for (let index = 0; index + 3 <= normalized.length; index += 1) grams.add(normalized.slice(index, index + 3));
     return grams;

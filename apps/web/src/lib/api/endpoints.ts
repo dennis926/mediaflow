@@ -98,6 +98,8 @@ export const contentApi = {
   create: (payload: ContentPayload) => api.post<Content>('/contents', payload),
   update: (id: string, payload: Partial<ContentPayload>) => api.put<Content>(`/contents/${id}`, payload),
   remove: (id: string) => api.delete<{ id: string; deletedAt: string }>(`/contents/${id}`),
+  /** 归档 / 取消归档：保留历史，不再参与发布与检索 */
+  archive: (id: string, archived: boolean) => api.patch<Content>(`/contents/${id}/archive`, { archived }),
   variants: (id: string) => api.get<ContentVariant[]>(`/contents/${id}/variants`),
   aiAdapt: (id: string, payload: { platforms: PlatformCode[]; tone?: string; keywords?: string[]; overwrite?: boolean }) =>
     api.post<AdaptResult>(`/contents/${id}/ai-adapt`, payload),

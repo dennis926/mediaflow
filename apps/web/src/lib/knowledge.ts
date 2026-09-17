@@ -64,6 +64,8 @@ const FALLBACK_SITE: SiteConfigView = {
   tagline: '内容分发与矩阵运营',
   company: '',
   supportEmail: '',
+  brandColor: '#4F6BFF',
+  logoUrl: '',
   pageSize: 10,
   aiDisclosureSuffix: '（本文由 AI 辅助生成）',
 };

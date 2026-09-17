@@ -205,3 +205,24 @@ E2E_ADMIN_EMAIL=you@example.com E2E_ADMIN_PASSWORD=... pnpm --filter @mediaflow/
 - 数据库：`pg_dump -U mediaflow mediaflow > mediaflow_$(date +%F).sql`
 - 上传/构建产物：`apps/*/dist`、`/www/wwwroot/auto.liangyijianye.cn/h5`
 - 配置：`.env`（含密钥，单独安全存放，不要提交到仓库）
+
+
+## 交付给其他公司：改配置即可上线
+
+1. **站点信息**：名称、副标题、公司、支持邮箱、品牌主色、Logo、每页条数、AI 标识文案 —— 「设置 → 站点信息」。
+2. **AI 服务**：服务商/Key/模型/写作规范/各平台风格/随机度/最大输出/单价/限流与每日额度 —— 「设置 → AI 服务」。
+3. **合规词库**：违规词 + 原因 + 建议 + 扣分权重 —— 「设置 → 合规词库」。
+4. **知识库**：分类（可视化编辑）、引用条数、切片长度/重叠/片数、单文件上限、OCR 开关与参数 —— 「设置 → 知识库」。
+5. **发布队列**：Worker 开关、重试次数与间隔、轮询参数、通知保留天数、队列名、AI 元数据开关 —— 「设置 → 发布队列」。
+6. **角色与权限**：权限矩阵、角色显示名、登录有效期与免登录时长 —— 「设置 → 角色与权限」。
+7. **平台密钥**：微信/抖音/小红书 AppID 与 Secret —— 「设置 → 平台密钥」。
+
+### 初始化数据
+- 示例品牌资料放在 `apps/api/src/database/seeds/sample-knowledge.json`，**可以直接替换成自己的资料**；
+- 或者设 `SEED_SAMPLE_CONTENT=false` 跳过示例数据（推荐交付时这么做）；
+- 也可以用 `SEED_KNOWLEDGE_FILE=/path/to/your.json` 指定自己的初始化文件；
+- 知识库还能整包迁移：导出 JSON（含分类配置）→ 新环境导入。
+
+### 浏览器插件品牌
+- 插件名称/说明在 `apps/plugin/plugin.config.json`，或用环境变量 `PLUGIN_NAME` / `PLUGIN_DESCRIPTION` 覆盖后重新构建；
+- 插件弹窗里的站点名是运行时从 `/api/public/site-config` 读取的，改后台配置即可，不用重新打包。

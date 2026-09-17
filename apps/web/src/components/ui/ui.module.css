@@ -689,3 +689,10 @@
   color: var(--mf-color-neutral-500);
   padding: 0 var(--mf-space-3);
 }
+
+.brandLogo {
+  width: var(--mf-size-icon-lg, 32px);
+  height: var(--mf-size-icon-lg, 32px);
+  object-fit: contain;
+  border-radius: var(--mf-radius-sm);
+}

@@ -3,7 +3,7 @@ import { IsIn, IsInt, IsObject, IsOptional, IsString, IsUUID, Length, Max, Min }
 import { Type } from 'class-transformer';
 import { PlatformCode } from '@mediaflow/shared';
 import { AnalyticsService, AccountRanking, ContentMetrics, OverviewResult, TrendPoint } from './analytics.service';
-import { Roles } from '../auth/roles.decorator';
+import { Capability } from '../auth/capabilities';
 import { PluginMetricsDto } from './plugin-metrics.dto';
 
 class TrendQueryDto {
@@ -76,7 +76,7 @@ export class AnalyticsController {
     return this.analyticsService.accountRanking();
   }
 
-  @Roles('owner', 'admin')
+  @Capability('analytics.sync')
   @Post('sync')
   sync(@Body() dto: SyncDto): Promise<{ synced: number; failed: number; results: Array<{ taskId: string; platform: PlatformCode; ok: boolean; message: string }> }> {
     return this.analyticsService.sync(dto);

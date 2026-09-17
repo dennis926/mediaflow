@@ -4,7 +4,7 @@ import { PlatformCode } from '@mediaflow/shared';
 import { toActor } from '../auth/actor.util';
 import { AuthUser } from '../auth/auth.types';
 import { CurrentUser } from '../auth/current-user.decorator';
-import { Roles } from '../auth/roles.decorator';
+import { Capability } from '../auth/capabilities';
 import { AccountView, SocialAccountService } from './social-account.service';
 
 class BindAccountDto {
@@ -52,13 +52,13 @@ export class SocialAccountController {
     return this.accountService.list(platform);
   }
 
-  @Roles('owner', 'admin')
+  @Capability('platform.bind')
   @Post('bind')
   bind(@Body() dto: BindAccountDto, @CurrentUser() user?: AuthUser): Promise<AccountView> {
     return this.accountService.bind(dto, toActor(user));
   }
 
-  @Roles('owner', 'admin')
+  @Capability('platform.bind')
   @Delete(':id')
   unbind(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user?: AuthUser): Promise<{ id: string }> {
     return this.accountService.unbind(id, toActor(user));

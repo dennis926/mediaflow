@@ -32,7 +32,8 @@
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| POST | `/api/auth/login` | **公开**。邮箱 + 密码（bcrypt 校验）→ JWT（默认 2h，`JWT_ACCESS_EXPIRES` 可配） |
+| POST | `/api/auth/login` | 登录，返回 `accessToken` 与 `refreshToken`（有效期分别由 AUTH_ACCESS_EXPIRES / AUTH_REFRESH_EXPIRES 配置） |
+| POST | `/api/auth/refresh` | 用 `refreshToken` 换新令牌；前端 401 时自动调用一次 | **公开**。邮箱 + 密码（bcrypt 校验）→ JWT（默认 2h，`JWT_ACCESS_EXPIRES` 可配） |
 | GET | `/api/auth/me` | 当前登录用户（含角色） |
 
 - 全局 `JwtAuthGuard`：`@Public()` 标记的接口（`/api/health`、`/api/auth/login`、`/api/publish/adapters`、`/api/ai/status`）免鉴权
@@ -86,6 +87,7 @@
 | POST | `/api/contents` | 创建内容；`aiFlagType != none` 时自动置 `aiGenerated=true` 并把 AI 标识写入正文 |
 | GET | `/api/contents/:id` | 详情（含平台版本） |
 | PUT | `/api/contents/:id` | 更新（同样重算 AI 标识） |
+| PATCH | `/api/contents/:id/archive` | **归档 / 取消归档**（body `{archived: true|false}`）：归档后不再参与发布与检索，历史保留 |
 | DELETE | `/api/contents/:id` | 软删除（`deleted_at`，列表与详情立即不可见） |
 | PATCH | `/api/contents/:id/ai-flag-check` | 标记 AI 标识已复核（`aiFlagChecked=true/true` 才能发布 AI 内容） |
 | GET | `/api/contents/:id/variants` | 平台版本列表 |

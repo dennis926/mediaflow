@@ -1,4 +1,3 @@
-import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
 import * as bcrypt from 'bcrypt';
@@ -9,7 +8,8 @@ import { AuditService } from '../../audit/audit.service';
 import { REDIS_CLIENT } from '../../redis/redis.constants';
 import { RoleCode } from '../workspace/entities/role.entity';
 import { User } from '../workspace/entities/user.entity';
-import { AuthUser, LoginResult } from './auth.types';
+import { runtime } from '../settings/runtime-config';
+import { AuthUser, LoginResult, RefreshTokenPayload } from './auth.types';
 
 @Injectable()
 export class AuthService {
@@ -18,7 +18,6 @@ export class AuthService {
   constructor(
     @InjectRepository(User) private readonly users: Repository<User>,
     private readonly jwtService: JwtService,
-    private readonly config: ConfigService,
     private readonly audit: AuditService,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
   ) {}
@@ -48,6 +47,59 @@ export class AuthService {
       .expire(key, AuthService.LOCK_SECONDS)
       .exec()
       .catch(() => undefined);
+  }
+
+  /** 签发访问令牌与刷新令牌；有效期都来自配置（设置 → 角色与权限）。 */
+  private async issueTokens(user: AuthUser): Promise<{ accessToken: string; refreshToken: string; expiresIn: string }> {
+    const { accessExpires, refreshExpires } = runtime().auth;
+    const accessToken = await this.jwtService.signAsync(
+      {
+        sub: user.id,
+        email: user.email,
+        displayName: user.displayName,
+        tenantId: user.tenantId,
+        workspaceId: user.workspaceId,
+        roles: user.roles,
+        isSuperAdmin: user.isSuperAdmin,
+      },
+      { expiresIn: accessExpires as unknown as number },
+    );
+    const refreshToken = await this.jwtService.signAsync(
+      { sub: user.id, type: 'refresh' } satisfies RefreshTokenPayload,
+      { expiresIn: refreshExpires as unknown as number },
+    );
+    return { accessToken, refreshToken, expiresIn: accessExpires };
+  }
+
+  /**
+   * 用刷新令牌换新令牌：用户在这段时间内打开系统不必重新登录。
+   * 每次都重新读库，账号被禁用/角色被改会立即生效，避免旧令牌无限续命。
+   */
+  async refresh(refreshToken: string): Promise<{ accessToken: string; refreshToken: string; expiresIn: string }> {
+    let payload: RefreshTokenPayload;
+    try {
+      payload = await this.jwtService.verifyAsync<RefreshTokenPayload>(refreshToken);
+    } catch {
+      throw new UnauthorizedException('登录状态已过期，请重新登录');
+    }
+    if (payload.type !== 'refresh') throw new UnauthorizedException('令牌类型不正确，请重新登录');
+
+    const user = await this.users.findOne({ where: { id: payload.sub } });
+    if (!user) throw new UnauthorizedException('账号不存在，请重新登录');
+    if (user.status !== 'active') throw new UnauthorizedException('账号已被禁用，请联系管理员');
+
+    const roles = await this.roleCodesOf(user.id);
+    const authUser: AuthUser = {
+      id: user.id,
+      email: user.email,
+      displayName: user.displayName,
+      tenantId: user.tenantId,
+      workspaceId: user.workspaceId,
+      roles,
+      isSuperAdmin: user.isSuperAdmin,
+      mustChangePassword: user.mustChangePassword,
+    };
+    return this.issueTokens(authUser);
   }
 
   async login(email: string, password: string, meta: { ip?: string | null; userAgent?: string | null }): Promise<LoginResult> {
@@ -80,19 +132,7 @@ export class AuthService {
       mustChangePassword: user.mustChangePassword,
     };
 
-    const expiresIn = this.config.get<string>('JWT_ACCESS_EXPIRES') ?? '2h';
-    const accessToken = await this.jwtService.signAsync(
-      {
-        sub: user.id,
-        email: user.email,
-        displayName: user.displayName,
-        tenantId: user.tenantId,
-        workspaceId: user.workspaceId,
-        roles,
-        isSuperAdmin: user.isSuperAdmin,
-      },
-      { expiresIn: expiresIn as unknown as number },
-    );
+    const { accessToken, refreshToken, expiresIn } = await this.issueTokens(authUser);
 
     await this.audit.record({
       action: 'auth.login',
@@ -108,7 +148,7 @@ export class AuthService {
     });
 
     this.logger.log(`登录成功：${user.email}`);
-    return { accessToken, expiresIn, user: authUser };
+    return { accessToken, refreshToken, expiresIn, user: authUser };
   }
 
   async profile(userId: string): Promise<AuthUser> {

@@ -1,7 +1,7 @@
-import { BadGatewayException, Injectable, Logger } from '@nestjs/common';
+import { BadGatewayException, HttpException, HttpStatus, Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { AiFlagType, PLATFORM_LABELS, PlatformCode } from '@mediaflow/shared';
-import { FindOptionsWhere, Repository } from 'typeorm';
+import { FindOptionsWhere, MoreThan, Repository } from 'typeorm';
 import { WorkspaceContextService } from '../../common/workspace-context.service';
 import { AiGeneration } from './entities/ai-generation.entity';
 import {
@@ -232,6 +232,8 @@ export class AiService {
       });
       report.aiReview = invocation.result;
     } catch (error) {
+      // 额度/限流属于"必须让用户看到"的错误，不能退化成静默的规则结果。
+      if (error instanceof HttpException) throw error;
       this.logger.warn(`AI 合规复核不可用，已返回规则结果：${error instanceof Error ? error.message : String(error)}`);
     }
     return report;
@@ -266,6 +268,7 @@ export class AiService {
   }): Promise<{ result: T; generationId: string; model: string }> {
     const scope = await this.workspaceContext.current();
     const startedAt = Date.now();
+    await this.assertWithinQuota(scope.workspaceId);
 
     const provider = await this.aiProviders.get();
     try {
@@ -324,6 +327,42 @@ export class AiService {
         }),
       );
       throw new BadGatewayException(`AI 服务调用失败：${message}`);
+    }
+  }
+
+  /**
+   * 额度保护：每分钟次数与每日 token 上限都可配置（设置 → AI 服务）。
+   * 关闭限流（填 0）时不做任何查询，不增加正常开销。
+   */
+  private async assertWithinQuota(workspaceId: string): Promise<void> {
+    const { rateLimitPerMinute, dailyTokenQuota } = runtime().ai;
+
+    if (rateLimitPerMinute > 0) {
+      const since = new Date(Date.now() - 60_000);
+      const recent = await this.generations.count({ where: { workspaceId, createdAt: MoreThan(since) } });
+      if (recent >= rateLimitPerMinute) {
+        throw new HttpException(
+          `AI 调用过于频繁：每分钟最多 ${rateLimitPerMinute} 次，请稍后再试（可在「设置 → AI 服务」调整）`,
+          HttpStatus.TOO_MANY_REQUESTS,
+        );
+      }
+    }
+
+    if (dailyTokenQuota > 0) {
+      const dayStart = new Date();
+      dayStart.setHours(0, 0, 0, 0);
+      const row = await this.generations
+        .createQueryBuilder('generation')
+        .select('COALESCE(SUM(generation.tokensInput + generation.tokensOutput), 0)', 'total')
+        .where('generation.workspaceId = :workspaceId AND generation.createdAt >= :dayStart', { workspaceId, dayStart })
+        .getRawOne<{ total: string }>();
+      const used = Number(row?.total ?? 0);
+      if (used >= dailyTokenQuota) {
+        throw new HttpException(
+          `今日 AI 额度已用完（已用 ${used} / 上限 ${dailyTokenQuota} token），明天自动恢复（可在「设置 → AI 服务」调整）`,
+          HttpStatus.TOO_MANY_REQUESTS,
+        );
+      }
     }
   }
 

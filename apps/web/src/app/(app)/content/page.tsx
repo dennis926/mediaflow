@@ -76,6 +76,15 @@ export default function ContentListPage() {
     },
   });
 
+  const archive = useMutation({
+    mutationFn: ({ id, archived }: { id: string; archived: boolean }) => contentApi.archive(id, archived),
+    onSuccess: (_result, variables) => {
+      setFeedback(variables.archived ? '内容已归档：不再参与发布与检索，可随时取消归档' : '已取消归档，内容回到草稿状态');
+      void queryClient.invalidateQueries({ queryKey: ['contents'] });
+    },
+    onError: (error: unknown) => setFeedback(error instanceof ApiError ? error.message : '归档失败'),
+  });
+
   const columns: Array<Column<Content>> = [
     {
       key: 'title',
@@ -130,7 +139,7 @@ export default function ContentListPage() {
     {
       key: 'actions',
       title: '操作',
-      width: '150px',
+      width: '220px',
       align: 'right',
       render: (row) => (
         <div className={styles.actions}>
@@ -141,6 +150,14 @@ export default function ContentListPage() {
             onClick={() => router.push(`/content/${row.id}/edit`)}
           >
             编辑
+          </Button>
+          <Button
+            variant="text"
+            size="sm"
+            loading={archive.isPending && archive.variables?.id === row.id}
+            onClick={() => archive.mutate({ id: row.id, archived: row.status !== ContentStatus.Archived })}
+          >
+            {row.status === ContentStatus.Archived ? '取消归档' : '归档'}
           </Button>
           <Button
             variant="text"

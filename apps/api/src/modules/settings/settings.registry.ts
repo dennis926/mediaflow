@@ -1,4 +1,4 @@
-export type SettingGroup = 'site' | 'ai' | 'compliance' | 'knowledge' | 'publish' | 'platform';
+export type SettingGroup = 'site' | 'permissions' | 'ai' | 'compliance' | 'knowledge' | 'publish' | 'platform';
 
 export interface SettingDefinition {
   key: string;
@@ -100,6 +100,24 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
     placeholder: '10',
   },
   {
+    key: 'SITE_BRAND_COLOR',
+    group: 'site',
+    label: '品牌主色（十六进制）',
+    description: '界面按钮、链接、标签的主色；填一个颜色，系统自动推导深浅色阶（例如 #4F6BFF）',
+    secret: false,
+    envKey: 'SITE_BRAND_COLOR',
+    placeholder: '#4F6BFF',
+  },
+  {
+    key: 'SITE_LOGO_URL',
+    group: 'site',
+    label: 'Logo 图片地址',
+    description: '侧边栏左上角使用；留空则用站点名首字作为图标',
+    secret: false,
+    envKey: 'SITE_LOGO_URL',
+    placeholder: 'https://example.com/logo.png',
+  },
+  {
     key: 'AI_DISCLOSURE_SUFFIX',
     group: 'site',
     label: 'AI 生成内容标识后缀',
@@ -107,6 +125,43 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
     secret: false,
     envKey: 'AI_DISCLOSURE_SUFFIX',
     placeholder: '（本文由 AI 辅助生成）',
+  },
+  {
+    key: 'PERMISSION_MATRIX',
+    group: 'permissions',
+    label: '权限矩阵（JSON）',
+    description:
+      '能力点 → 允许的角色。可用能力点：settings.write（改设置）、users.manage（管用户）、users.privileged（删用户/改角色）、content.write（写内容）、content.review（审核）、publish.execute（发布）、knowledge.write（知识库）、platform.bind（绑账号）、analytics.sync（同步数据）',
+    secret: false,
+    envKey: 'PERMISSION_MATRIX',
+    placeholder: '{"settings.write":["owner","admin"],"publish.execute":["owner","admin","editor"]}',
+  },
+  {
+    key: 'AUTH_ACCESS_EXPIRES',
+    group: 'permissions',
+    label: '登录有效期',
+    description: '访问令牌有效期，默认 2h；到期前端会自动用刷新令牌续期',
+    secret: false,
+    envKey: 'JWT_ACCESS_EXPIRES',
+    placeholder: '2h',
+  },
+  {
+    key: 'AUTH_REFRESH_EXPIRES',
+    group: 'permissions',
+    label: '免登录时长',
+    description: '刷新令牌有效期，默认 7d；在这段时间内打开系统无需重新登录',
+    secret: false,
+    envKey: 'JWT_REFRESH_EXPIRES',
+    placeholder: '7d',
+  },
+  {
+    key: 'ROLE_LABELS',
+    group: 'permissions',
+    label: '角色显示名（JSON）',
+    description: '把内置角色改成贵公司的叫法，例如 {"admin":"运营主管","reviewer":"内容负责人"}',
+    secret: false,
+    envKey: 'ROLE_LABELS',
+    placeholder: '{"admin":"运营主管"}',
   },
   {
     key: 'AI_SYSTEM_PROMPT',
@@ -160,6 +215,24 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
     secret: false,
     envKey: 'AI_PRICE_OUTPUT_PER_MTOK',
     placeholder: '8',
+  },
+  {
+    key: 'AI_RATE_LIMIT_PER_MINUTE',
+    group: 'ai',
+    label: '每分钟最多生成次数',
+    description: '防止误触发把额度刷掉；填 0 表示不限制',
+    secret: false,
+    envKey: 'AI_RATE_LIMIT_PER_MINUTE',
+    placeholder: '0',
+  },
+  {
+    key: 'AI_DAILY_TOKEN_QUOTA',
+    group: 'ai',
+    label: '每日 token 上限',
+    description: '当天累计 token 达到上限后停止调用，避免账单失控；填 0 表示不限制',
+    secret: false,
+    envKey: 'AI_DAILY_TOKEN_QUOTA',
+    placeholder: '0',
   },
   {
     key: 'COMPLIANCE_RULES',
@@ -261,6 +334,45 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
     secret: false,
     envKey: 'KB_OCR_DPI',
     placeholder: '200',
+  },
+  {
+    key: 'NOTIFICATION_RETENTION_DAYS',
+    group: 'publish',
+    label: '通知保留天数',
+    description: '超过该天数的站内通知会被自动清理（默认 90，填 0 表示永久保留）',
+    secret: false,
+    envKey: 'NOTIFICATION_RETENTION_DAYS',
+    placeholder: '90',
+  },
+  {
+    key: 'AI_METADATA_ENABLED',
+    group: 'publish',
+    label: '发布时写入 AI 生成标识元数据',
+    description: '按《人工智能生成合成内容标识办法》要求，AI 生成内容的图片/视频需要隐式标识；开启后发布负载会带上元数据',
+    secret: false,
+    envKey: 'AI_METADATA_ENABLED',
+    options: [
+      { value: 'true', label: '开启' },
+      { value: 'false', label: '关闭' },
+    ],
+  },
+  {
+    key: 'PUBLISH_STREAM_NAME',
+    group: 'publish',
+    label: '队列名称',
+    description: 'Redis Stream 名称，默认 mediaflow:publish:tasks；改名前请确认没有排队中的任务',
+    secret: false,
+    envKey: 'PUBLISH_STREAM_NAME',
+    placeholder: 'mediaflow:publish:tasks',
+  },
+  {
+    key: 'PUBLISH_GROUP_NAME',
+    group: 'publish',
+    label: '消费组名称',
+    description: '默认 publish-workers；与队列名一起改可让新环境使用独立队列',
+    secret: false,
+    envKey: 'PUBLISH_GROUP_NAME',
+    placeholder: 'publish-workers',
   },
   {
     key: 'PUBLISH_MAX_ATTEMPTS',
@@ -402,6 +514,7 @@ export const SETTING_BY_KEY = new Map(SETTING_DEFINITIONS.map((definition) => [d
 
 export const SETTING_GROUP_LABELS: Record<SettingGroup, string> = {
   site: '站点信息',
+  permissions: '角色与权限',
   ai: 'AI 服务',
   compliance: '合规词库',
   knowledge: '知识库',

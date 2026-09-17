@@ -2,7 +2,7 @@ import { Body, Controller, Get, Param, ParseUUIDPipe, Post } from '@nestjs/commo
 import { toActor } from '../auth/actor.util';
 import { AuthUser } from '../auth/auth.types';
 import { CurrentUser } from '../auth/current-user.decorator';
-import { Roles } from '../auth/roles.decorator';
+import { Capability } from '../auth/capabilities';
 import { AiAdaptDto } from '../ai/dto/ai.dto';
 import { ContentVariant } from './entities/content-variant.entity';
 import { AdaptResult, ContentService } from './content.service';
@@ -17,7 +17,7 @@ export class ContentVariantController {
   }
 
   /** Generates per-platform versions of one content through the AI service. */
-  @Roles('owner', 'admin', 'editor')
+  @Capability('content.write')
   @Post(':id/ai-adapt')
   adapt(
     @Param('id', ParseUUIDPipe) id: string,

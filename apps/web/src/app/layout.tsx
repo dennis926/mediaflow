@@ -3,7 +3,7 @@ import '@mediaflow/design-tokens/tokens.css';
 import './globals.css';
 import { tokens } from '@mediaflow/design-tokens';
 import { Providers } from '../lib/providers';
-import { SiteTitle } from '../components/layout/SiteTitle';
+import { SiteTheme } from '../components/layout/SiteTheme';
 
 export const metadata: Metadata = {
   // 站点名可在后台配置，这里只是首屏兜底（客户端由 SiteTitle 同步）
@@ -22,7 +22,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="zh-CN">
       <body>
         <Providers>
-          <SiteTitle />
+          <SiteTheme />
           {children}
         </Providers>
       </body>

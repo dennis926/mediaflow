@@ -8,6 +8,8 @@ import { IS_PUBLIC_KEY } from './public.decorator';
 
 interface JwtPayload {
   sub: string;
+  /** 刷新令牌带 type='refresh'，只能用于换新令牌，不能直接访问业务接口 */
+  type?: string;
   email: string;
   displayName: string;
   tenantId: string;
@@ -35,6 +37,10 @@ export class JwtAuthGuard implements CanActivate {
     if (token) {
       try {
         const payload = this.jwtService.verify<JwtPayload>(token);
+        // 只接受"访问令牌"形态：刷新令牌没有角色信息，若被放行会退化成无角色身份。
+        if (payload.type === 'refresh' || !payload.sub || !payload.workspaceId || !Array.isArray(payload.roles)) {
+          throw new UnauthorizedException('令牌类型不正确，请重新登录');
+        }
         request.user = {
           id: payload.sub,
           email: payload.email,

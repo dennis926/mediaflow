@@ -15,6 +15,8 @@ export class PublicConfigController {
     tagline: string;
     company: string;
     supportEmail: string;
+    brandColor: string;
+    logoUrl: string;
     pageSize: number;
     aiDisclosureSuffix: string;
   } {

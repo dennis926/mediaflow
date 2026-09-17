@@ -300,3 +300,24 @@ describe('KnowledgeService 复核后提交（parse → commit）', () => {
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 });
+
+describe('导入外部数据：分类归一化', () => {
+  it('外部文件的分类名（中文/大写）会映射到现有分类，未知值回退默认分类', () => {
+    const transfer = new KnowledgeTransferService();
+    const { entries } = transfer.buildEntries(
+      [
+        { 标题: '中文分类', 答案: '这是一段足够长的正文内容，用来通过入库长度校验。', 分类: '产品卖点' },
+        { 标题: '大写分类', 答案: '这是一段足够长的正文内容，用来通过入库长度校验。', 分类: 'PRODUCT' },
+        { 标题: '未知分类', 答案: '这是一段足够长的正文内容，用来通过入库长度校验。', 分类: '不存在的分类' },
+      ],
+      { title: '标题', content: '答案', category: '分类' },
+      { brand: '测试品牌', category: 'faq', priority: 0, isActive: true },
+      [
+        { code: 'product', label: '产品卖点' },
+        { code: 'faq', label: '常见问答' },
+      ],
+    );
+
+    expect(entries.map((entry) => entry.category)).toEqual(['product', 'product', 'faq']);
+  });
+});

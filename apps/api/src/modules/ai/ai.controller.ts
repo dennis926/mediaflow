@@ -3,6 +3,7 @@ import { toActor } from '../auth/actor.util';
 import { AuthUser } from '../auth/auth.types';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { Public } from '../auth/public.decorator';
+import { Capability } from '../auth/capabilities';
 import { Roles } from '../auth/roles.decorator';
 import { AiGeneration } from './entities/ai-generation.entity';
 import { AiService } from './ai.service';
@@ -19,7 +20,7 @@ export class AiController {
     return this.aiService.describe();
   }
 
-  @Roles('owner', 'admin', 'editor')
+  @Capability('content.write')
   @Post('generate')
   generate(
     @Body() dto: GenerateTextDto,
@@ -31,7 +32,7 @@ export class AiController {
     });
   }
 
-  @Roles('owner', 'admin', 'editor')
+  @Capability('content.write')
   @Post('optimize-title')
   optimizeTitle(
     @Body() dto: OptimizeTitleDto,
@@ -40,7 +41,7 @@ export class AiController {
     return this.aiService.optimizeTitle(dto.title, dto.platform, dto.keywords, { requestedBy: toActor(user).id ?? null });
   }
 
-  @Roles('owner', 'admin', 'editor')
+  @Capability('content.write')
   @Post('compliance-check')
   complianceCheck(
     @Body() dto: ComplianceCheckDto,

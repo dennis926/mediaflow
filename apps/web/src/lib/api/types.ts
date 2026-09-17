@@ -218,6 +218,8 @@ export interface SiteConfigView {
   tagline: string;
   company: string;
   supportEmail: string;
+  brandColor: string;
+  logoUrl: string;
   /** 列表默认每页条数（可在「设置 → 站点信息」调整） */
   pageSize: number;
   aiDisclosureSuffix: string;

@@ -8,6 +8,7 @@ import { SocialAccountService } from '../../modules/platform/social-account.serv
 import { WorkspaceContextService } from '../../common/workspace-context.service';
 import { ContentVariant } from '../../modules/content/entities/content-variant.entity';
 import { Content } from '../../modules/content/entities/content.entity';
+import { AiGeneration } from '../../modules/ai/entities/ai-generation.entity';
 import { SocialAccount } from '../../modules/platform/entities/social-account.entity';
 import { PublishTask } from '../../modules/publish/entities/publish-task.entity';
 import { PublishQueueService } from '../publish.queue';
@@ -48,11 +49,14 @@ function buildService(options: {
     getBoolean: vi.fn(async (_key: string, fallback: boolean) => fallback),
   } as unknown as SettingsService;
 
+  const aiGenerations = repositoryMock<AiGeneration>({ findOne: vi.fn(async () => null) });
+
   const service = new PublishService(
     tasks,
     contents,
     variants,
     accounts,
+    aiGenerations,
     socialAccounts,
     registry as never,
     queue,

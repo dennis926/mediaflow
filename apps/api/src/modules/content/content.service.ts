@@ -152,6 +152,31 @@ export class ContentService {
   }
 
   /** Soft delete: the row is kept, only deleted_at is set, and it disappears from every query. */
+  /**
+   * 归档：内容不再参与发布与检索，但保留全部历史（比删除更温和、可随时恢复）。
+   * 已发布过的稿件建议归档而不是删除，避免数据断链。
+   */
+  async archive(id: string, archived: boolean, actor: ContentActor): Promise<Content> {
+    const content = await this.get(id);
+    const previous = content.status;
+    await this.contents.update(
+      { id },
+      { status: archived ? ContentStatus.Archived : ContentStatus.Draft },
+    );
+    await this.audit.record({
+      action: archived ? 'content.archive' : 'content.unarchive',
+      resourceType: 'content',
+      resourceId: content.id,
+      tenantId: content.tenantId,
+      workspaceId: content.workspaceId,
+      actorId: actor.id ?? null,
+      actorName: actor.name ?? null,
+      payload: { previousStatus: previous },
+    });
+    this.logger.log(`内容 ${content.id} 已${archived ? '归档' : '取消归档'}`);
+    return this.get(id);
+  }
+
   async remove(id: string, actor: ContentActor): Promise<{ id: string; deletedAt: Date }> {
     const content = await this.get(id);
     // 级联软删平台版本，避免内容删了但版本还留在库里造成统计漂移。

@@ -1,6 +1,7 @@
 import type { ApiResponse } from '@mediaflow/shared';
 
 export const TOKEN_STORAGE_KEY = 'mediaflow.token';
+export const REFRESH_STORAGE_KEY = 'mediaflow.refresh';
 
 export class ApiError extends Error {
   constructor(
@@ -18,6 +19,8 @@ export interface RequestOptions {
   body?: unknown;
   query?: Record<string, string | number | boolean | undefined | null>;
   signal?: AbortSignal;
+  /** 内部使用：续期后只重放一次，避免刷新成功但令牌仍被拒时无限递归 */
+  retried?: boolean;
 }
 
 export function getToken(): string | null {
@@ -25,10 +28,54 @@ export function getToken(): string | null {
   return window.localStorage.getItem(TOKEN_STORAGE_KEY);
 }
 
-export function setToken(token: string | null): void {
+export function setToken(token: string | null, refreshToken?: string | null): void {
   if (typeof window === 'undefined') return;
   if (token) window.localStorage.setItem(TOKEN_STORAGE_KEY, token);
   else window.localStorage.removeItem(TOKEN_STORAGE_KEY);
+  if (refreshToken === undefined) return;
+  if (refreshToken) window.localStorage.setItem(REFRESH_STORAGE_KEY, refreshToken);
+  else window.localStorage.removeItem(REFRESH_STORAGE_KEY);
+}
+
+export function getRefreshToken(): string | null {
+  if (typeof window === 'undefined') return null;
+  return window.localStorage.getItem(REFRESH_STORAGE_KEY);
+}
+
+function clearSession(): void {
+  setToken(null, null);
+}
+
+/**
+ * 用刷新令牌换新的访问令牌；并发请求只发一次刷新（单飞），避免令牌被刷新多次。
+ * 免登录时长由后台配置（AUTH_REFRESH_EXPIRES，默认 7 天）。
+ */
+let refreshInFlight: Promise<boolean> | null = null;
+
+export function refreshSession(): Promise<boolean> {
+  if (refreshInFlight) return refreshInFlight;
+  const refreshToken = getRefreshToken();
+  if (!refreshToken) return Promise.resolve(false);
+
+  refreshInFlight = fetch('/api/auth/refresh', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ refreshToken }),
+  })
+    .then(async (response) => {
+      if (!response.ok) return false;
+      const payload = (await response.json()) as { data?: { accessToken?: string; refreshToken?: string } };
+      const accessToken = payload.data?.accessToken;
+      if (!accessToken) return false;
+      setToken(accessToken, payload.data?.refreshToken ?? refreshToken);
+      return true;
+    })
+    .catch(() => false)
+    .finally(() => {
+      refreshInFlight = null;
+    });
+
+  return refreshInFlight;
 }
 
 function buildUrl(path: string, query?: RequestOptions['query']): string {
@@ -67,7 +114,11 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
   }
 
   if (response.status === 401) {
-    setToken(null);
+    // 访问令牌过期：先用刷新令牌续期并重放一次请求，失败才跳登录
+    if (!options.retried && (await refreshSession())) {
+      return apiRequest<T>(path, { ...options, retried: true });
+    }
+    clearSession();
     if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
       window.location.href = '/login';
     }
@@ -98,8 +149,8 @@ export async function apiUpload<T>(path: string, form: FormData): Promise<T> {
       payload = null;
     }
   }
-  if (response.status === 401) {
-    setToken(null);
+  if (response.status === 401 && !(await refreshSession())) {
+    clearSession();
     if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
       window.location.href = '/login';
     }

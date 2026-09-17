@@ -24,6 +24,26 @@ export interface PluginAccount {
 
 export const DEFAULT_API_BASE = 'https://auto.liangyijianye.cn';
 
+/** Shown while the public endpoint is unreachable, so the popup always has something to render. */
+export const FALLBACK_SITE_NAME = 'MediaFlow';
+export const FALLBACK_SITE_TAGLINE = '自动填充 · 人工发布';
+
+/** Public site metadata served by `GET /api/public/site-config`; needs no token. */
+export interface SiteConfigView {
+  name: string;
+  tagline: string;
+  company: string;
+  supportEmail: string;
+  pageSize: number;
+  aiDisclosureSuffix: string;
+}
+
+/** Branding the popup renders, already reduced to non-empty strings. */
+export interface SiteBranding {
+  name: string;
+  tagline: string;
+}
+
 const CONFIG_KEY = 'mediaflow.config';
 
 export async function loadConfig(): Promise<PluginConfig> {
@@ -60,6 +80,8 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 }
 
 export const api = {
+  /** Public branding/tagline: readable before login, used to label the popup. */
+  siteConfig: () => request<SiteConfigView | null>('/public/site-config'),
   login: async (email: string, password: string): Promise<{ token: string; name: string }> => {
     const result = await request<{ accessToken: string; user: { displayName: string } }>('/auth/login', {
       method: 'POST',
@@ -87,6 +109,23 @@ export const api = {
     postId?: string;
   }) => request<{ id: string }>('/analytics/plugin-metrics', { method: 'POST', body: JSON.stringify(payload) }),
 };
+
+/**
+ * Loads the site branding shown in the popup.
+ * Never throws: a failed or malformed response falls back to the built-in brand so the
+ * popup keeps rendering instead of showing an error or a blank page.
+ */
+export async function loadSiteBranding(): Promise<SiteBranding> {
+  try {
+    const config = await api.siteConfig();
+    const name = typeof config?.name === 'string' && config.name.trim().length > 0 ? config.name.trim() : FALLBACK_SITE_NAME;
+    const tagline =
+      typeof config?.tagline === 'string' && config.tagline.trim().length > 0 ? config.tagline.trim() : FALLBACK_SITE_TAGLINE;
+    return { name, tagline };
+  } catch {
+    return { name: FALLBACK_SITE_NAME, tagline: FALLBACK_SITE_TAGLINE };
+  }
+}
 
 export function platformName(platform: PlatformCode): string {
   const labels: Record<string, string> = {

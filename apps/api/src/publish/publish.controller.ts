@@ -3,7 +3,7 @@ import { AuthUser } from '../modules/auth/auth.types';
 import { CurrentUser } from '../modules/auth/current-user.decorator';
 import { toActor } from '../modules/auth/actor.util';
 import { Public } from '../modules/auth/public.decorator';
-import { Roles } from '../modules/auth/roles.decorator';
+import { Capability } from '../modules/auth/capabilities';
 import { AdapterDescriptor, PublishService, PublishTaskPage } from './publish.service';
 import { CreatePublishTaskDto } from './dto/create-publish-task.dto';
 import { QueryPublishTaskDto } from './dto/query-publish-task.dto';
@@ -41,20 +41,20 @@ export class PublishController {
     return this.publishService.get(id);
   }
 
-  @Roles('owner', 'admin', 'editor')
+  @Capability('publish.execute')
   @Post('tasks/:id/retry')
   retry(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user?: AuthUser): Promise<PublishTask> {
     return this.publishService.retry(id, toActor(user));
   }
 
   /** 取消尚未发布的任务（发布中/已发布的不可取消）。 */
-  @Roles('owner', 'admin', 'editor')
+  @Capability('publish.execute')
   @Delete('tasks/:id')
   cancel(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user?: AuthUser): Promise<PublishTask> {
     return this.publishService.cancel(id, toActor(user));
   }
 
-  @Roles('owner', 'admin', 'editor')
+  @Capability('publish.execute')
   @Post('tasks')
   create(@Body() dto: CreatePublishTaskDto, @CurrentUser() user?: AuthUser): Promise<PublishTask[]> {
     return this.publishService.createTasks(dto, toActor(user));

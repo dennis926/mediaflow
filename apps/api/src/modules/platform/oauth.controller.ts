@@ -5,7 +5,7 @@ import { toActor } from '../auth/actor.util';
 import { AuthUser } from '../auth/auth.types';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { Public } from '../auth/public.decorator';
-import { Roles } from '../auth/roles.decorator';
+import { Capability } from '../auth/capabilities';
 import { AuthorizeResult, OAuthService } from './oauth.service';
 
 @Controller('accounts/oauth')
@@ -13,7 +13,7 @@ export class OAuthController {
   constructor(private readonly oauthService: OAuthService) {}
 
   /** Step 1: returns the platform authorize URL (the UI opens it in a new tab / same window). */
-  @Roles('owner', 'admin')
+  @Capability('platform.bind')
   @Get(':platform/authorize')
   authorize(
     @Param('platform', new ParseEnumPipe(PlatformCode)) platform: PlatformCode,

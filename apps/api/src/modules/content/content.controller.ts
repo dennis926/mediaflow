@@ -1,10 +1,10 @@
 import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Patch, Post, Put, Query } from '@nestjs/common';
 import { AuthUser } from '../auth/auth.types';
-import { Roles } from '../auth/roles.decorator';
+import { Capability } from '../auth/capabilities';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { toActor } from '../auth/actor.util';
 import { Content } from './entities/content.entity';
-import { AiFlagCheckDto, CreateContentDto, QueryContentDto, UpdateContentDto } from './dto/content.dto';
+import { AiFlagCheckDto, ArchiveContentDto, CreateContentDto, QueryContentDto, UpdateContentDto } from './dto/content.dto';
 import { ContentPage, ContentService } from './content.service';
 
 @Controller('contents')
@@ -16,7 +16,7 @@ export class ContentController {
     return this.contentService.list(query);
   }
 
-  @Roles('owner', 'admin', 'editor')
+  @Capability('content.write')
   @Post()
   create(@Body() dto: CreateContentDto, @CurrentUser() user?: AuthUser): Promise<Content> {
     return this.contentService.create(dto, toActor(user));
@@ -27,7 +27,7 @@ export class ContentController {
     return this.contentService.get(id);
   }
 
-  @Roles('owner', 'admin', 'editor')
+  @Capability('content.write')
   @Put(':id')
   update(
     @Param('id', ParseUUIDPipe) id: string,
@@ -37,7 +37,18 @@ export class ContentController {
     return this.contentService.update(id, dto, toActor(user));
   }
 
-  @Roles('owner', 'admin', 'editor')
+  /** 归档 / 取消归档（归档后不再参与发布与检索，但保留历史） */
+  @Capability('content.write')
+  @Patch(':id/archive')
+  archive(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ArchiveContentDto,
+    @CurrentUser() user?: AuthUser,
+  ): Promise<Content> {
+    return this.contentService.archive(id, dto.archived, toActor(user));
+  }
+
+  @Capability('content.write')
   @Delete(':id')
   remove(
     @Param('id', ParseUUIDPipe) id: string,
@@ -47,7 +58,7 @@ export class ContentController {
   }
 
   /** Records that the AI disclosure has been reviewed before publishing. */
-  @Roles('owner', 'admin', 'editor')
+  @Capability('content.write')
   @Patch(':id/ai-flag-check')
   aiFlagCheck(
     @Param('id', ParseUUIDPipe) id: string,

@@ -17,6 +17,7 @@ import {
   PublishMode,
   PublishTaskStatus,
   appendAiDisclosure,
+  buildAiMetadata,
 } from '@mediaflow/shared';
 import { IsNull, Repository } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
@@ -31,6 +32,7 @@ import { PublishTask } from '../modules/publish/entities/publish-task.entity';
 import { CHANNEL_REGISTRY } from './channel-registry.provider';
 import { CreatePublishTaskDto } from './dto/create-publish-task.dto';
 import { QueryPublishTaskDto } from './dto/query-publish-task.dto';
+import { AiGeneration } from '../modules/ai/entities/ai-generation.entity';
 import { PublishQueueService } from './publish.queue';
 
 export interface PublishActor {
@@ -61,6 +63,7 @@ export class PublishService {
     @InjectRepository(Content) private readonly contents: Repository<Content>,
     @InjectRepository(ContentVariant) private readonly variants: Repository<ContentVariant>,
     @InjectRepository(SocialAccount) private readonly accounts: Repository<SocialAccount>,
+    @InjectRepository(AiGeneration) private readonly aiGenerations: Repository<AiGeneration>,
     private readonly socialAccounts: SocialAccountService,
     @Inject(CHANNEL_REGISTRY) private readonly registry: ChannelAdapterRegistry,
     private readonly queue: PublishQueueService,
@@ -245,6 +248,17 @@ export class PublishService {
       : null;
 
     const aiFlagType = variant?.aiFlagType ?? content.aiFlagType;
+    const aiGenerated = aiFlagType !== AiFlagType.None;
+
+    // 隐式标识：AI 生成内容带图片/视频时，按法规要求附上元数据（可在设置里关闭）。
+    const aiMetadata =
+      aiGenerated && runtime().publish.aiMetadataEnabled
+        ? buildAiMetadata(aiFlagType, await this.resolveAiModel(task.contentId))
+        : undefined;
+    if (aiMetadata) {
+      await this.mergeExtra(task.id, { aiMetadata });
+    }
+
     return {
       taskId: task.id,
       title: variant?.title ?? content.title,
@@ -253,8 +267,19 @@ export class PublishService {
       mediaUrls: variant?.mediaUrls ?? content.mediaUrls,
       coverUrl: content.coverUrl ?? undefined,
       scheduledAt: task.scheduledAt?.toISOString(),
-      aiGenerated: aiFlagType !== AiFlagType.None,
+      aiGenerated,
+      ...(aiMetadata ? { aiMetadata } : {}),
     };
+  }
+
+  /** 取该内容最近一次 AI 调用用的模型名，用于元数据可追溯；查不到就用当前配置的模型。 */
+  private async resolveAiModel(contentId: string): Promise<string> {
+    try {
+      const latest = await this.aiGenerations.findOne({ where: { contentId }, order: { createdAt: 'DESC' } });
+      return latest?.model ?? (await this.settings.get('AI_MODEL')) ?? 'unknown';
+    } catch {
+      return 'unknown';
+    }
   }
 
   async resolveCredentials(platform: PlatformCode, socialAccountId: string | null): Promise<AdapterCredentials> {
@@ -295,6 +320,22 @@ export class PublishService {
     return (result.affected ?? 0) > 0;
   }
 
+  /**
+   * 合并式更新任务 extra（JSONB）。
+   *
+   * 之前直接用内存里的 task.extra 覆盖，会把并发写入（例如 buildPayload 刚写入的
+   * AI 标识元数据）冲掉 —— 实测确实丢过。这里先读最新行再合并，保证不丢字段。
+   */
+  private async mergeExtra(
+    taskId: string,
+    patch: Record<string, unknown>,
+    rest: Record<string, unknown> = {},
+  ): Promise<void> {
+    const current = await this.tasks.findOne({ where: { id: taskId }, select: ['id', 'extra'] });
+    const merged: Record<string, unknown> = { ...(current?.extra ?? {}), ...patch };
+    await this.tasks.update({ id: taskId }, { ...rest, extra: merged } as never);
+  }
+
   async markScheduled(task: PublishTask): Promise<void> {
     await this.tasks.update({ id: task.id, status: task.status }, { status: PublishTaskStatus.Scheduled });
   }
@@ -316,31 +357,23 @@ export class PublishService {
   }
 
   async markManualRequired(task: PublishTask, result: PublishResult): Promise<void> {
-    await this.tasks.update(
-      { id: task.id },
-      {
-        status: PublishTaskStatus.ManualRequired,
-        finishedAt: new Date(),
-        errorMessage: null,
-        lockedBy: null,
-        lockedAt: null,
-        extra: { ...task.extra, manualMessage: result.message },
-      },
-    );
+    await this.mergeExtra(task.id, { manualMessage: result.message }, {
+      status: PublishTaskStatus.ManualRequired,
+      finishedAt: new Date(),
+      errorMessage: null,
+      lockedBy: null,
+      lockedAt: null,
+    });
   }
 
   async markAwaitingHuman(task: PublishTask, result: PublishResult): Promise<void> {
-    await this.tasks.update(
-      { id: task.id },
-      {
-        status: PublishTaskStatus.Pending,
-        scheduledAt: null,
-        lockedBy: null,
-        lockedAt: null,
-        errorMessage: null,
-        extra: { ...task.extra, awaitingConfirmation: true, pluginMessage: result.message },
-      },
-    );
+    await this.mergeExtra(task.id, { awaitingConfirmation: true, pluginMessage: result.message }, {
+      status: PublishTaskStatus.Pending,
+      scheduledAt: null,
+      lockedBy: null,
+      lockedAt: null,
+      errorMessage: null,
+    });
   }
 
   async releaseWithRetry(task: PublishTask, errorMessage: string): Promise<void> {

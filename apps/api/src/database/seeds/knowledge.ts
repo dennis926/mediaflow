@@ -1,91 +1,67 @@
 import { Logger } from '@nestjs/common';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { DataSource } from 'typeorm';
 import { BrandKnowledge } from '../../modules/content/entities/brand-knowledge.entity';
 import { DEFAULT_TENANT_ID, DEFAULT_WORKSPACE_ID } from './defaults';
 
 const logger = new Logger('SeedKnowledge');
 
+interface SampleEntry {
+  brand: string;
+  category: string;
+  title: string;
+  content: string;
+  tags?: string[];
+  keywords?: string[];
+  priority?: number;
+}
+
 /**
- * 品牌资料种子：只写配方、规格、工艺、适用人群与合规红线，
- * 不写疾病治疗/疗效类表述（对外发布必须走「有助于/日常营养支持」框架）。
+ * 示例品牌资料改为**数据文件**驱动，而不是写死在代码里：
+ * - 默认读取同目录的 sample-knowledge.json（可整体替换成贵公司的资料）；
+ * - 置空/关闭：环境变量 SEED_SAMPLE_CONTENT=false 时直接跳过（新环境不放示例数据）；
+ * - 自定义文件：环境变量 SEED_KNOWLEDGE_FILE=/path/to/your.json。
  */
-const ENTRIES: Array<Partial<BrandKnowledge>> = [
-  {
-    brand: '卿尔美',
-    category: 'brand',
-    title: '卿尔美品牌定位与话术基调',
-    content:
-      '定位：药食同源 + 水溶性膳食纤维 / 益生元的日常营养补充品牌。\n话术基调：专业、克制、可验证；讲清配方与吃法，不做效果承诺。\n目标人群：关注肠道健康、日常饮食纤维摄入不足的人群。\n禁止表述：治疗、疗效、根治、降糖降压、抗癌、最好的、保证见效。',
-    tags: ['品牌定位', '话术', '合规'],
-    keywords: ['卿尔美', '膳食纤维', '益生元', '品牌调性'],
-    priority: 10,
-  },
-  {
-    brand: '卿尔美',
-    category: 'product',
-    title: '卿尔美·益生元复合益生菌畅享版',
-    content:
-      '规格：8 克/袋 × 12 袋/盒。\n配方：菊粉、低聚果糖、水苏糖、半乳甘露聚糖、聚葡萄糖、L-阿拉伯糖、玫瑰茄、凝结魏茨曼氏菌 CC-09。\n核心卖点：五种益生元复配（含稀缺水苏糖）+ 出厂活菌 >200 亿 CFU/盒。\n写作用语：强调"复配益生元"与"活菌数量"，可写"有助于维持肠道环境"，不得写治疗肠道疾病。',
-    tags: ['益生菌', '益生元', '水苏糖', '肠道'],
-    keywords: ['畅享版', 'CC-09', '活菌', '水苏糖', '益生菌'],
-    priority: 9,
-  },
-  {
-    brand: '卿尔美',
-    category: 'product',
-    title: '卿尔美·膳食纤维特膳粉增强版',
-    content:
-      '规格：38 克（3.8 克×10 袋）。\n配方：菊粉（添加量≥50%）、甜橙粉、低聚果糖（添加量≥20%）、玫瑰茄粉、低聚半乳糖、维生素 C、百合粉、沙棘粉、肉桂粉、维生素 E、维生素 B1、维生素 B2、DHA 藻油粉。\n核心卖点：菊粉与低聚果糖高添加量，额外添加 DHA 藻油粉，适合儿童、孕妇、老年人的日常补充。',
-    tags: ['膳食纤维', 'DHA', '儿童', '孕妇'],
-    keywords: ['增强版', 'DHA 藻油', '菊粉', '低聚果糖'],
-    priority: 8,
-  },
-  {
-    brand: '金善加',
-    category: 'product',
-    title: '金善加·营养素特膳粉 C 版',
-    content:
-      '规格：54 克（1.8 克×30 条）。\n配方：葡萄糖酸镁、L-乳酸钙、维生素 C、低聚果糖、沙棘果汁粉、葡萄糖酸亚铁、葡萄糖酸锌、葡萄糖酸钙、亚硒酸钠、维生素 A/D/E、B1/B2/B6、烟酸、叶酸、D-泛酸钙、β-胡萝卜素、甜菊糖苷，以及茯苓、黄精、葛根、益智仁、青果、肉桂、玫瑰茄粉、枸杞子、乌梅、菊粉。\n核心卖点：维生素 + 矿物质 + 药食同源复配，条装便携，适合三餐不规律人群的日常营养补充。',
-    tags: ['维生素', '矿物质', '药食同源', '便携'],
-    keywords: ['金善加', 'C 版', '复合维生素', '亚硒酸钠', '叶酸'],
-    priority: 8,
-  },
-  {
-    brand: '长青元',
-    category: 'product',
-    title: '长青元·后生元日用版 / 夜用版',
-    content:
-      '日用版（4.2 克×12 袋）：黄芪、山梨糖醇、肉桂、麦芽、乌梅、陈皮、当归、茯苓、薏苡仁、牡蛎肽、木瓜、山楂、大枣、黄精、枸杞子、发酵西洋参粉、山茱萸、肉苁蓉、代代花、昆布、副干酪乳酪杆菌（后生元）。白天服用，主打日常精力与营养支持。\n夜用版（4.1 克×12 袋）：黄芪、酸枣仁、山梨糖醇、山楂、发酵西洋参粉、乌梅、陈皮、茯苓、木瓜、麦芽、百合、莲子、牡蛎肽、佛手、香橼、淡豆豉、副干酪乳酪杆菌（后生元）。夜间服用，主打安神、清爽口感。\n注意：可写"帮助放松""夜间养护"，不得写治疗失眠。',
-    tags: ['后生元', '药食同源', '日用', '夜用'],
-    keywords: ['长青元', '后生元', '酸枣仁', '牡蛎肽', '发酵西洋参'],
-    priority: 8,
-  },
-  {
-    brand: '全品牌',
-    category: 'compliance',
-    title: '对外内容合规红线（必读）',
-    content:
-      '1. 不得出现疾病治疗、疗效、根治、抗癌、降血糖/血压等医疗功效表述，改用"有助于""日常营养支持"；\n2. 不得使用绝对化用语（最好、第一、国家级、特效、100% 有效）；\n3. 不得承诺效果（保证见效、无效退款、立竿见影）；\n4. 不得使用医疗机构、专家名义作证明；\n5. AI 参与创作的内容必须保留"（本文由 AI 辅助生成）"标识；\n6. 产品为食品，宣传口径统一为"日常营养补充"。',
-    tags: ['合规', '广告法', '食品宣传'],
-    keywords: ['合规', '广告法', '禁止', '红线', '标识'],
-    priority: 10,
-  },
-];
+function loadSampleEntries(): SampleEntry[] {
+  const custom = process.env.SEED_KNOWLEDGE_FILE?.trim();
+  const file = custom && existsSync(custom) ? custom : join(__dirname, 'sample-knowledge.json');
+  if (!existsSync(file)) {
+    logger.warn(`示例资料文件不存在，跳过：${file}`);
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(readFileSync(file, 'utf8')) as { entries?: SampleEntry[] } | SampleEntry[];
+    const entries = Array.isArray(parsed) ? parsed : (parsed.entries ?? []);
+    return entries.filter((entry) => Boolean(entry?.title && entry?.content && entry?.brand && entry?.category));
+  } catch (error) {
+    logger.warn(`示例资料文件解析失败，跳过：${error instanceof Error ? error.message : String(error)}`);
+    return [];
+  }
+}
 
 export async function seedKnowledge(dataSource: DataSource): Promise<number> {
+  if ((process.env.SEED_SAMPLE_CONTENT ?? 'true').toLowerCase() === 'false') {
+    logger.log('SEED_SAMPLE_CONTENT=false，已跳过示例品牌资料写入');
+    return 0;
+  }
+
+  const entries = loadSampleEntries();
+  if (entries.length === 0) return 0;
+
   const repository = dataSource.getRepository(BrandKnowledge);
   let created = 0;
 
-  for (const entry of ENTRIES) {
-    const existing = await repository.findOne({ where: { workspaceId: DEFAULT_WORKSPACE_ID, title: entry.title as string } });
+  for (const entry of entries) {
+    const existing = await repository.findOne({ where: { workspaceId: DEFAULT_WORKSPACE_ID, title: entry.title } });
     if (existing) continue;
     await repository.insert({
       tenantId: DEFAULT_TENANT_ID,
       workspaceId: DEFAULT_WORKSPACE_ID,
-      brand: entry.brand as string,
-      category: entry.category as BrandKnowledge['category'],
-      title: entry.title as string,
-      content: entry.content as string,
+      brand: entry.brand,
+      category: entry.category,
+      title: entry.title,
+      content: entry.content,
       tags: entry.tags ?? [],
       keywords: entry.keywords ?? [],
       priority: entry.priority ?? 0,
@@ -94,10 +70,11 @@ export async function seedKnowledge(dataSource: DataSource): Promise<number> {
       isActive: true,
       usageCount: 0,
       lastUsedAt: null,
+      aiGenerated: false,
     });
     created += 1;
   }
 
-  logger.log(`品牌资料种子完成：新增 ${created} 条，跳过 ${ENTRIES.length - created} 条已存在`);
+  logger.log(`品牌资料种子完成：新增 ${created} 条，跳过 ${entries.length - created} 条已存在`);
   return created;
 }

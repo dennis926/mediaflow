@@ -79,6 +79,8 @@ export interface AuthUserDto {
 
 export interface LoginResultDto {
   accessToken: string;
+  /** 免登录续期用；有效期由后台配置（AUTH_REFRESH_EXPIRES，默认 7d）。 */
+  refreshToken: string;
   expiresIn: string;
   user: AuthUserDto;
 }

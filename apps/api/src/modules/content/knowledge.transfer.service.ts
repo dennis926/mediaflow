@@ -80,7 +80,7 @@ function normalizeHeader(value: string): string {
   return value
     .trim()
     .toLowerCase()
-    .replace(/[\s_\-（）()【】\[\]]/g, '')
+    .replace(/[\s_-（）()【】[\]]/g, '')
     .replace(/[（(].*?[)）]/g, '');
 }
 
@@ -341,7 +341,20 @@ export class KnowledgeTransferService {
     rows: Array<Record<string, string>>,
     mapping: FieldMapping,
     defaults: { brand: string; category: string; priority: number; isActive: boolean },
+    /** 当前生效的分类码表：外部文件里的分类名/中文标签都要归一化到这里，否则会变成界面上的"孤儿分类" */
+    knownCategories: Array<{ code: string; label: string }> = [],
   ): { entries: TransferEntry[]; skipped: Array<{ row: number; reason: string }> } {
+    const findByLabel = new Map(knownCategories.map((item) => [item.label.trim().toLowerCase(), item.code]));
+    const codes = new Set(knownCategories.map((item) => item.code));
+    const normalizeCategory = (raw: string): string => {
+      const value = raw.trim();
+      if (!value) return defaults.category;
+      const lower = value.toLowerCase();
+      if (codes.has(lower)) return lower;
+      if (findByLabel.has(lower)) return findByLabel.get(lower) as string;
+      return defaults.category;
+    };
+
     const entries: TransferEntry[] = [];
     const skipped: Array<{ row: number; reason: string }> = [];
 
@@ -363,7 +376,7 @@ export class KnowledgeTransferService {
       const priorityText = pick('priority').replace(/[^\d]/g, '');
       entries.push({
         brand: pick('brand') || defaults.brand,
-        category: pick('category') || defaults.category,
+        category: normalizeCategory(pick('category')),
         title: (title || this.firstLine(content)).slice(0, 200),
         content,
         tags: splitList(pick('tags')),

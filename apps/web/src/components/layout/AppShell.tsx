@@ -86,7 +86,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   });
 
   const signOut = (): void => {
-    setToken(null);
+    setToken(null, null);
     router.replace('/login');
   };
 
@@ -100,6 +100,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           activeHref={pathname}
           siteName={site.name}
           siteTagline={site.tagline}
+          siteLogoUrl={site.logoUrl}
           footer={<span>香港节点 · v0.1.0</span>}
         />
       </div>
@@ -110,7 +111,8 @@ export function AppShell({ children }: { children: ReactNode }) {
           <div className={styles.drawer}>
             <Sidebar items={NAV_ITEMS} activeHref={pathname}
           siteName={site.name}
-          siteTagline={site.tagline} onNavigate={() => setDrawerOpen(false)} />
+          siteTagline={site.tagline}
+          siteLogoUrl={site.logoUrl} onNavigate={() => setDrawerOpen(false)} />
           </div>
         </>
       ) : null}

@@ -1,10 +1,16 @@
 import { useMutation } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { loadSiteConfig, type SiteConfig } from '../lib/site';
 import { useNavigate } from 'react-router-dom';
 import { ApiError, setToken } from '../lib/api/client';
 import { authApi } from '../lib/api/endpoints';
 
 export function LoginPage() {
+  const [site, setSite] = useState<SiteConfig>({ name: 'MediaFlow', tagline: '', brandColor: '#4F6BFF', pageSize: 10 });
+
+  useEffect(() => {
+    void loadSiteConfig().then(setSite);
+  }, []);
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -39,8 +45,8 @@ export function LoginPage() {
         >
           M
         </span>
-        <h1 style={{ margin: 0, fontSize: 'var(--mf-font-size-3xl)' }}>MediaFlow</h1>
-        <span className="muted">内容分发与矩阵运营 · 移动端</span>
+        <h1 style={{ margin: 0, fontSize: 'var(--mf-font-size-3xl)' }}>{site.name}</h1>
+        <span className="muted">{site.tagline ? `${site.tagline} · 移动端` : "移动端"}</span>
       </div>
 
       {error ? (
