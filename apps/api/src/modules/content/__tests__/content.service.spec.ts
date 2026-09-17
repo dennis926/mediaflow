@@ -72,6 +72,25 @@ describe('ContentService disclosure', () => {
     expect(created.body).toBe('人工正文');
   });
 
+  it('已通过审核的内容被再次编辑时退回草稿（审核结论失效）', async () => {
+    const { service, contents } = buildService();
+    (contents.findOne as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: 'c9',
+      title: '原标题',
+      body: '原正文',
+      tags: [],
+      mediaUrls: [],
+      status: ContentStatus.Approved,
+      aiFlagType: AiFlagType.None,
+      tenantId: TENANT_ID,
+      workspaceId: WORKSPACE_ID,
+    } as unknown as Content);
+
+    const saved = await service.update('c9', { body: '改过的正文' }, { name: 'tester' });
+
+    expect(saved.status).toBe(ContentStatus.Draft);
+  });
+
   it('soft deletes instead of removing the row', async () => {
     const content = { id: 'c1', title: '标题', tenantId: TENANT_ID, workspaceId: WORKSPACE_ID } as Content;
     const { service, contents } = buildService();

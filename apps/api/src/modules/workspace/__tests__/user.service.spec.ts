@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
 import { ObjectLiteral, Repository } from 'typeorm';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { AuditService } from '../../../audit/audit.service';
 import { WorkspaceContextService } from '../../../common/workspace-context.service';
 import { Role } from '../entities/role.entity';

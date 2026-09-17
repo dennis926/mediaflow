@@ -10,10 +10,10 @@ import { EmptyState } from '../../../components/ui/EmptyState';
 import { SkeletonRows } from '../../../components/ui/Skeleton';
 import { StatCard } from '../../../components/ui/StatCard';
 import { Tag } from '../../../components/ui/Tag';
-import { aiApi, contentApi, publishApi } from '../../../lib/api/endpoints';
+import { aiApi, contentApi, publishApi, reviewsApi } from '../../../lib/api/endpoints';
 import type { PublishTask } from '../../../lib/api/types';
 import { formatDateTime, TASK_STATUS_LABELS, TASK_STATUS_TONES } from '../../../lib/format';
-import { InboxIcon, PublishIcon, SparkleIcon, WarningIcon } from '../../../lib/icons';
+import { InboxIcon, PublishIcon, ReviewIcon, SparkleIcon, WarningIcon } from '../../../lib/icons';
 import { PLATFORM_LABELS, PlatformCode, PublishTaskStatus } from '@mediaflow/shared';
 import { PlusIcon } from '../../../lib/icons';
 import styles from './page.module.css';
@@ -35,6 +35,10 @@ export default function DashboardPage() {
   const failed = useQuery({
     queryKey: ['tasks', 'count', PublishTaskStatus.Failed],
     queryFn: () => publishApi.tasks({ status: PublishTaskStatus.Failed, pageSize: 1 }),
+  });
+  const pendingReviews = useQuery({
+    queryKey: ['reviews', 'pending', 'count'],
+    queryFn: () => reviewsApi.list({ status: 'pending', pageSize: 1 }),
   });
   const recent = useQuery({ queryKey: ['tasks', 'recent'], queryFn: () => publishApi.tasks({ pageSize: 6 }) });
   const queue = useQuery({ queryKey: ['queue', 'stats'], queryFn: () => publishApi.queueStats() });
@@ -98,6 +102,12 @@ export default function DashboardPage() {
           value={published.data?.meta.total ?? '—'}
           hint="平台已确认发布"
           icon={<SparkleIcon />}
+        />
+        <StatCard
+          label="待审核"
+          value={pendingReviews.data?.pendingCount ?? '—'}
+          hint="内容审核工作流"
+          icon={<ReviewIcon />}
         />
         <StatCard
           label="需人工处理"

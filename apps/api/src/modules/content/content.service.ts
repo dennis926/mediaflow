@@ -115,21 +115,32 @@ export class ContentService {
     const aiFlagType = dto.aiFlagType ?? content.aiFlagType;
     const rawBody = dto.body ?? content.body;
 
+    const previousStatus = content.status;
+    const contentChanged =
+      (dto.title !== undefined && dto.title !== content.title) || (dto.body !== undefined && dto.body !== content.body);
+
     Object.assign(content, {
       title: dto.title ?? content.title,
       summary: dto.summary ?? content.summary,
       coverUrl: dto.coverUrl ?? content.coverUrl,
       mediaUrls: dto.mediaUrls ?? content.mediaUrls,
       tags: dto.tags ?? content.tags,
-      status: dto.status ?? content.status,
       brandKnowledgeId: dto.brandKnowledgeId ?? content.brandKnowledgeId,
       aiFlagType,
       aiGenerated: aiFlagType !== AiFlagType.None,
       body: appendAiDisclosure(rawBody, aiFlagType),
+      // 审核通过后如果正文/标题又被改了，原审核结论失效，必须重新送审。
+      status: contentChanged && previousStatus === ContentStatus.Approved ? ContentStatus.Draft : (dto.status ?? content.status),
     });
 
     const saved = await this.contents.save(content);
-    await this.record(saved, 'content.update', actor, { aiFlagType });
+    await this.record(saved, 'content.update', actor, {
+      aiFlagType,
+      ...(contentChanged && previousStatus === ContentStatus.Approved ? { reviewInvalidatedFrom: previousStatus } : {}),
+    });
+    if (contentChanged && previousStatus === ContentStatus.Approved) {
+      this.logger.log(`内容已修改，审核结论失效并退回草稿：${saved.title}`);
+    }
     return saved;
   }
 

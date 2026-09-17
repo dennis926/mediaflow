@@ -100,10 +100,11 @@ export class ContentReviewService {
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? 20;
 
+    // 用实体关系 join，TypeORM 才会把 content.title 映射到 review.content（手写 join 取不到值）
     const builder = this.reviews
       .createQueryBuilder('review')
-      .leftJoin(Content, 'content', 'content.id = review.content_id')
-      .addSelect(['content.title'])
+      .leftJoin('review.content', 'content')
+      .addSelect(['content.id', 'content.title'])
       .where('review.workspaceId = :workspaceId', { workspaceId: scope.workspaceId });
 
     if (query.status) builder.andWhere('review.status = :status', { status: query.status });
@@ -114,7 +115,7 @@ export class ContentReviewService {
     const pendingCount = await this.reviews.count({ where: { workspaceId: scope.workspaceId, status: 'pending' } });
 
     return {
-      items: items.map((review) => Object.assign(review, { contentTitle: (review as unknown as { content_title?: string }).content_title })),
+      items: items.map((review) => Object.assign(review, { contentTitle: review.content?.title })),
       meta: { page, pageSize, total, totalPages: Math.ceil(total / pageSize) || 1 },
       pendingCount,
     };
