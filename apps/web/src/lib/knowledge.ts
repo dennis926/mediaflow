@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
-import { knowledgeApi } from './api/endpoints';
-import type { KnowledgeCategoryView } from './api/types';
+import { knowledgeApi, publicApi } from './api/endpoints';
+import type { KnowledgeCategoryView, SiteConfigView } from './api/types';
 
 export type KnowledgeTone = 'brand' | 'success' | 'info' | 'warning' | 'danger' | 'default';
 
@@ -57,3 +57,19 @@ export function sourceFileName(sourceUrl: string | null): string {
 }
 
 export const IMPORT_ACCEPT = '.pdf,.docx,.pptx,.xlsx,.xls,.csv,.txt,.md,.markdown';
+
+
+const FALLBACK_SITE: SiteConfigView = {
+  name: 'MediaFlow',
+  tagline: '内容分发与矩阵运营',
+  company: '',
+  supportEmail: '',
+  pageSize: 10,
+  aiDisclosureSuffix: '（本文由 AI 辅助生成）',
+};
+
+/** 站点名称/副标题/每页条数都来自后台配置，换公司改配置即可，无需改代码。 */
+export function useSiteConfig(): SiteConfigView {
+  const query = useQuery({ queryKey: ['public', 'site-config'], queryFn: () => publicApi.siteConfig(), staleTime: 300_000 });
+  return query.data ?? FALLBACK_SITE;
+}

@@ -20,6 +20,7 @@ import {
 } from '@mediaflow/shared';
 import { IsNull, Repository } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
+import { runtime } from '../modules/settings/runtime-config';
 import { WorkspaceContextService } from '../common/workspace-context.service';
 import { SettingsService } from '../modules/settings/settings.service';
 import { ContentVariant } from '../modules/content/entities/content-variant.entity';
@@ -247,7 +248,7 @@ export class PublishService {
     return {
       taskId: task.id,
       title: variant?.title ?? content.title,
-      body: appendAiDisclosure(variant?.body ?? content.body, aiFlagType),
+      body: appendAiDisclosure(variant?.body ?? content.body, aiFlagType, runtime().site.aiDisclosureSuffix),
       tags: variant?.tags ?? content.tags,
       mediaUrls: variant?.mediaUrls ?? content.mediaUrls,
       coverUrl: content.coverUrl ?? undefined,

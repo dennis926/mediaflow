@@ -14,6 +14,7 @@ import {
   TARGET_LABELS,
   autoMapColumns,
 } from './knowledge.transfer.service';
+import { runtime } from '../settings/runtime-config';
 import { AiService } from '../ai/ai.service';
 import { KnowledgeDraft } from '../ai/ai.types';
 import { AuditService } from '../../audit/audit.service';
@@ -101,10 +102,6 @@ export function sourceFileName(sourceUrl: string): string {
   return name.replace(/^\d{10,}-/, '');
 }
 
-/** 单次导入最多落库的资料片数（防止一份大文档灌爆知识库）。 */
-const MAX_IMPORT_CHUNKS = 40;
-/** 每次生成最多注入多少条品牌资料（太多会稀释重点、推高 token）。 */
-const DEFAULT_LIMIT = 5;
 
 /**
  * 品牌知识库。
@@ -250,7 +247,7 @@ export class KnowledgeService implements OnModuleInit {
    */
   async findRelevant(
     input: { title: string; body?: string; tags?: string[]; brand?: string; platform?: PlatformCode },
-    limit = DEFAULT_LIMIT,
+    limit = runtime().knowledge.injectLimit,
   ): Promise<KnowledgeMatch[]> {
     const scope = await this.workspaceContext.current();
     const pool = await this.knowledge.find({
@@ -298,7 +295,7 @@ export class KnowledgeService implements OnModuleInit {
   }
 
   /** 针对某个内容预览"这次生成会引用哪些资料"，让运营在生成前就能确认。 */
-  async previewForContent(contentId: string, platform?: PlatformCode, limit = DEFAULT_LIMIT): Promise<{ matches: KnowledgeMatch[] }> {
+  async previewForContent(contentId: string, platform?: PlatformCode, limit = runtime().knowledge.injectLimit): Promise<{ matches: KnowledgeMatch[] }> {
     const scope = await this.workspaceContext.current();
     const content = await this.contents.findOne({ where: { id: contentId, workspaceId: scope.workspaceId } });
     if (!content) throw new NotFoundException('内容不存在');
@@ -341,7 +338,7 @@ export class KnowledgeService implements OnModuleInit {
   }> {
     const fileName = KnowledgeService.normalizeFileName(file.originalname);
     const parsed = await this.parser.parse(fileName, file.buffer);
-    const chunks = this.parser.chunkSegments(parsed.segments, MAX_IMPORT_CHUNKS);
+    const chunks = this.parser.chunkSegments(parsed.segments, runtime().knowledge.maxChunks);
 
     this.pruneTempFiles();
     mkdirSync(this.tempDir, { recursive: true });
@@ -412,7 +409,7 @@ export class KnowledgeService implements OnModuleInit {
     const scope = await this.workspaceContext.current();
     const fileName = KnowledgeService.normalizeFileName(file.originalname);
     const parsed = await this.parser.parse(fileName, file.buffer);
-    const chunks = this.parser.chunkSegments(parsed.segments, dto.maxChunks ?? MAX_IMPORT_CHUNKS);
+    const chunks = this.parser.chunkSegments(parsed.segments, dto.maxChunks ?? runtime().knowledge.maxChunks);
 
     mkdirSync(this.uploadDir, { recursive: true });
     const storedName = `${Date.now()}-${KnowledgeService.safeFileName(fileName)}`;
@@ -650,7 +647,7 @@ export class KnowledgeService implements OnModuleInit {
     return {
       matches: await this.findRelevant(
         { title: dto.title ?? '', body: dto.body ?? '', tags: dto.tags, platform: dto.platform },
-        dto.limit ?? DEFAULT_LIMIT,
+        dto.limit ?? runtime().knowledge.injectLimit,
       ),
     };
   }

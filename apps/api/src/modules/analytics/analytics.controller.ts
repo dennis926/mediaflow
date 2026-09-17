@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
-import { IsIn, IsInt, IsOptional, IsString, IsUUID, Length, Max, Min } from 'class-validator';
+import { IsIn, IsInt, IsObject, IsOptional, IsString, IsUUID, Length, Max, Min } from 'class-validator';
 import { Type } from 'class-transformer';
 import { PlatformCode } from '@mediaflow/shared';
 import { AnalyticsService, AccountRanking, ContentMetrics, OverviewResult, TrendPoint } from './analytics.service';
@@ -32,6 +32,11 @@ class TrackDto {
   @IsString()
   @Length(1, 80)
   sessionId?: string;
+
+  /** 事件附带的自定义信息（如来源页面、操作对象），便于后续分析。 */
+  @IsOptional()
+  @IsObject()
+  properties?: Record<string, unknown>;
 }
 
 class SyncDto {

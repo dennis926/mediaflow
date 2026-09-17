@@ -5,6 +5,8 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState, type ReactNode } from 'react';
 import { authApi } from '../../lib/api/endpoints';
 import { getToken, setToken } from '../../lib/api/client';
+import { trackEvent } from '../../lib/track';
+import { useSiteConfig } from '../../lib/knowledge';
 import {
   AccountIcon,
   AnalyticsIcon,
@@ -65,6 +67,12 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false);
   const [passwordOpen, setPasswordOpen] = useState(false);
   const meta = resolveMeta(pathname);
+  const site = useSiteConfig();
+
+  // 页面访问埋点：数据中心可以看到各功能的使用热度
+  useEffect(() => {
+    void trackEvent('page_view', { properties: { path: pathname } });
+  }, [pathname]);
 
   useEffect(() => {
     if (!getToken()) router.replace('/login');
@@ -90,6 +98,8 @@ export function AppShell({ children }: { children: ReactNode }) {
         <Sidebar
           items={NAV_ITEMS}
           activeHref={pathname}
+          siteName={site.name}
+          siteTagline={site.tagline}
           footer={<span>香港节点 · v0.1.0</span>}
         />
       </div>
@@ -98,7 +108,9 @@ export function AppShell({ children }: { children: ReactNode }) {
         <>
           <div className={styles.drawerOverlay} onClick={() => setDrawerOpen(false)} role="presentation" />
           <div className={styles.drawer}>
-            <Sidebar items={NAV_ITEMS} activeHref={pathname} onNavigate={() => setDrawerOpen(false)} />
+            <Sidebar items={NAV_ITEMS} activeHref={pathname}
+          siteName={site.name}
+          siteTagline={site.tagline} onNavigate={() => setDrawerOpen(false)} />
           </div>
         </>
       ) : null}

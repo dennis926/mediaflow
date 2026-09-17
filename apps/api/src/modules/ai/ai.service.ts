@@ -15,6 +15,7 @@ import {
 } from './ai.types';
 import { checkCompliance, scoreViolations } from './compliance.rules';
 import { AiProviderFactory } from './ai-provider.factory';
+import { estimateCost, runtime } from '../settings/runtime-config';
 
 export interface AiInvocationMeta {
   contentId?: string | null;
@@ -41,18 +42,13 @@ export interface ComplianceInput {
   useAiReview?: boolean;
 }
 
-/** Keeps every prompt in one place so prompt changes are reviewable. */
-const PLATFORM_GUIDANCE: Partial<Record<PlatformCode, string>> = {
-  [PlatformCode.WechatMp]: '深度图文，可长文，标题 20 字以内，正文分段清晰，不做营销夸大',
-  [PlatformCode.Douyin]: '短视频文案，口语化，前 3 秒抓住注意力，正文 100 字以内，结尾 3-5 个话题标签',
-  [PlatformCode.Xiaohongshu]: '种草笔记，第一人称，emoji 适度，正文 300 字以内，结尾 5 个话题标签',
-  [PlatformCode.WechatVideo]: '视频号口播稿，简洁口语，200 字以内',
-  [PlatformCode.Zhihu]: '知乎回答风格，先给结论再论证，专业克制，不使用营销词',
-  [PlatformCode.Toutiao]: '资讯风格，标题信息量大，正文 300-800 字',
-  [PlatformCode.Baijiahao]: '图文资讯，结构清晰，小标题分节，300-800 字',
-};
-
-const SYSTEM_EDITOR = '你是资深中文新媒体编辑，服务食品与营养健康行业，严格遵守《广告法》与食品宣传合规要求，绝不出现疾病治疗、绝对化、承诺性表述。';
+/**
+ * 写作规范与平台指引都是可配置项（设置 → AI 服务 → 写作规范 / 平台风格指引），
+ * 换行业时改配置即可，不用改代码。取值见 runtime-config.ts。
+ */
+const platformGuidance = (platform: PlatformCode): string =>
+  runtime().ai.platformGuidance[platform] ?? '常规风格';
+const systemEditor = (): string => runtime().ai.systemPrompt;
 const SYSTEM_JSON = '只输出 JSON，不要输出任何解释文字或 Markdown 代码块。';
 
 @Injectable()
@@ -73,7 +69,7 @@ export class AiService {
   async generate(prompt: string, tone: string | undefined, meta: AiInvocationMeta): Promise<{ text: string; generationId: string }> {
     const invocation = await this.invoke({
       task: 'generate',
-      system: `${SYSTEM_EDITOR}${tone ? ` 语气要求：${tone}。` : ''}`,
+      system: `${systemEditor()}${tone ? ` 语气要求：${tone}。` : ''}`,
       user: prompt,
       meta,
       parse: (completion) => completion.text,
@@ -83,12 +79,12 @@ export class AiService {
 
   async adapt(input: AdaptInput, meta: AiInvocationMeta): Promise<{ variants: AdaptedVariantPayload[]; generationId: string; model: string }> {
     const guidance = input.platforms
-      .map((platform) => `- ${PLATFORM_LABELS[platform]}(${platform})：${PLATFORM_GUIDANCE[platform] ?? '常规风格'}`)
+      .map((platform) => `- ${PLATFORM_LABELS[platform]}(${platform})：${platformGuidance(platform)}`)
       .join('\n');
 
     const invocation = await this.invoke({
       task: 'adapt',
-      system: `${SYSTEM_EDITOR}${SYSTEM_JSON}`,
+      system: `${systemEditor()}${SYSTEM_JSON}`,
       json: true,
       user: [
         '请把以下内容改写为指定平台各自的版本，保留事实信息，不新增疗效描述。',
@@ -135,7 +131,7 @@ export class AiService {
 
     const invocation = await this.invoke({
       task: 'knowledge_generate',
-      system: `${SYSTEM_EDITOR}${SYSTEM_JSON}`,
+      system: `${systemEditor()}${SYSTEM_JSON}`,
       json: true,
       user: [
         '请把运营给的要点扩写成一条标准品牌资料，供后续内容生成引用。',
@@ -163,7 +159,7 @@ export class AiService {
   async polishKnowledge(input: KnowledgePolishInput, meta: AiInvocationMeta): Promise<{ content: string; generationId: string }> {
     const invocation = await this.invoke({
       task: 'knowledge_polish',
-      system: `${SYSTEM_EDITOR}${SYSTEM_JSON}`,
+      system: `${systemEditor()}${SYSTEM_JSON}`,
       json: true,
       user: [
         '请润色下面这条品牌资料：保持全部事实、数字、规格不变，只让表达更清晰、更适合被内容生成引用。',
@@ -190,7 +186,7 @@ export class AiService {
   ): Promise<{ titles: string[]; generationId: string }> {
     const invocation = await this.invoke({
       task: 'optimize_title',
-      system: `${SYSTEM_EDITOR}${SYSTEM_JSON}`,
+      system: `${systemEditor()}${SYSTEM_JSON}`,
       json: true,
       user: [
         `title=${title}`,
@@ -221,7 +217,7 @@ export class AiService {
     try {
       const invocation = await this.invoke({
         task: 'compliance_check',
-        system: `${SYSTEM_EDITOR}${SYSTEM_JSON}`,
+        system: `${systemEditor()}${SYSTEM_JSON}`,
         json: true,
         user: [
           input.platform ? `platform=${input.platform}` : '',
@@ -278,6 +274,8 @@ export class AiService {
         system: params.system,
         user: params.user,
         json: params.json,
+        temperature: runtime().ai.temperature,
+        maxTokens: runtime().ai.maxTokens,
       });
       const parsed = params.parse(completion);
       const generation = await this.generations.save(
@@ -294,7 +292,7 @@ export class AiService {
           tokensInput: completion.tokensInput,
           tokensOutput: completion.tokensOutput,
           latencyMs: Date.now() - startedAt,
-          cost: '0',
+          cost: estimateCost(completion.tokensInput, completion.tokensOutput),
           errorMessage: null,
           requestedBy: params.meta.requestedBy ?? null,
           contentId: params.meta.contentId ?? null,

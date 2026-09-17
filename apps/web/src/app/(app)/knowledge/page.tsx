@@ -12,6 +12,7 @@ import { Input, Select, Textarea } from '../../../components/ui/Field';
 import { Pagination } from '../../../components/ui/Pagination';
 import { SkeletonRows } from '../../../components/ui/Skeleton';
 import { Tag } from '../../../components/ui/Tag';
+import { useSiteConfig } from '../../../lib/knowledge';
 import { ApiError } from '../../../lib/api/client';
 import { authApi, knowledgeApi } from '../../../lib/api/endpoints';
 import type { KnowledgeItem } from '../../../lib/api/types';
@@ -52,6 +53,7 @@ const EMPTY_FORM: FormState = {
 };
 
 export default function KnowledgePage() {
+  const site = useSiteConfig();
   const queryClient = useQueryClient();
   const [keyword, setKeyword] = useState('');
   const [appliedKeyword, setAppliedKeyword] = useState('');
@@ -85,7 +87,7 @@ export default function KnowledgePage() {
         category: category || undefined,
         isActive: status || undefined,
         page,
-        pageSize: 10,
+        pageSize: site.pageSize,
       }),
   });
   const brands = useQuery({ queryKey: ['knowledge', 'brands'], queryFn: () => knowledgeApi.brands() });
@@ -435,7 +437,7 @@ export default function KnowledgePage() {
           )}
         </div>
 
-        <Pagination page={page} pageSize={10} total={list.data?.meta.total ?? 0} onChange={setPage} />
+        <Pagination page={page} pageSize={site.pageSize} total={list.data?.meta.total ?? 0} onChange={setPage} />
       </Card>
       ) : null}
 
@@ -505,7 +507,7 @@ export default function KnowledgePage() {
           )}
           {aiDrafted ? <Banner tone="warning">这条资料由 AI 起草，保存后会标记「AI 起草」便于日后追溯；数字、规格、认证信息请务必人工核对。</Banner> : null}
           <div className={styles.twoCol}>
-            <Input label="品牌" name="brand" required placeholder="例如：卿尔美" value={form.brand} onChange={(event) => setForm({ ...form, brand: event.target.value })} />
+            <Input label="品牌" name="brand" required placeholder={brands.data?.[0] ? `例如：${brands.data[0].brand}` : '例如：品牌名称'} value={form.brand} onChange={(event) => setForm({ ...form, brand: event.target.value })} />
             <Select
               label="分类"
               name="category"

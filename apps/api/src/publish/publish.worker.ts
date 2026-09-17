@@ -4,14 +4,12 @@ import { PublishTaskStatus } from '@mediaflow/shared';
 import { AuditService } from '../audit/audit.service';
 import { PublishTask } from '../modules/publish/entities/publish-task.entity';
 import { CHANNEL_REGISTRY } from './channel-registry.provider';
+import { runtime } from '../modules/settings/runtime-config';
 import { PublishQueueService } from './publish.queue';
 import { PublishService } from './publish.service';
-import { SettingsService } from '../modules/settings/settings.service';
 import { NotificationService } from '../modules/notification/notification.service';
 
 const SWEEP_INTERVAL_MS = 15_000;
-const BLOCK_MS = 5_000;
-const READ_COUNT = 5;
 const TERMINAL_STATUSES: PublishTaskStatus[] = [
   PublishTaskStatus.Published,
   PublishTaskStatus.ManualRequired,
@@ -41,7 +39,6 @@ export class PublishWorker implements OnModuleInit, OnModuleDestroy {
     private readonly publishService: PublishService,
     private readonly queue: PublishQueueService,
     private readonly audit: AuditService,
-    private readonly settings: SettingsService,
     private readonly notifications: NotificationService,
     @Inject(CHANNEL_REGISTRY) private readonly registry: ChannelAdapterRegistry,
   ) {}
@@ -66,14 +63,14 @@ export class PublishWorker implements OnModuleInit, OnModuleDestroy {
   }
 
   private async enabled(): Promise<boolean> {
-    return this.settings.getBoolean('PUBLISH_WORKER_ENABLED', true);
+    return runtime().publish.workerEnabled;
   }
 
   private async consumeLoop(): Promise<void> {
     await this.reclaimStale();
     while (this.running) {
       try {
-        const entries = await this.queue.read(this.consumerName, READ_COUNT, BLOCK_MS);
+        const entries = await this.queue.read(this.consumerName, runtime().publish.readCount, runtime().publish.readBlockMs);
         for (const entry of entries) {
           try {
             await this.handle(entry.taskId);

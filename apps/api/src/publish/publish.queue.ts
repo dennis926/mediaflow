@@ -1,10 +1,11 @@
 import { Inject, Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import Redis from 'ioredis';
 import { REDIS_CLIENT } from '../redis/redis.constants';
+import { runtime } from '../modules/settings/runtime-config';
 
 export const PUBLISH_STREAM = 'mediaflow:publish:tasks';
 export const PUBLISH_GROUP = 'publish-workers';
-/** A worker that dies mid-flight leaves entries pending; they are re-claimed after this idle time. */
+/** 默认回收阈值；实际取值来自配置 PUBLISH_CLAIM_IDLE_MS。 */
 export const CLAIM_IDLE_MS = 60_000;
 
 export interface StreamEntry {
@@ -76,7 +77,7 @@ export class PublishQueueService implements OnModuleDestroy {
 
   /** Takes over entries whose consumer died before acknowledging them. */
   async claimStale(consumer: string, count = 20): Promise<StreamEntry[]> {
-    const raw = await this.redis.xautoclaim(PUBLISH_STREAM, PUBLISH_GROUP, consumer, CLAIM_IDLE_MS, '0-0', 'COUNT', count);
+    const raw = await this.redis.xautoclaim(PUBLISH_STREAM, PUBLISH_GROUP, consumer, runtime().publish.claimIdleMs, '0-0', 'COUNT', count);
     if (!Array.isArray(raw)) return [];
     const claimed = raw[1];
     return parseStreamEntries([[PUBLISH_STREAM, claimed]]);

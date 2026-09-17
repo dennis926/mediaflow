@@ -175,6 +175,7 @@
 | PUT | `/api/knowledge/:id` | 更新（含 `isActive` 启停） |
 | DELETE | `/api/knowledge/:id` | 软删除 |
 
+| GET | `/api/public/site-config` | **未登录可读**的站点信息（名称/副标题/公司/支持邮箱/每页条数/AI 标识文案），登录页与侧边栏据此渲染 |
 | GET | `/api/knowledge/categories` | 当前生效的分类配置 + 每个分类的资料数（分类是配置项，不是写死的枚举） |
 | PUT | `/api/knowledge/categories` | 保存整套分类（`categories[{code,label,tone,description?}]`）；**正在被资料使用的分类不允许删除**；保存后 DTO 校验码表即时刷新 |
 | POST | `/api/knowledge/export` | 导出知识库：`format` = `json`（原生，含分类配置，可整站迁移）/ `csv` / `markdown`，另可 `brand`/`category`/`includeInactive` 过滤；返回 `{fileName,mimeType,content}` 由前端下载 |

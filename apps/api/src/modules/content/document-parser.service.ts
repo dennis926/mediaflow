@@ -1,10 +1,11 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import { runtime } from '../settings/runtime-config';
 import { execFile } from 'node:child_process';
 import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { extname, join } from 'node:path';
 import { promisify } from 'node:util';
-import { MAX_OCR_IMAGES, OcrService } from './ocr.service';
+import { OcrService } from './ocr.service';
 
 const execFileAsync = promisify(execFile);
 
@@ -46,11 +47,10 @@ export const SUPPORTED_DOCUMENT_TYPES = [
   '.markdown',
 ] as const;
 
-export const MAX_DOCUMENT_BYTES = 10 * 1024 * 1024;
-const MAX_PDF_OCR_PAGES = 10;
-const PDF_OCR_DPI = 200;
-const CHUNK_SIZE = 1200;
-const CHUNK_OVERLAP = 200;
+/** 上传层硬上限（安全护栏）：真正的业务上限来自配置 KB_MAX_DOCUMENT_MB。 */
+export const MAX_DOCUMENT_BYTES = 50 * 1024 * 1024;
+
+const config = (): ReturnType<typeof runtime>['knowledge'] => runtime().knowledge;
 
 /**
  * 文档解析：PDF / Word / PPT / Excel / 文本 → 纯文本，再切成适合喂给 AI 的片段。
@@ -70,8 +70,9 @@ export class DocumentParserService {
     if (!SUPPORTED_DOCUMENT_TYPES.includes(type as (typeof SUPPORTED_DOCUMENT_TYPES)[number])) {
       throw new BadRequestException(`不支持的文件类型 ${type || '(无扩展名)'}，目前支持：${SUPPORTED_DOCUMENT_TYPES.join('、')}`);
     }
-    if (size > MAX_DOCUMENT_BYTES) {
-      throw new BadRequestException(`文件过大（${(size / 1024 / 1024).toFixed(1)}MB），单文件上限 ${MAX_DOCUMENT_BYTES / 1024 / 1024}MB`);
+    const limitBytes = config().maxDocumentMb * 1024 * 1024;
+    if (size > limitBytes) {
+      throw new BadRequestException(`文件过大（${(size / 1024 / 1024).toFixed(1)}MB），单文件上限 ${config().maxDocumentMb}MB`);
     }
     if (size === 0) throw new BadRequestException('文件内容为空');
     return type;
@@ -174,6 +175,8 @@ export class DocumentParserService {
       .map((paragraph) => paragraph.trim())
       .filter((paragraph) => paragraph.length > 0);
 
+    const CHUNK_SIZE = config().chunkSize;
+    const CHUNK_OVERLAP = Math.min(config().chunkOverlap, Math.floor(CHUNK_SIZE / 2));
     const chunks: KnowledgeChunk[] = [];
     let buffer = '';
 
@@ -260,7 +263,7 @@ export class DocumentParserService {
 
   /** 读取压缩包内图片并逐张 OCR（docx 的 word/media、pptx 的 ppt/media）。 */
   private async ocrZipMedia(buffer: Buffer, prefix: RegExp, warnings: string[]): Promise<{ text: string; sections: number }> {
-    if (!this.ocr.available) return { text: '', sections: 0 };
+    if (!config().ocrEnabled || !this.ocr.available) return { text: '', sections: 0 };
     const JSZip = (await import('jszip')).default;
     const zip = await JSZip.loadAsync(buffer);
     const images = Object.keys(zip.files)
@@ -268,7 +271,7 @@ export class DocumentParserService {
       .sort();
 
     if (images.length === 0) return { text: '', sections: 0 };
-    const limited = images.slice(0, MAX_OCR_IMAGES);
+    const limited = images.slice(0, config().ocrMaxImages);
     if (images.length > limited.length) {
       warnings.push(`文档含 ${images.length} 张图片，仅识别前 ${limited.length} 张`);
     }
@@ -286,14 +289,14 @@ export class DocumentParserService {
 
   /** 扫描版 PDF：用 poppler 把前若干页渲染成图片再 OCR。 */
   private async ocrPdfPages(buffer: Buffer, warnings: string[]): Promise<{ text: string; sections: number }> {
-    if (!this.ocr.available) return { text: '', sections: 0 };
+    if (!config().ocrEnabled || !this.ocr.available) return { text: '', sections: 0 };
     const dir = mkdtempSync(join(tmpdir(), 'mediaflow-pdf-'));
     const pdfPath = join(dir, 'input.pdf');
     try {
       writeFileSync(pdfPath, buffer);
       await execFileAsync(
         'pdftoppm',
-        ['-png', '-r', String(PDF_OCR_DPI), '-f', '1', '-l', String(MAX_PDF_OCR_PAGES), pdfPath, join(dir, 'page')],
+        ['-png', '-r', String(config().ocrDpi), '-f', '1', '-l', String(config().ocrPdfMaxPages), pdfPath, join(dir, 'page')],
         { timeout: 60_000 },
       );
       const pages = readdirSync(dir).filter((name) => name.endsWith('.png')).sort();
@@ -301,7 +304,7 @@ export class DocumentParserService {
         warnings.push('PDF 渲染失败，未能提取图片文字');
         return { text: '', sections: 0 };
       }
-      if (pages.length >= MAX_PDF_OCR_PAGES) warnings.push(`PDF 页数较多，仅识别前 ${MAX_PDF_OCR_PAGES} 页`);
+      if (pages.length >= config().ocrPdfMaxPages) warnings.push(`PDF 页数较多，仅识别前 ${config().ocrPdfMaxPages} 页`);
 
       const parts: string[] = [];
       for (const [index, page] of pages.entries()) {

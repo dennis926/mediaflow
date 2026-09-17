@@ -195,7 +195,7 @@ export function TransferPanel() {
                   label="默认品牌（行里没有品牌时用）"
                   name="importBrand"
                   required
-                  placeholder="例如：卿尔美"
+                  placeholder="例如：品牌名称"
                   value={defaults.brand}
                   onChange={(event) => setDefaults({ ...defaults, brand: event.target.value })}
                 />

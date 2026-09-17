@@ -1,6 +1,7 @@
 import { ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { AiFlagType, ContentStatus, PlatformCode, appendAiDisclosure } from '@mediaflow/shared';
+import { runtime } from '../settings/runtime-config';
 import { DataSource, EntityManager, Repository } from 'typeorm';
 import { AuditService } from '../../audit/audit.service';
 import { WorkspaceContextService } from '../../common/workspace-context.service';
@@ -58,7 +59,7 @@ export class ContentService {
       title: dto.title,
       summary: dto.summary ?? null,
       // The legal AI mark is stored with the text, so every downstream consumer inherits it.
-      body: appendAiDisclosure(dto.body, aiFlagType),
+      body: appendAiDisclosure(dto.body, aiFlagType, runtime().site.aiDisclosureSuffix),
       coverUrl: dto.coverUrl ?? null,
       mediaUrls: dto.mediaUrls ?? [],
       tags: dto.tags ?? [],
@@ -134,7 +135,7 @@ export class ContentService {
       brandKnowledgeId: dto.brandKnowledgeId ?? content.brandKnowledgeId,
       aiFlagType,
       aiGenerated: aiFlagType !== AiFlagType.None,
-      body: appendAiDisclosure(rawBody, aiFlagType),
+      body: appendAiDisclosure(rawBody, aiFlagType, runtime().site.aiDisclosureSuffix),
       // 审核通过后如果正文/标题又被改了，原审核结论失效，必须重新送审。
       status: contentChanged && previousStatus === ContentStatus.Approved ? ContentStatus.Draft : (dto.status ?? content.status),
     });

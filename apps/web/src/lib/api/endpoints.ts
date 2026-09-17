@@ -21,6 +21,7 @@ import type {
   KnowledgeImportResult,
   KnowledgeDraft,
   KnowledgeItem,
+  SiteConfigView,
   KnowledgeMatchItem,
   KnowledgeSourceGroup,
   LoginResult,
@@ -179,6 +180,11 @@ export const accountsApi = {
     extra?: Record<string, unknown>;
   }) => api.post<AccountView>('/accounts/bind', payload),
   unbind: (id: string) => api.delete<{ id: string }>(`/accounts/${id}`),
+};
+
+/** 站点信息（未登录可读）：登录页、侧边栏、浏览器标题都用它 */
+export const publicApi = {
+  siteConfig: () => api.get<SiteConfigView>('/public/site-config'),
 };
 
 export const knowledgeApi = {

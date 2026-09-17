@@ -14,6 +14,7 @@ import { Input, Select } from '../../../components/ui/Field';
 import { Pagination } from '../../../components/ui/Pagination';
 import { SkeletonRows } from '../../../components/ui/Skeleton';
 import { Tag } from '../../../components/ui/Tag';
+import { useSiteConfig } from '../../../lib/knowledge';
 import { ApiError } from '../../../lib/api/client';
 import { contentApi } from '../../../lib/api/endpoints';
 import type { Content } from '../../../lib/api/types';
@@ -38,6 +39,7 @@ const PLATFORM_OPTIONS = [
 ];
 
 export default function ContentListPage() {
+  const site = useSiteConfig();
   const router = useRouter();
   const queryClient = useQueryClient();
   const [keyword, setKeyword] = useState('');
@@ -51,12 +53,12 @@ export default function ContentListPage() {
   const query = useMemo(
     () => ({
       page,
-      pageSize: 10,
+      pageSize: site.pageSize,
       keyword: appliedKeyword || undefined,
       status: (status || undefined) as ContentStatus | undefined,
       platform: (platform || undefined) as PlatformCode | undefined,
     }),
-    [page, appliedKeyword, status, platform],
+    [page, appliedKeyword, status, platform, site.pageSize],
   );
 
   const contents = useQuery({ queryKey: ['contents', query], queryFn: () => contentApi.list(query) });
@@ -256,7 +258,7 @@ export default function ContentListPage() {
 
         <Pagination
           page={page}
-          pageSize={10}
+          pageSize={site.pageSize}
           total={contents.data?.meta.total ?? 0}
           onChange={(next) => setPage(next)}
         />

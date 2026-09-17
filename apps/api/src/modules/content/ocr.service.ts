@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { runtime } from '../settings/runtime-config';
 import { execFile } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -13,9 +14,7 @@ export interface OcrResult {
   error?: string;
 }
 
-/** 每次导入最多识别的图片数（OCR 是 CPU 密集操作，必须设上限）。 */
-export const MAX_OCR_IMAGES = 20;
-const OCR_TIMEOUT_MS = 30_000;
+/** 小图（图标、分隔线）识别没有意义，跳过省时间。 */
 const MIN_IMAGE_BYTES = 3 * 1024;
 
 /**
@@ -25,10 +24,17 @@ const MIN_IMAGE_BYTES = 3 * 1024;
 @Injectable()
 export class OcrService {
   private readonly logger = new Logger(OcrService.name);
-  private readonly languages = process.env.OCR_LANGUAGES ?? 'chi_sim+eng';
+  /** 语言包、开关、超时都是配置项（设置 → 知识库） */
+  private get languages(): string {
+    return runtime().knowledge.ocrLanguages;
+  }
+  private get enabled(): boolean {
+    return runtime().knowledge.ocrEnabled;
+  }
   private queue: Promise<unknown> = Promise.resolve();
 
   get available(): boolean {
+    if (!this.enabled) return false;
     return process.env.OCR_ENABLED !== 'false';
   }
 
@@ -57,7 +63,7 @@ export class OcrService {
       const candidates: string[] = [];
       for (const psm of ['3', '6']) {
         const { stdout } = await execFileAsync('tesseract', [file, 'stdout', '-l', this.languages, '--psm', psm], {
-          timeout: OCR_TIMEOUT_MS,
+          timeout: runtime().knowledge.ocrTimeoutMs,
           maxBuffer: 8 * 1024 * 1024,
         });
         candidates.push(stdout.replace(/\n{3,}/g, '\n\n').trim());

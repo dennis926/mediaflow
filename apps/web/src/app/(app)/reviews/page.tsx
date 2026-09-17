@@ -12,6 +12,7 @@ import { Textarea } from '../../../components/ui/Field';
 import { Pagination } from '../../../components/ui/Pagination';
 import { SkeletonRows } from '../../../components/ui/Skeleton';
 import { Tag } from '../../../components/ui/Tag';
+import { useSiteConfig } from '../../../lib/knowledge';
 import { ApiError } from '../../../lib/api/client';
 import { contentApi, reviewsApi } from '../../../lib/api/endpoints';
 import type { Content, ReviewItem } from '../../../lib/api/types';
@@ -44,6 +45,7 @@ const STATUS_TONES: Record<string, 'warning' | 'success' | 'danger' | 'info'> = 
 const DEFAULT_CHECKLIST = ['compliance', 'aiDisclosure', 'facts', 'typos', 'brandVoice'];
 
 export default function ReviewsPage() {
+  const site = useSiteConfig();
   const queryClient = useQueryClient();
   const [active, setActive] = useState('pending');
   const [page, setPage] = useState(1);
@@ -195,7 +197,7 @@ export default function ReviewsPage() {
           )}
         </div>
 
-        <Pagination page={page} pageSize={10} total={reviews.data?.meta.total ?? 0} onChange={setPage} />
+        <Pagination page={page} pageSize={site.pageSize} total={reviews.data?.meta.total ?? 0} onChange={setPage} />
       </Card>
 
       <Dialog

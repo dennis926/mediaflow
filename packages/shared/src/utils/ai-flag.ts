@@ -6,10 +6,10 @@ export function requiresAiDisclosure(aiFlagType: AiFlagType): boolean {
 }
 
 /** Appends the mandatory visible AI mark exactly once. */
-export function appendAiDisclosure(body: string, aiFlagType: AiFlagType): string {
+export function appendAiDisclosure(body: string, aiFlagType: AiFlagType, disclosureText = AI_DISCLOSURE_TEXT): string {
   if (!requiresAiDisclosure(aiFlagType)) return body;
-  if (body.includes(AI_DISCLOSURE_TEXT)) return body;
-  return `${body.trimEnd()}\n\n${AI_DISCLOSURE_TEXT}`;
+  if (body.includes(disclosureText)) return body;
+  return `${body.trimEnd()}\n\n${disclosureText}`;
 }
 
 /** Builds the invisible mark embedded into image/video metadata. */

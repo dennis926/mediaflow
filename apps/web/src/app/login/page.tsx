@@ -3,6 +3,7 @@
 import { useMutation } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
+import { useSiteConfig } from '../../lib/knowledge';
 import { Banner } from '../../components/ui/Banner';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Field';
@@ -11,6 +12,7 @@ import { ApiError, setToken } from '../../lib/api/client';
 import styles from './page.module.css';
 
 export default function LoginPage() {
+  const site = useSiteConfig();
   const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -33,8 +35,8 @@ export default function LoginPage() {
         <div className={styles.brand}>
           <span className={styles.brandMark}>M</span>
           <div>
-            <h1 className={styles.title}>MediaFlow</h1>
-            <span className={styles.subtitle}>社交媒体内容分发与矩阵运营平台</span>
+            <h1 className={styles.title}>{site.name}</h1>
+            <span className={styles.subtitle}>{site.tagline}</span>
           </div>
         </div>
 

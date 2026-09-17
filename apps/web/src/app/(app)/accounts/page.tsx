@@ -260,7 +260,7 @@ function AccountsPageInner() {
         <Input
           label="账号名称"
           name="accountName"
-          placeholder="例如：卿尔美官方号"
+          placeholder="例如：官方账号"
           value={form.accountName}
           onChange={(event) => setForm({ ...form, accountName: event.target.value })}
         />

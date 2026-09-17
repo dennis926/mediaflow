@@ -3,9 +3,11 @@ import '@mediaflow/design-tokens/tokens.css';
 import './globals.css';
 import { tokens } from '@mediaflow/design-tokens';
 import { Providers } from '../lib/providers';
+import { SiteTitle } from '../components/layout/SiteTitle';
 
 export const metadata: Metadata = {
-  title: 'MediaFlow · 内容分发与矩阵运营',
+  // 站点名可在后台配置，这里只是首屏兜底（客户端由 SiteTitle 同步）
+  title: 'MediaFlow',
   description: '一次创作，多平台适配，统一排期发布',
 };
 
@@ -19,7 +21,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="zh-CN">
       <body>
-        <Providers>{children}</Providers>
+        <Providers>
+          <SiteTitle />
+          {children}
+        </Providers>
       </body>
     </html>
   );

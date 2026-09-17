@@ -213,6 +213,16 @@ export interface ImportChunkPreview {
   preview: string;
 }
 
+export interface SiteConfigView {
+  name: string;
+  tagline: string;
+  company: string;
+  supportEmail: string;
+  /** 列表默认每页条数（可在「设置 → 站点信息」调整） */
+  pageSize: number;
+  aiDisclosureSuffix: string;
+}
+
 export interface KnowledgeExportFile {
   fileName: string;
   mimeType: string;

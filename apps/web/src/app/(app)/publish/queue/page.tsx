@@ -13,6 +13,7 @@ import { EmptyState } from '../../../../components/ui/EmptyState';
 import { Pagination } from '../../../../components/ui/Pagination';
 import { SkeletonRows } from '../../../../components/ui/Skeleton';
 import { Tag } from '../../../../components/ui/Tag';
+import { useSiteConfig } from '../../../../lib/knowledge';
 import { ApiError } from '../../../../lib/api/client';
 import { publishApi } from '../../../../lib/api/endpoints';
 import type { PublishTask } from '../../../../lib/api/types';
@@ -45,6 +46,7 @@ const RETRYABLE: string[] = [
 ];
 
 export default function PublishQueuePage() {
+  const site = useSiteConfig();
   const queryClient = useQueryClient();
   const [active, setActive] = useState('all');
   const [page, setPage] = useState(1);
@@ -202,7 +204,7 @@ export default function PublishQueuePage() {
           )}
         </div>
 
-        <Pagination page={page} pageSize={10} total={tasks.data?.meta.total ?? 0} onChange={setPage} />
+        <Pagination page={page} pageSize={site.pageSize} total={tasks.data?.meta.total ?? 0} onChange={setPage} />
       </Card>
 
       <Dialog

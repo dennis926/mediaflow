@@ -17,16 +17,19 @@ export interface SidebarProps {
   activeHref: string;
   footer?: ReactNode;
   onNavigate?: () => void;
+  /** 站点名称与副标题来自后台配置（设置 → 站点信息） */
+  siteName?: string;
+  siteTagline?: string;
 }
 
-export function Sidebar({ items, activeHref, footer, onNavigate }: SidebarProps) {
+export function Sidebar({ items, activeHref, footer, onNavigate, siteName = 'MediaFlow', siteTagline = '' }: SidebarProps) {
   return (
     <nav className={styles.sidebar} aria-label="主导航">
       <div className={styles.brand}>
-        <span className={styles.brandMark}>M</span>
+        <span className={styles.brandMark}>{siteName.slice(0, 1).toUpperCase()}</span>
         <span className={styles.brandText}>
-          <span className={styles.brandName}>MediaFlow</span>
-          <span className={styles.brandTag}>内容分发与矩阵运营</span>
+          <span className={styles.brandName}>{siteName}</span>
+          {siteTagline ? <span className={styles.brandTag}>{siteTagline}</span> : null}
         </span>
       </div>
 

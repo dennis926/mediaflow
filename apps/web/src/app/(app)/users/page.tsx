@@ -12,6 +12,7 @@ import { Input, Select } from '../../../components/ui/Field';
 import { Pagination } from '../../../components/ui/Pagination';
 import { SkeletonRows } from '../../../components/ui/Skeleton';
 import { Tag } from '../../../components/ui/Tag';
+import { useSiteConfig } from '../../../lib/knowledge';
 import { ApiError } from '../../../lib/api/client';
 import { usersApi } from '../../../lib/api/endpoints';
 import type { UserItem } from '../../../lib/api/types';
@@ -42,6 +43,7 @@ const STATUS_OPTIONS = [
 ];
 
 export default function UsersPage() {
+  const site = useSiteConfig();
   const queryClient = useQueryClient();
   const [keyword, setKeyword] = useState('');
   const [appliedKeyword, setAppliedKeyword] = useState('');
@@ -66,7 +68,7 @@ export default function UsersPage() {
         status: status || undefined,
         role: role || undefined,
         page,
-        pageSize: 10,
+        pageSize: site.pageSize,
       }),
   });
   const roles = useQuery({ queryKey: ['users', 'roles'], queryFn: () => usersApi.roles() });
@@ -297,7 +299,7 @@ export default function UsersPage() {
           )}
         </div>
 
-        <Pagination page={page} pageSize={10} total={users.data?.meta.total ?? 0} onChange={setPage} />
+        <Pagination page={page} pageSize={site.pageSize} total={users.data?.meta.total ?? 0} onChange={setPage} />
       </Card>
 
       <Card title="角色说明">

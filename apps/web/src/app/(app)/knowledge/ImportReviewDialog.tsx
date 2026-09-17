@@ -316,7 +316,7 @@ export function ImportReviewDialog({ open, onClose, onImported }: ImportReviewDi
             </div>
           ) : null}
           <div className={styles.twoCol}>
-            <Input label="品牌" name="importBrand" required placeholder="例如：卿尔美" value={settings.brand} onChange={(event) => setSettings({ ...settings, brand: event.target.value })} />
+            <Input label="品牌" name="importBrand" required placeholder="例如：品牌名称" value={settings.brand} onChange={(event) => setSettings({ ...settings, brand: event.target.value })} />
             <Select
               label="分类"
               name="importCategory"

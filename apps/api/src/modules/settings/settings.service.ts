@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { AuditService } from '../../audit/audit.service';
@@ -6,6 +6,7 @@ import { CryptoService } from '../../common/crypto.service';
 import { WorkspaceContextService } from '../../common/workspace-context.service';
 import { SystemSetting } from './entities/system-setting.entity';
 import { SETTING_BY_KEY, SETTING_DEFINITIONS, SETTING_GROUP_LABELS, SettingGroup } from './settings.registry';
+import { applyRuntimeConfig, runtime } from './runtime-config';
 
 export interface SettingView {
   key: string;
@@ -38,7 +39,7 @@ export interface SettingsActor {
  * Values marked as secret are encrypted with CryptoService before they hit the database.
  */
 @Injectable()
-export class SettingsService {
+export class SettingsService implements OnModuleInit {
   private readonly logger = new Logger(SettingsService.name);
   /** Bumped on every write so cached consumers (e.g. the AI provider) rebuild. */
   private version = 1;
@@ -53,6 +54,32 @@ export class SettingsService {
 
   get revision(): number {
     return this.version;
+  }
+
+  /** 启动时把数据库里的配置刷进运行时快照，业务代码同步读 runtime()。 */
+  async onModuleInit(): Promise<void> {
+    try {
+      await this.refreshRuntimeConfig();
+      const config = runtime();
+      this.logger.log(`运行时配置已加载：站点「${config.site.name}」，合规规则 ${config.compliance.length} 组，知识库注入上限 ${config.knowledge.injectLimit} 条`);
+    } catch (error) {
+      this.logger.warn(`运行时配置加载失败，使用默认值：${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  /** 全部配置的扁平快照（未配置的键不出现，由默认值兜底）。 */
+  async flat(): Promise<Record<string, string | undefined>> {
+    const values: Record<string, string | undefined> = {};
+    for (const definition of SETTING_DEFINITIONS) {
+      const value = await this.get(definition.key);
+      if (value !== null && value !== undefined && value !== '') values[definition.key] = value;
+    }
+    return values;
+  }
+
+  /** 把当前配置刷进运行时快照；保存设置后会自动调用。 */
+  async refreshRuntimeConfig(): Promise<void> {
+    applyRuntimeConfig(await this.flat(), (message) => this.logger.warn(`配置解析失败：${message}`));
   }
 
   /** Effective value: database override, then environment, then undefined. */
@@ -171,6 +198,8 @@ export class SettingsService {
 
     this.cache.clear();
     this.version += 1;
+    // 配置改完立刻生效：业务代码读的是运行时快照，不需要重启服务。
+    await this.refreshRuntimeConfig();
 
     await this.audit.record({
       action: 'settings.update',
