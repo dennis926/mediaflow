@@ -142,6 +142,19 @@ export class PublishWorker implements OnModuleInit, OnModuleDestroy {
       await this.publishService.releaseWithRetry(claimedTask, message);
       await this.record(claimedTask, 'publish_task.attempt_failed', { attempts: claimedTask.attempts, error: message });
       this.logger.warn(`任务 ${taskId} 执行异常（第 ${claimedTask.attempts} 次）：${message}`);
+
+      // 用尽重试次数才算"彻底失败"：这时才提醒人（是否推送到群/邮件走配置）
+      if (claimedTask.attempts >= claimedTask.maxAttempts && runtime().notify.onPublishFailure) {
+        await this.notifications.notify({
+          type: 'publish.failed',
+          level: 'error',
+          title: `发布失败：${claimedTask.platform}`,
+          body: `任务重试 ${claimedTask.attempts} 次仍失败：${message}。请到「发布队列」查看详情并检查账号授权或内容格式。`,
+          resourceType: 'publish_task',
+          resourceId: claimedTask.id,
+          payload: { platform: claimedTask.platform, attempts: claimedTask.attempts },
+        });
+      }
       return;
     }
 
@@ -194,7 +207,7 @@ export class PublishWorker implements OnModuleInit, OnModuleDestroy {
             resourceType: 'publish_task',
             resourceId: task.id,
             payload: { platform: task.platform, attempts: task.attempts },
-            email: true,
+            external: true,
           });
         }
     }

@@ -187,7 +187,11 @@ export class SocialAccountService {
   }
 
   /** Accounts whose token expires soon, used by the refresh scheduler. */
-  async expiringAccounts(withinMinutes = 30): Promise<Array<{ id: string; platform: PlatformCode }>> {
+  async expiringAccounts(
+    withinMinutes = 30,
+  ): Promise<
+    Array<{ id: string; platform: PlatformCode; accountName: string; tokenExpiresAt: Date | null; extra: Record<string, unknown> }>
+  > {
     const scope = await this.workspaceContext.current();
     const threshold = new Date(Date.now() + withinMinutes * 60 * 1000);
     const rows = await this.accounts
@@ -198,7 +202,36 @@ export class SocialAccountService {
       .andWhere('account.tokenExpiresAt IS NOT NULL')
       .andWhere('account.tokenExpiresAt <= :threshold', { threshold })
       .getMany();
-    return rows.map((row) => ({ id: row.id, platform: row.platformCode }));
+    return rows.map((row) => ({
+      id: row.id,
+      platform: row.platformCode,
+      accountName: row.accountName,
+      tokenExpiresAt: row.tokenExpiresAt,
+      extra: row.extra ?? {},
+    }));
+  }
+
+  /** 标记"令牌刷新失败"：状态置为 expired 并在 extra 记时间，供列表中警示与去重提醒。 */
+  async markTokenProblem(accountId: string, reason: string): Promise<void> {
+    const account = await this.accounts.findOne({ where: { id: accountId } });
+    if (!account) return;
+    await this.accounts.update(
+      { id: accountId },
+      {
+        status: 'expired',
+        extra: { ...(account.extra ?? {}), refreshFailedAt: new Date().toISOString(), refreshFailedReason: reason },
+      },
+    );
+  }
+
+  /** 记录"即将到期"提醒时间（不改状态，仅用于去重）。 */
+  async markTokenWarning(accountId: string, note: string): Promise<void> {
+    const account = await this.accounts.findOne({ where: { id: accountId } });
+    if (!account) return;
+    await this.accounts.update(
+      { id: accountId },
+      { extra: { ...(account.extra ?? {}), expiryNotifiedAt: new Date().toISOString(), expiryNote: note } },
+    );
   }
 
   async saveRefreshedTokens(accountId: string, tokens: { accessToken?: string; refreshToken?: string; expiresAt?: string }): Promise<void> {

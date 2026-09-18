@@ -147,10 +147,14 @@ function AccountsPageInner() {
                 <div className={styles.tags}>
                   <Tag tone="info">{MODE_LABELS[account.publishMode]}</Tag>
                   <Tag tone={account.hasToken ? 'success' : 'warning'}>{account.hasToken ? '令牌已配置' : '未配置令牌'}</Tag>
+                  {account.status === 'expired' ? <Tag tone="danger">授权已失效，请重新绑定</Tag> : null}
                 </div>
                 <span className={styles.meta}>平台账号 ID：{account.platformAccountId}</span>
                 <span className={styles.meta}>
                   {account.tokenExpiresAt ? `令牌到期：${formatDateTime(account.tokenExpiresAt)}` : '绑定时间：' + formatDateTime(account.createdAt)}
+                  {account.tokenExpiresAt && account.status !== 'expired' && new Date(account.tokenExpiresAt).getTime() - Date.now() < 7 * 86_400_000
+                    ? ' · 即将到期，建议提前重新授权'
+                    : ''}
                 </span>
                 <div className={styles.actions}>
                   {OAUTH_PLATFORMS.includes(account.platform) ? (

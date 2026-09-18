@@ -30,12 +30,65 @@ interface MetricsReport {
 
 /** Tabs this worker opened for a sweep, so they can be closed after reporting. */
 interface OwnedTab {
-  target: MetricsTarget;
+  url: string;
   openedAt: number;
+}
+
+/** Session storage key holding the sweep tabs, so a service-worker restart still knows them. */
+const OWNED_TABS_KEY = 'mediaflow:sweepTabs';
+
+/** Minimal view of `chrome.storage.session`, which may be missing on older Chrome builds. */
+interface SessionArea {
+  get(keys: string[]): Promise<Record<string, unknown>>;
+  set(values: Record<string, unknown>): Promise<void>;
 }
 
 const ownedTabs = new Map<number, OwnedTab>();
 const recentReports = new Map<string, number>();
+
+function sessionArea(): SessionArea | null {
+  try {
+    return (chrome.storage.session as unknown as SessionArea | undefined) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Best-effort mirror of `ownedTabs`: collection works without it, tab cleanup does not. */
+async function persistOwnedTabs(): Promise<void> {
+  const area = sessionArea();
+  if (area === null) return;
+  try {
+    const entries = [...ownedTabs].map(([tabId, owned]) => ({ tabId, url: owned.url, openedAt: owned.openedAt }));
+    await area.set({ [OWNED_TABS_KEY]: entries });
+  } catch {
+    // Session storage is unavailable: the map stays in-memory for this worker's lifetime.
+  }
+}
+
+/**
+ * Rebuilds `ownedTabs` after a service-worker restart.
+ * Without it, a data page that finishes loading after the worker was suspended would be
+ * reported but its tab would never be closed again.
+ */
+async function restoreOwnedTabs(): Promise<void> {
+  const area = sessionArea();
+  if (area === null) return;
+  try {
+    const values = await area.get([OWNED_TABS_KEY]);
+    const entries = values[OWNED_TABS_KEY];
+    if (!Array.isArray(entries)) return;
+    for (const entry of entries) {
+      if (entry === null || typeof entry !== 'object') continue;
+      const record = entry as Record<string, unknown>;
+      const { tabId, url, openedAt } = record;
+      if (typeof tabId !== 'number' || typeof url !== 'string' || typeof openedAt !== 'number') continue;
+      ownedTabs.set(tabId, { url, openedAt });
+    }
+  } catch {
+    // Nothing restored: the next sweep opens fresh tabs.
+  }
+}
 
 async function fetchPluginTasks(): Promise<{ ok: boolean; items?: unknown[]; error?: string }> {
   const config = await loadConfig();
@@ -105,11 +158,16 @@ function toPayload(report: MetricsReport, target: MetricsTarget | undefined): Pl
   return payload;
 }
 
-/** Validates a message payload before it reaches the API; unknown shapes are dropped. */
-function asMetricsReport(payload: unknown): MetricsReport | null {
+/**
+ * Validates a message payload before it reaches the API; unknown shapes are dropped.
+ * Accepts the `{ metrics, url }` envelope the content script sends and the legacy flat payload
+ * (`{ platform, views, … }`) an older build may still post; `fallbackUrl` (the sender tab) is
+ * used for the target lookup when the payload carries no URL of its own.
+ */
+function asMetricsReport(payload: unknown, fallbackUrl?: string): MetricsReport | null {
   if (payload === null || typeof payload !== 'object') return null;
   const record = payload as Record<string, unknown>;
-  const raw = record.metrics;
+  const raw = record.metrics === undefined ? record : record.metrics;
   if (raw === null || typeof raw !== 'object') return null;
   const source = raw as Record<string, unknown>;
   if (!isMetricsPlatform(source.platform)) return null;
@@ -122,11 +180,13 @@ function asMetricsReport(payload: unknown): MetricsReport | null {
   if (typeof source.postId === 'string' && source.postId.trim().length > 0) metrics.postId = source.postId.trim().slice(0, 160);
   if (METRIC_NAMES.every((name) => metrics[name] === undefined)) return null;
 
-  return { metrics, url: typeof record.url === 'string' ? record.url : '' };
+  const url = typeof record.url === 'string' && record.url.length > 0 ? record.url : (fallbackUrl ?? '');
+  return { metrics, url };
 }
 
 async function closeOwnedTab(tabId: number): Promise<void> {
   ownedTabs.delete(tabId);
+  await persistOwnedTabs();
   try {
     await chrome.tabs.remove(tabId);
   } catch {
@@ -185,7 +245,8 @@ async function openTargetTab(target: MetricsTarget): Promise<number | null> {
   try {
     const tab = await chrome.tabs.create({ url: target.url, active: false });
     if (typeof tab.id !== 'number') return null;
-    ownedTabs.set(tab.id, { target, openedAt: Date.now() });
+    ownedTabs.set(tab.id, { url: target.url, openedAt: Date.now() });
+    await persistOwnedTabs();
     return tab.id;
   } catch (error) {
     console.warn('[mediaflow] 无法打开数据页', target.url, error);
@@ -241,6 +302,13 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (METRICS_INTERVAL_KEY in changes || METRICS_TARGETS_KEY in changes) void applyMetricsAlarm();
 });
 
+// A sweep tab the operator closes by hand must not stay in the "owned" map until the next sweep.
+chrome.tabs.onRemoved.addListener((tabId) => {
+  ownedTabs.delete(tabId);
+  void persistOwnedTabs();
+});
+
+void restoreOwnedTabs();
 void applyMetricsAlarm();
 
 /* -------------------------------------------------------------------- messages --- */
@@ -271,7 +339,7 @@ chrome.runtime.onMessage.addListener((message: { type?: string; payload?: unknow
 
   // Numbers scraped by the content script (scheduled sweep and pages the operator opens).
   if (message?.type === MSG_METRICS_COLLECTED) {
-    const report = asMetricsReport(message.payload);
+    const report = asMetricsReport(message.payload, sender.tab?.url);
     if (report === null) {
       sendResponse({ ok: false, error: '上报数据无效或没有可用的数值' });
       return true;
@@ -291,7 +359,7 @@ chrome.runtime.onMessage.addListener((message: { type?: string; payload?: unknow
   }
 
   if (message?.type === 'mediaflow:report-metrics') {
-    const report = asMetricsReport(message.payload);
+    const report = asMetricsReport(message.payload, sender.tab?.url);
     if (report === null) {
       sendResponse({ ok: false, error: '上报数据无效' });
       return true;

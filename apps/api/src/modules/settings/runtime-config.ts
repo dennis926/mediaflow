@@ -119,8 +119,19 @@ export interface MediaRuntimeConfig {
   contentHistoryLimit: number;
 }
 
+export interface NotifyRuntimeConfig {
+  webhookUrl: string;
+  webhookType: 'auto' | 'dingtalk' | 'feishu' | 'wecom' | 'generic';
+  emailEnabled: boolean;
+  emailTo: string[];
+  smtp: { host: string; port: number; secure: boolean; user: string; password: string; fromName: string };
+  onPublishFailure: boolean;
+  accountExpiryWarnDays: number;
+}
+
 export interface RuntimeConfig {
   site: SiteConfig;
+  notify: NotifyRuntimeConfig;
   media: MediaRuntimeConfig;
   auth: AuthRuntimeConfig;
   knowledge: KnowledgeRuntimeConfig;
@@ -260,10 +271,21 @@ export const DEFAULT_MEDIA_RUNTIME: MediaRuntimeConfig = {
   contentHistoryLimit: 20,
 };
 
+export const DEFAULT_NOTIFY_RUNTIME: NotifyRuntimeConfig = {
+  webhookUrl: '',
+  webhookType: 'auto',
+  emailEnabled: false,
+  emailTo: [],
+  smtp: { host: '', port: 465, secure: true, user: '', password: '', fromName: '' },
+  onPublishFailure: true,
+  accountExpiryWarnDays: 7,
+};
+
 const snapshot: RuntimeConfig = {
   site: { ...DEFAULT_SITE },
   auth: { ...DEFAULT_AUTH_RUNTIME },
   media: { ...DEFAULT_MEDIA_RUNTIME },
+  notify: { ...DEFAULT_NOTIFY_RUNTIME },
   knowledge: { ...DEFAULT_KNOWLEDGE_RUNTIME },
   ai: { ...DEFAULT_AI_RUNTIME, platformGuidance: { ...DEFAULT_AI_RUNTIME.platformGuidance } },
   compliance: DEFAULT_COMPLIANCE_RULES.map((rule) => ({ ...rule, terms: [...rule.terms] })),
@@ -333,6 +355,31 @@ export function applyRuntimeConfig(flat: Record<string, string | undefined>, onE
     logoUrl: text(flat.SITE_LOGO_URL, DEFAULT_SITE.logoUrl),
     pageSize: num(flat.UI_PAGE_SIZE, DEFAULT_SITE.pageSize, 5, 100),
     aiDisclosureSuffix: text(flat.AI_DISCLOSURE_SUFFIX, DEFAULT_SITE.aiDisclosureSuffix),
+  };
+
+  snapshot.notify = {
+    webhookUrl: text(flat.NOTIFY_WEBHOOK_URL, DEFAULT_NOTIFY_RUNTIME.webhookUrl),
+    webhookType: ((): NotifyRuntimeConfig['webhookType'] => {
+      const value = (flat.NOTIFY_WEBHOOK_TYPE ?? 'auto').trim();
+      return (['auto', 'dingtalk', 'feishu', 'wecom', 'generic'] as const).includes(value as never)
+        ? (value as NotifyRuntimeConfig['webhookType'])
+        : 'auto';
+    })(),
+    emailEnabled: bool(flat.NOTIFY_EMAIL_ENABLED, DEFAULT_NOTIFY_RUNTIME.emailEnabled),
+    emailTo: (flat.NOTIFY_EMAIL_TO ?? '')
+      .split(/[,，;\s]+/)
+      .map((item) => item.trim())
+      .filter(Boolean),
+    smtp: {
+      host: text(flat.SMTP_HOST, DEFAULT_NOTIFY_RUNTIME.smtp.host),
+      port: num(flat.SMTP_PORT, DEFAULT_NOTIFY_RUNTIME.smtp.port, 1, 65535),
+      secure: bool(flat.SMTP_SECURE, DEFAULT_NOTIFY_RUNTIME.smtp.secure),
+      user: text(flat.SMTP_USER, DEFAULT_NOTIFY_RUNTIME.smtp.user),
+      password: text(flat.SMTP_PASSWORD, DEFAULT_NOTIFY_RUNTIME.smtp.password),
+      fromName: text(flat.SMTP_FROM, DEFAULT_NOTIFY_RUNTIME.smtp.fromName),
+    },
+    onPublishFailure: bool(flat.NOTIFY_ON_PUBLISH_FAILURE, DEFAULT_NOTIFY_RUNTIME.onPublishFailure),
+    accountExpiryWarnDays: num(flat.ACCOUNT_EXPIRY_WARN_DAYS, DEFAULT_NOTIFY_RUNTIME.accountExpiryWarnDays, 0, 90),
   };
 
   snapshot.media = {
@@ -435,6 +482,7 @@ export function defaultConfigSnapshot(): RuntimeConfig {
     site: { ...DEFAULT_SITE },
     auth: { ...DEFAULT_AUTH_RUNTIME },
     media: { ...DEFAULT_MEDIA_RUNTIME },
+    notify: { ...DEFAULT_NOTIFY_RUNTIME },
     knowledge: { ...DEFAULT_KNOWLEDGE_RUNTIME },
     ai: { ...DEFAULT_AI_RUNTIME, platformGuidance: { ...DEFAULT_AI_RUNTIME.platformGuidance } },
     compliance: DEFAULT_COMPLIANCE_RULES.map((rule) => ({ ...rule, terms: [...rule.terms] })),

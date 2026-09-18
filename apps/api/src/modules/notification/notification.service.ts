@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { WorkspaceContextService } from '../../common/workspace-context.service';
+import { NotificationChannelService } from './notification-channel.service';
 import { Notification, NotificationLevel } from './entities/notification.entity';
 
 export interface NotifyInput {
@@ -12,8 +13,8 @@ export interface NotifyInput {
   resourceType?: string | null;
   resourceId?: string | null;
   payload?: Record<string, unknown>;
-  /** Also send the (mocked) email copy. */
-  email?: boolean;
+  /** 除了站内通知，是否也推到已配置的群机器人/邮件 */
+  external?: boolean;
 }
 
 export interface NotificationPage {
@@ -29,6 +30,7 @@ export class NotificationService {
   constructor(
     @InjectRepository(Notification) private readonly repository: Repository<Notification>,
     private readonly workspaceContext: WorkspaceContextService,
+    private readonly channels: NotificationChannelService,
   ) {}
 
   async notify(input: NotifyInput): Promise<Notification> {
@@ -51,18 +53,15 @@ export class NotificationService {
     );
 
     this.logger.log(`通知已写入：[${saved.level}] ${saved.title}`);
-    if (input.email) this.sendEmail(saved);
-    return saved;
-  }
 
-  /**
-   * Email delivery is a development stub: it logs instead of sending.
-   * Wire a real SMTP provider here when the server has one configured.
-   */
-  private sendEmail(notification: Notification): void {
-    this.logger.log(
-      `（邮件模拟）收件人=工作区成员 主题=${notification.title} 正文=${notification.body.slice(0, 80)}`,
-    );
+    // 已配置群机器人/邮件时同步推出去；失败不影响业务（只记日志）
+    if (input.external !== false && this.channels.available().length > 0) {
+      const results = await this.channels.dispatch({ title: saved.title, text: saved.body, context: saved.payload });
+      for (const result of results) {
+        if (!result.ok) this.logger.warn(`外部通知发送失败(${result.channel})：${result.error}`);
+      }
+    }
+    return saved;
   }
 
   async list(query: { page?: number; pageSize?: number; status?: 'unread' | 'read' }): Promise<NotificationPage> {

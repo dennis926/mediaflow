@@ -16,7 +16,8 @@
     "migrate:prod": "typeorm migration:run -d dist/database/data-source.js",
     "seed": "ts-node src/database/seeds/run-seed.ts",
     "schema:log": "typeorm-ts-node-commonjs schema:log -d src/database/data-source.ts",
-    "seed:knowledge": "ts-node src/database/seeds/seed-knowledge.ts"
+    "seed:knowledge": "ts-node src/database/seeds/seed-knowledge.ts",
+    "test:e2e": "vitest run test/app.e2e.spec.ts"
   },
   "dependencies": {
     "@mediaflow/channel-adapters": "workspace:*",
@@ -38,6 +39,7 @@
     "jszip": "3.10.1",
     "mammoth": "1.12.3",
     "multer": "1.4.4",
+    "nodemailer": "6.9.16",
     "pdf-parse": "1.1.1",
     "pg": "8.23.0",
     "reflect-metadata": "0.2.2",
@@ -55,6 +57,7 @@
     "@types/express": "4.17.25",
     "@types/multer": "1.4.13",
     "@types/node": "20.19.43",
+    "@types/nodemailer": "6.4.17",
     "@types/pdf-parse": "1.1.5",
     "@types/pg": "8.23.1",
     "@types/supertest": "6.0.3",

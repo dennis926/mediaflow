@@ -20,7 +20,8 @@
     "migrate": "pnpm --filter @mediaflow/api run migrate",
     "migrate:revert": "pnpm --filter @mediaflow/api run migrate:revert",
     "seed": "pnpm --filter @mediaflow/api run seed",
-    "check:secrets": "node scripts/check-secrets.mjs"
+    "check:secrets": "node scripts/check-secrets.mjs",
+    "test:e2e": "node scripts/run-e2e.mjs"
   },
   "devDependencies": {
     "@typescript-eslint/eslint-plugin": "7.18.0",
