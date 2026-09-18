@@ -443,6 +443,15 @@ export class PublishService {
   /** Conditional update that makes concurrent workers idempotent. */
   /** 读取任务所属的租户/工作区（后台 worker 建立作用域用，不能受当前作用域过滤影响）。 */
   async scopeOf(taskId: string): Promise<{ tenantId: string; workspaceId: string } | null> {
+    /**
+     * 队列消息里的 taskId 来自 Redis，可能是人工写入或历史脏数据：
+     * 非 uuid 直接当作"任务不存在"，避免 Postgres 抛 invalid input syntax for type uuid
+     * 把 worker 的消费循环打成错误日志。
+     */
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(taskId)) {
+      this.logger.warn(`队列消息里的 taskId 不是合法 UUID，已忽略：${taskId.slice(0, 40)}`);
+      return null;
+    }
     const task = await this.tasks.findOne({ where: { id: taskId }, select: ['id', 'tenantId', 'workspaceId'] });
     if (!task) return null;
     return { tenantId: task.tenantId, workspaceId: task.workspaceId };

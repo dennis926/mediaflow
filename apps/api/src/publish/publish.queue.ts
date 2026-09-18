@@ -82,6 +82,16 @@ export class PublishQueueService implements OnModuleDestroy {
     return String(id);
   }
 
+  /** 当前队列长度（XLEN），用于容量判断与告警。 */
+  async length(): Promise<number> {
+    try {
+      return Number(await this.redis.xlen(streamName()));
+    } catch (error) {
+      this.logger.warn(`读取队列长度失败：${error instanceof Error ? error.message : String(error)}`);
+      return 0;
+    }
+  }
+
   /** 取消费组里最早一条未 ack 的消息 ID（没有则为 null）。 */
   async pendingFloor(): Promise<string | null> {
     try {
