@@ -46,9 +46,11 @@ export class CreateContentDto {
   @Length(1, 512)
   coverUrl?: string;
 
-  @IsOptional()
-  @IsIn(Object.values(ContentStatus))
-  status?: ContentStatus;
+  /**
+   * 注意：这里**故意没有** status 字段。
+   * 内容状态只能由审批流（/reviews/:id）与归档接口（/contents/:id/archive）推进，
+   * 客户端可写状态会导致"未审即通过"的审核绕过（审计 P1-1）。
+   */
 
   /** Declares whether the text was produced with AI assistance; drives the legal disclosure. */
   @IsOptional()
@@ -77,6 +79,10 @@ export class BatchContentDto {
   action!: 'archive' | 'unarchive' | 'delete';
 }
 
+/**
+ * 更新用 DTO：显式继承 Create 的白名单（不含 status）。
+ * 全局 ValidationPipe 开了 whitelist，客户端多传的 status 会被直接丢弃。
+ */
 export class UpdateContentDto extends PartialType(CreateContentDto) {}
 
 export class QueryContentDto {

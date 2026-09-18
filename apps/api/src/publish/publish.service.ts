@@ -27,6 +27,7 @@ import { SettingsService } from '../modules/settings/settings.service';
 import { ContentVariant } from '../modules/content/entities/content-variant.entity';
 import { Content } from '../modules/content/entities/content.entity';
 import { SocialAccount } from '../modules/platform/entities/social-account.entity';
+import { ContentReview } from '../modules/content/entities/content-review.entity';
 import { SocialAccountService } from '../modules/platform/social-account.service';
 import { PublishTask } from '../modules/publish/entities/publish-task.entity';
 import { CHANNEL_REGISTRY } from './channel-registry.provider';
@@ -64,6 +65,7 @@ export class PublishService {
     @InjectRepository(ContentVariant) private readonly variants: Repository<ContentVariant>,
     @InjectRepository(SocialAccount) private readonly accounts: Repository<SocialAccount>,
     @InjectRepository(AiGeneration) private readonly aiGenerations: Repository<AiGeneration>,
+    @InjectRepository(ContentReview) private readonly reviews: Repository<ContentReview>,
     private readonly socialAccounts: SocialAccountService,
     @Inject(CHANNEL_REGISTRY) private readonly registry: ChannelAdapterRegistry,
     private readonly queue: PublishQueueService,
@@ -102,9 +104,29 @@ export class PublishService {
       throw new BadRequestException('AI 生成内容发布前必须通过 AI 标识校验（ai_flag_checked）');
     }
 
-    // Optional gate: when enabled, only approved content may be published.
-    if ((await this.settings.getBoolean('REQUIRE_CONTENT_APPROVAL', false)) && content.status !== ContentStatus.Approved) {
-      throw new BadRequestException('该内容尚未审核通过，不能创建发布任务（可在系统设置中关闭「发布前必须审核通过」）');
+    /**
+     * 审核闸门（审计 P1-1 加固）：
+     * 不只看 content.status —— 状态字段可能被历史数据/直接改库影响，必须回到审核记录本身：
+     * 1. 最新一轮审核结论必须是 approved；
+     * 2. 审批之后内容不得再被修改（updatedAt <= decidedAt），否则视为"结论过期"。
+     */
+    if (await this.settings.getBoolean('REQUIRE_CONTENT_APPROVAL', false)) {
+      const latestReview = await this.reviews.findOne({
+        where: { contentId: content.id, workspaceId: scope.workspaceId },
+        order: { round: 'DESC' },
+      });
+      const approved = latestReview?.status === 'approved';
+      // 用审批时记录的内容版本比较，避免"审批自身刷新 updatedAt"造成误判
+      const approvedVersion = latestReview?.contentUpdatedAt ?? null;
+      const editedAfterApproval = Boolean(
+        approved && approvedVersion && content.updatedAt && content.updatedAt.getTime() > approvedVersion.getTime() + 1000,
+      );
+      if (content.status !== ContentStatus.Approved || !approved) {
+        throw new BadRequestException('该内容尚未通过最新一轮审核，不能创建发布任务（可在系统设置中关闭「发布前必须审核通过」）');
+      }
+      if (editedAfterApproval) {
+        throw new BadRequestException('该内容在审核通过后又被修改，请重新提交审核');
+      }
     }
 
     const platforms = [...new Set(dto.platforms)];

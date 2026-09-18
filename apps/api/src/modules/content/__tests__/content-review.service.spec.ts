@@ -54,6 +54,8 @@ function buildService(options: { content?: Partial<Content> | null; pending?: Pa
   const manager = {
     save: vi.fn(async (value: unknown) => ({ ...(value as object), id: 'review-1' })),
     update: vi.fn(async () => ({ affected: 1 })),
+    // 审批事务里会回读内容版本（updatedAt），供发布闸门判断"审批后是否被改过"
+    findOne: vi.fn(async () => ({ id: 'c1', updatedAt: new Date('2026-09-18T10:00:00Z') })),
   };
   const dataSource = {
     transaction: async (work: (m: typeof manager) => Promise<unknown>) => work(manager),
@@ -124,6 +126,9 @@ describe('ContentReviewService 审核决定', () => {
 
     // 审核记录与内容状态在同一个事务里更新
     expect(manager.save).toHaveBeenCalled();
+    // 审批时快照内容版本（任务 3：发布闸门据此判断"审批后是否被改动"）
+    const savedReview = manager.save.mock.calls[0][0] as { contentUpdatedAt?: Date };
+    expect(savedReview.contentUpdatedAt).toBeInstanceOf(Date);
     expect(manager.update).toHaveBeenCalledWith(expect.anything(), { id: 'c1' }, { status: 'approved' });
     expect(notifications.notify).toHaveBeenCalledWith(expect.objectContaining({ type: 'review.approved' }));
   });

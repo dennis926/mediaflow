@@ -196,3 +196,78 @@ describe('ContentService aiAdapt', () => {
     expect((ai.adapt as unknown as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
   });
 });
+
+
+describe('内容状态机：状态只能由审批流/归档推进（任务 3 / 审计 P1-1）', () => {
+  const actor = { id: 'u-1', name: '运营' };
+
+  it('创建永远落 draft，即使调用方塞了 status', async () => {
+    const { service, contents } = buildService();
+    await service.create({ title: '标题', body: '正文内容足够长。' , status: 'approved' } as never, actor);
+
+    const created = (contents.create as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0] as { status: string };
+    expect(created.status).toBe('draft');
+  });
+
+  it('更新不会改变状态（dto 里的 status 被忽略）', async () => {
+    const existing = { id: 'c-1', title: '标题', body: '正文', status: 'draft', tags: [], mediaUrls: [] } as unknown as Content;
+    const contents = repositoryMock<Content>({ findOne: vi.fn(async () => existing) });
+    const variants = repositoryMock<ContentVariant>({ find: vi.fn(async () => []) });
+    const revisionsRepo = repositoryMock<ContentRevision>({ findOne: vi.fn(async () => null), find: vi.fn(async () => []) });
+    const ai = { adapt: vi.fn() } as unknown as AiService;
+    const audit = { record: vi.fn(async () => undefined) } as unknown as AuditService;
+    const workspaceContext = { current: vi.fn(async () => ({ tenantId: TENANT_ID, workspaceId: WORKSPACE_ID })) } as unknown as WorkspaceContextService;
+    const dataSource = { createQueryBuilder: vi.fn(() => ({ update: vi.fn().mockReturnThis(), set: vi.fn().mockReturnThis(), where: vi.fn().mockReturnThis(), execute: vi.fn(async () => undefined) })) };
+    const knowledge = { findRelevant: vi.fn(async () => []), markUsed: vi.fn() };
+    const service = new ContentService(contents, variants, revisionsRepo, ai, knowledge as never, audit, workspaceContext, dataSource as never);
+
+    const saved = await service.update('c-1', { title: '标题', body: '正文', status: 'approved' } as never, actor);
+
+    expect(saved.status).toBe('draft');
+  });
+
+  it('归档写入 content.status_change（from/to/reason）', async () => {
+    const existing = { id: 'c-1', title: '标题', body: '正文', status: 'draft', tags: [], mediaUrls: [] } as unknown as Content;
+    const contents = repositoryMock<Content>({ findOne: vi.fn(async () => existing), update: vi.fn(async () => ({ affected: 1 })) });
+    const variants = repositoryMock<ContentVariant>({ find: vi.fn(async () => []) });
+    const revisionsRepo = repositoryMock<ContentRevision>({ findOne: vi.fn(async () => null), find: vi.fn(async () => []) });
+    const audit = { record: vi.fn(async () => undefined) } as unknown as AuditService;
+    const workspaceContext = { current: vi.fn(async () => ({ tenantId: TENANT_ID, workspaceId: WORKSPACE_ID })) } as unknown as WorkspaceContextService;
+    const dataSource = { createQueryBuilder: vi.fn(() => ({ update: vi.fn().mockReturnThis(), set: vi.fn().mockReturnThis(), where: vi.fn().mockReturnThis(), execute: vi.fn(async () => undefined) })) };
+    const service = new ContentService(contents, variants, revisionsRepo, { adapt: vi.fn() } as unknown as AiService, { findRelevant: vi.fn(async () => []) } as never, audit, workspaceContext, dataSource as never);
+
+    await service.archive('c-1', true, actor);
+
+    const actions = (audit.record as unknown as ReturnType<typeof vi.fn>).mock.calls.map((call) => (call[0] as { action: string }).action);
+    expect(actions).toContain('content.archive');
+    expect(actions).toContain('content.status_change');
+    const change = (audit.record as unknown as ReturnType<typeof vi.fn>).mock.calls
+      .map((call) => call[0] as { action: string; payload: Record<string, unknown> })
+      .find((entry) => entry.action === 'content.status_change');
+    expect(change?.payload).toMatchObject({ from: 'draft', to: 'archived', reason: '归档' });
+  });
+});
+
+describe('DTO 白名单：status 不可由客户端提交', () => {
+  it('CreateContentDto 在 whitelist 校验后不含 status', async () => {
+    const { plainToInstance } = await import('class-transformer');
+    const { validate } = await import('class-validator');
+    const { CreateContentDto } = await import('../dto/content.dto');
+
+    const dto = plainToInstance(CreateContentDto, { title: '标题', body: '正文', status: 'approved' });
+    await validate(dto, { whitelist: true });
+
+    expect('status' in dto).toBe(false);
+  });
+
+  it('UpdateContentDto 同样不含 status', async () => {
+    const { plainToInstance } = await import('class-transformer');
+    const { validate } = await import('class-validator');
+    const { UpdateContentDto } = await import('../dto/content.dto');
+
+    const dto = plainToInstance(UpdateContentDto, { title: '标题', status: 'approved' });
+    await validate(dto, { whitelist: true });
+
+    expect('status' in dto).toBe(false);
+  });
+});

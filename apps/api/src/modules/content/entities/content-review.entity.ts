@@ -30,6 +30,14 @@ export class ContentReview extends BaseEntity {
   @Column({ type: 'timestamptz', nullable: true })
   decidedAt!: Date | null;
 
+  /**
+   * 审批时内容的 updatedAt 快照。
+   * 用来判断"审批之后内容是否又被改过" —— 不能用 decidedAt 比较：
+   * 审批本身会更新内容状态，从而刷新 updatedAt，会让比较永远为真（实测踩过）。
+   */
+  @Column({ type: 'timestamptz', nullable: true })
+  contentUpdatedAt!: Date | null;
+
   @Column({ type: 'int', default: 1 })
   round!: number;
 

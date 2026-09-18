@@ -1,5 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
-import { AiFlagType, PlatformCode, PublishTaskStatus } from '@mediaflow/shared';
+import { AiFlagType, ContentStatus, PlatformCode, PublishTaskStatus } from '@mediaflow/shared';
 import { ObjectLiteral, Repository } from 'typeorm';
 import { describe, expect, it, vi } from 'vitest';
 import { AuditService } from '../../audit/audit.service';
@@ -10,6 +10,7 @@ import { ContentVariant } from '../../modules/content/entities/content-variant.e
 import { Content } from '../../modules/content/entities/content.entity';
 import { AiGeneration } from '../../modules/ai/entities/ai-generation.entity';
 import { SocialAccount } from '../../modules/platform/entities/social-account.entity';
+import { ContentReview } from '../../modules/content/entities/content-review.entity';
 import { PublishTask } from '../../modules/publish/entities/publish-task.entity';
 import { PublishQueueService } from '../publish.queue';
 import { PublishService } from '../publish.service';
@@ -25,7 +26,10 @@ function buildService(options: {
   content: Partial<Content> | null;
   variant?: Partial<ContentVariant> | null;
   queue?: Partial<PublishQueueService>;
-}): { service: PublishService; queue: PublishQueueService; tasks: Repository<PublishTask> } {
+  /** 最新一轮审核记录（测审核闸门用） */
+  review?: Record<string, unknown> | null;
+  requireApproval?: boolean;
+}): { service: PublishService; queue: PublishQueueService; tasks: Repository<PublishTask>; reviews: Repository<ContentReview>; settings: SettingsService } {
   const contents = repositoryMock<Content>({ findOne: vi.fn(async () => options.content as Content | null) });
   const variants = repositoryMock<ContentVariant>({ findOne: vi.fn(async () => (options.variant ?? null) as ContentVariant | null) });
   const tasks = repositoryMock<PublishTask>({ save: vi.fn(async (value: PublishTask) => ({ ...value, id: 'task-1' })) });
@@ -46,10 +50,15 @@ function buildService(options: {
   const settings = {
     get: vi.fn(async () => null),
     getNumber: vi.fn(async (_key: string, fallback: number) => fallback),
-    getBoolean: vi.fn(async (_key: string, fallback: boolean) => fallback),
+    getBoolean: vi.fn(async (key: string, fallback: boolean) =>
+      key === 'REQUIRE_CONTENT_APPROVAL' ? (options.requireApproval ?? false) : fallback,
+    ),
   } as unknown as SettingsService;
 
   const aiGenerations = repositoryMock<AiGeneration>({ findOne: vi.fn(async () => null) });
+  const reviews = repositoryMock<ContentReview>({
+    findOne: vi.fn(async () => (options.review ?? null) as ContentReview | null),
+  });
 
   const service = new PublishService(
     tasks,
@@ -57,6 +66,7 @@ function buildService(options: {
     variants,
     accounts,
     aiGenerations,
+    reviews,
     socialAccounts,
     registry as never,
     queue,
@@ -64,7 +74,7 @@ function buildService(options: {
     workspaceContext,
     settings,
   );
-  return { service, queue, tasks };
+  return { service, queue, tasks, reviews, settings };
 }
 
 describe('PublishService AI disclosure', () => {
@@ -190,5 +200,70 @@ describe('PublishService cancel', () => {
 
     await expect(service.cancel('task-10', { id: 'u1' })).rejects.toBeInstanceOf(BadRequestException);
     expect(tasks.save).not.toHaveBeenCalled();
+  });
+});
+
+
+describe('发布闸门：以审核记录为准（任务 3 / 审计 P1-1）', () => {
+  const baseContent: Partial<Content> = {
+    id: 'c-1',
+    title: '标题',
+    body: '正文',
+    status: ContentStatus.Approved,
+    aiGenerated: false,
+    aiFlagChecked: false,
+    aiFlagType: AiFlagType.None,
+    updatedAt: new Date('2026-09-18T10:00:00Z'),
+  };
+
+  function dto() {
+    return { contentId: 'c-1', platforms: [PlatformCode.WechatMp] } as never;
+  }
+
+  it('闸门开启且没有审核记录 → 400', async () => {
+    const { service } = buildService({ content: baseContent, review: null, requireApproval: true });
+    await expect(service.createTasks(dto(), { id: 'u-1', name: 'x' })).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('闸门开启且最新一轮被驳回 → 400', async () => {
+    const { service } = buildService({
+      content: { ...baseContent, status: ContentStatus.Rejected },
+      review: { status: 'rejected', round: 2, decidedAt: new Date('2026-09-18T09:00:00Z') },
+      requireApproval: true,
+    });
+    await expect(service.createTasks(dto(), { id: 'u-1', name: 'x' })).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('闸门开启、最新一轮通过且审批后未修改 → 允许创建', async () => {
+    const { service } = buildService({
+      content: baseContent,
+      review: { status: 'approved', round: 1, decidedAt: new Date('2026-09-18T11:00:00Z'), contentUpdatedAt: new Date('2026-09-18T10:00:00Z') },
+      requireApproval: true,
+    });
+    await expect(service.createTasks(dto(), { id: 'u-1', name: 'x' })).resolves.toBeTruthy();
+  });
+
+  it('闸门开启但审批后内容被修改 → 400（结论过期）', async () => {
+    const { service } = buildService({
+      content: { ...baseContent, updatedAt: new Date('2026-09-18T12:00:00Z') },
+      review: { status: 'approved', round: 1, decidedAt: new Date('2026-09-18T11:00:00Z'), contentUpdatedAt: new Date('2026-09-18T10:00:00Z') },
+      requireApproval: true,
+    });
+    await expect(service.createTasks(dto(), { id: 'u-1', name: 'x' })).rejects.toThrow(/又被修改/);
+  });
+
+  it('已归档内容（即使有通过记录）→ 400', async () => {
+    const { service } = buildService({
+      content: { ...baseContent, status: ContentStatus.Archived },
+      review: { status: 'approved', round: 1, decidedAt: new Date('2026-09-18T11:00:00Z'), contentUpdatedAt: new Date('2026-09-18T10:00:00Z') },
+      requireApproval: true,
+    });
+    await expect(service.createTasks(dto(), { id: 'u-1', name: 'x' })).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('闸门关闭时不查审核记录（保持内部工具默认行为）', async () => {
+    const { service, reviews } = buildService({ content: baseContent, requireApproval: false });
+    await expect(service.createTasks(dto(), { id: 'u-1', name: 'x' })).resolves.toBeTruthy();
+    expect((reviews.findOne as unknown as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
   });
 });

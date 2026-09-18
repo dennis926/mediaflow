@@ -166,11 +166,34 @@ export class ContentReviewService {
     const nextStatus =
       dto.decision === 'approved' ? ContentStatus.Approved : dto.decision === 'rejected' ? ContentStatus.Rejected : ContentStatus.Draft;
 
+    const before = await this.contents.findOne({ where: { id: review.contentId, workspaceId: scope.workspaceId } });
+    const previousStatus = before?.status ?? ContentStatus.Draft;
+
     // 审核记录与内容状态必须同时生效，否则会出现"审核已通过但内容仍是草稿"这类不一致。
     const saved = await this.dataSource.transaction(async (manager) => {
-      const persisted = await manager.save(review);
       await manager.update(Content, { id: review.contentId }, { status: nextStatus });
-      return persisted;
+      // 记录审批时刻的内容版本（updatedAt），供发布闸门判断"审批后是否又被改动"
+      const after = await manager.findOne(Content, { where: { id: review.contentId }, select: ['id', 'updatedAt'] });
+      review.contentUpdatedAt = after?.updatedAt ?? new Date();
+      return manager.save(review);
+    });
+
+    // 状态迁移留痕：谁能从审计日志回答"这内容为什么是已通过"
+    await this.audit.record({
+      action: 'content.status_change',
+      resourceType: 'content',
+      resourceId: review.contentId,
+      tenantId: scope.tenantId,
+      workspaceId: scope.workspaceId,
+      actorId: actor.id ?? null,
+      actorName: actor.name ?? null,
+      payload: {
+        from: previousStatus,
+        to: nextStatus,
+        reason: `审核第 ${review.round} 轮：${dto.decision}`,
+        reviewId: review.id,
+        round: review.round,
+      },
     });
 
     const content = await this.contents.findOne({ where: { id: review.contentId } });

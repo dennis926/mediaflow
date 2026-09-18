@@ -11,6 +11,7 @@ export type Capability =
   | 'users.privileged'
   | 'content.write'
   | 'content.review'
+  | 'content.archive'
   | 'publish.execute'
   | 'knowledge.write'
   | 'platform.bind'
@@ -24,6 +25,7 @@ export const CAPABILITIES: Capability[] = [
   'users.privileged',
   'content.write',
   'content.review',
+  'content.archive',
   'publish.execute',
   'knowledge.write',
   'platform.bind',
@@ -38,6 +40,7 @@ export const CAPABILITY_LABELS: Record<Capability, string> = {
   'users.privileged': '删除用户与调整角色（高危）',
   'content.write': '创建与编辑内容',
   'content.review': '审核内容',
+  'content.archive': '归档/取消归档内容',
   'publish.execute': '创建/重试/取消发布任务',
   'knowledge.write': '维护知识库与分类',
   'platform.bind': '绑定/解绑平台账号',
@@ -53,6 +56,7 @@ export const DEFAULT_PERMISSION_MATRIX: Record<Capability, RoleCode[]> = {
   'users.privileged': ['owner'],
   'content.write': ['owner', 'admin', 'editor'],
   'content.review': ['owner', 'admin', 'reviewer'],
+  'content.archive': ['owner', 'admin', 'editor'],
   'publish.execute': ['owner', 'admin', 'editor'],
   'knowledge.write': ['owner', 'admin', 'editor'],
   'platform.bind': ['owner', 'admin'],

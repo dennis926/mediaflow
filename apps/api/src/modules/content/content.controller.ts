@@ -65,7 +65,7 @@ export class ContentController {
   }
 
   /** 归档 / 取消归档（归档后不再参与发布与检索，但保留历史） */
-  @Capability('content.write')
+  @Capability('content.archive')
   @Patch(':id/archive')
   archive(
     @Param('id', ParseUUIDPipe) id: string,

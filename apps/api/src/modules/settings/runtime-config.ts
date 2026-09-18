@@ -284,6 +284,7 @@ export const DEFAULT_PERMISSION_MATRIX_RUNTIME: Record<string, string[]> = {
   'users.privileged': ['owner'],
   'content.write': ['owner', 'admin', 'editor'],
   'content.review': ['owner', 'admin', 'reviewer'],
+  'content.archive': ['owner', 'admin', 'editor'],
   'publish.execute': ['owner', 'admin', 'editor'],
   'knowledge.write': ['owner', 'admin', 'editor'],
   'platform.bind': ['owner', 'admin'],

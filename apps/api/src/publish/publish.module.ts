@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AiGeneration } from '../modules/ai/entities/ai-generation.entity';
 import { ContentVariant } from '../modules/content/entities/content-variant.entity';
 import { Content } from '../modules/content/entities/content.entity';
+import { ContentReview } from '../modules/content/entities/content-review.entity';
 import { SocialAccount } from '../modules/platform/entities/social-account.entity';
 import { PlatformModule } from '../modules/platform/platform.module';
 import { SettingsModule } from '../modules/settings/settings.module';
@@ -16,7 +17,7 @@ import { QueueTrimTask } from './queue-trim.task';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([PublishTask, Content, ContentVariant, SocialAccount, AiGeneration]),
+    TypeOrmModule.forFeature([PublishTask, Content, ContentVariant, SocialAccount, AiGeneration, ContentReview]),
     ChannelModule,
     SettingsModule,
     PlatformModule,

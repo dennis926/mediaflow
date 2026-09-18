@@ -67,7 +67,8 @@ export class ContentService {
       coverUrl: dto.coverUrl ?? null,
       mediaUrls: dto.mediaUrls ?? [],
       tags: dto.tags ?? [],
-      status: dto.status ?? ContentStatus.Draft,
+      // 创建永远是草稿：状态只能由审批流/归档接口推进（审计 P1-1）
+      status: ContentStatus.Draft,
       aiGenerated: aiFlagType !== AiFlagType.None,
       aiFlagType,
       aiFlagChecked: false,
@@ -127,8 +128,15 @@ export class ContentService {
     const rawBody = dto.body ?? content.body;
 
     const previousStatus = content.status;
+    /**
+     * 影响发布内容的字段都算改动：早期只比较 title/body，导致"改标签/素材后仍算已审核"（审计 P2-1）。
+     */
     const contentChanged =
-      (dto.title !== undefined && dto.title !== content.title) || (dto.body !== undefined && dto.body !== content.body);
+      (dto.title !== undefined && dto.title !== content.title) ||
+      (dto.body !== undefined && dto.body !== content.body) ||
+      (dto.tags !== undefined && JSON.stringify(dto.tags) !== JSON.stringify(content.tags ?? [])) ||
+      (dto.mediaUrls !== undefined && JSON.stringify(dto.mediaUrls) !== JSON.stringify(content.mediaUrls ?? [])) ||
+      (dto.coverUrl !== undefined && (dto.coverUrl ?? null) !== (content.coverUrl ?? null));
 
     Object.assign(content, {
       title: dto.title ?? content.title,
@@ -140,8 +148,9 @@ export class ContentService {
       aiFlagType,
       aiGenerated: aiFlagType !== AiFlagType.None,
       body: appendAiDisclosure(rawBody, aiFlagType, runtime().site.aiDisclosureSuffix),
-      // 审核通过后如果正文/标题又被改了，原审核结论失效，必须重新送审。
-      status: contentChanged && previousStatus === ContentStatus.Approved ? ContentStatus.Draft : (dto.status ?? content.status),
+      // 审核通过后如果再改动（正文/标题/标签/素材），原审核结论失效，必须重新送审。
+      // 客户端传的 status 已在 DTO 层移除，这里只保留服务端自己的状态机。
+      status: contentChanged && previousStatus === ContentStatus.Approved ? ContentStatus.Draft : content.status,
     });
 
     // 保存前把"上一版"留档，改错可回滚（保留条数可配置）
@@ -292,6 +301,7 @@ export class ContentService {
         })
         .execute();
     }
+    await this.recordStatusChange(content, previous, archived ? ContentStatus.Archived : ContentStatus.Draft, archived ? '归档' : '取消归档', actor);
     await this.audit.record({
       action: archived ? 'content.archive' : 'content.unarchive',
       resourceType: 'content',
@@ -480,6 +490,21 @@ export class ContentService {
       skipped,
       knowledgeUsed: matches,
     };
+  }
+
+  /**
+   * 状态迁移统一留痕：任何状态变化都写 content.status_change（含 from/to/reason），
+   * 便于回答"这条内容为什么是已审核/已归档"（审计要求：状态迁移可追溯）。
+   */
+  private async recordStatusChange(
+    content: Content,
+    from: string,
+    to: string,
+    reason: string,
+    actor: ContentActor,
+  ): Promise<void> {
+    if (from === to) return;
+    await this.record(content, 'content.status_change', actor, { from, to, reason });
   }
 
   private async record(content: Content, action: string, actor: ContentActor, payload: Record<string, unknown>): Promise<void> {

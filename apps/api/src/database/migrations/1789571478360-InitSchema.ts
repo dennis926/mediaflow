@@ -40,6 +40,7 @@ export class InitSchema1789571478360 implements MigrationInterface {
         await queryRunner.query(`CREATE INDEX "IDX_51afe3304890be08f6b4f07f2b" ON "publish_tasks" ("platform") `);
         await queryRunner.query(`CREATE INDEX "IDX_ff37bc94d883789e535ea369f6" ON "publish_tasks" ("status") `);
         await queryRunner.query(`CREATE INDEX "IDX_aca8f4bff7635051f3ab2dd9bc" ON "publish_tasks" ("status", "scheduled_at") `);
+        // 注意：approvals 表已在迁移 1789700600000-DropApprovals 中删除（历史空壳表，代码从未引用）
         await queryRunner.query(`CREATE TABLE "approvals" ("id" uuid NOT NULL DEFAULT gen_random_uuid(), "tenant_id" uuid NOT NULL, "workspace_id" uuid NOT NULL, "created_at" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(), "updated_at" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(), "target_type" character varying(32) NOT NULL, "target_id" uuid NOT NULL, "status" character varying(32) NOT NULL DEFAULT 'pending', "requested_by" uuid, "reviewed_by" uuid, "comment" text, "reviewed_at" TIMESTAMP WITH TIME ZONE, "payload" jsonb NOT NULL DEFAULT '{}', CONSTRAINT "PK_690417aaefa84d18b1a59e2a499" PRIMARY KEY ("id"))`);
         await queryRunner.query(`CREATE INDEX "IDX_63e5eac9d0712aee7c49014a82" ON "approvals" ("tenant_id") `);
         await queryRunner.query(`CREATE INDEX "IDX_98637628f162aa5d902ab38cca" ON "approvals" ("workspace_id") `);
