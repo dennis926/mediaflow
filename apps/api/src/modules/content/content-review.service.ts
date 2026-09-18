@@ -81,6 +81,17 @@ export class ContentReviewService {
     );
 
     await this.contents.update({ id: content.id }, { status: ContentStatus.Reviewing });
+    // 状态迁移留痕：提交送审也是状态变化（draft/rejected → reviewing）
+    await this.audit.record({
+      action: 'content.status_change',
+      resourceType: 'content',
+      resourceId: content.id,
+      tenantId: scope.tenantId,
+      workspaceId: scope.workspaceId,
+      actorId: actor.id ?? null,
+      actorName: actor.name ?? null,
+      payload: { from: content.status, to: ContentStatus.Reviewing, reason: `提交第 ${review.round} 轮审核`, reviewId: review.id, round: review.round },
+    });
     await this.record('review.submit', review, actor, { round: review.round, title: content.title, comments: dto.comments ?? null });
     await this.notifications.notify({
       type: 'review.submitted',
