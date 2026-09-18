@@ -69,9 +69,59 @@ export class PublishQueueService implements OnModuleDestroy {
     }
   }
 
+  /**
+   * 入队。
+   *
+   * 这里**故意不做** `MAXLEN` 自动修剪：实测（2026-09-18，15000 条压测）证明 Redis 的
+   * `MAXLEN ~` 会把**尚未 ack** 的消息本体一起丢掉（PEL 里还留着 id，但 `XRANGE`/认领
+   * 都取不到内容），等于任务被静默吞掉。队列长度改由 `trim()` 在保护未确认消息的前提下
+   * 定期收敛。
+   */
   async enqueue(taskId: string): Promise<string> {
     const id = await this.redis.xadd(streamName(), '*', 'taskId', taskId, 'enqueuedAt', new Date().toISOString());
     return String(id);
+  }
+
+  /** 取消费组里最早一条未 ack 的消息 ID（没有则为 null）。 */
+  async pendingFloor(): Promise<string | null> {
+    try {
+      const raw = await this.redis.call('XPENDING', streamName(), groupName(), '-', '+', '1');
+      if (!Array.isArray(raw) || raw.length === 0) return null;
+      const first = raw[0];
+      if (Array.isArray(first) && first.length > 0) return String(first[0]);
+      return null;
+    } catch (error) {
+      this.logger.warn(`读取未确认消息失败：${error instanceof Error ? error.message : String(error)}`);
+      return null;
+    }
+  }
+
+  /**
+   * 队列修剪：**先保护未 ack 的消息**，再压缩历史。
+   *
+   * 1. 存在未 ack 的消息 → 用 `XTRIM MINID ~ <最早未确认 id>`，只丢更旧的、已处理完的历史；
+   *    Redis 保证 MINID 之后的条目（含所有待确认消息）不被删除。
+   * 2. 没有未 ack 的消息 → 才用 `XTRIM MAXLEN ~ <上限>`。
+   *
+   * 返回值 `skipped` 表示"因为有待确认消息而放弃按长度压缩"，用于可观测。
+   */
+  async trim(): Promise<{ removed: number; floor: string | null }> {
+    const maxLen = runtime().publish.maxLen;
+    try {
+      const floor = await this.pendingFloor();
+      const removed = floor
+        ? await this.redis.xtrim(streamName(), 'MINID', '~', floor)
+        : await this.redis.xtrim(streamName(), 'MAXLEN', '~', String(maxLen));
+      if (Number(removed) > 0) {
+        this.logger.log(
+          `已修剪发布队列 ${removed} 条历史消息（${floor ? `保护未确认消息，保留 ${floor} 之后` : `上限 ${maxLen}`}）`,
+        );
+      }
+      return { removed: Number(removed ?? 0), floor };
+    } catch (error) {
+      this.logger.warn(`队列修剪失败：${error instanceof Error ? error.message : String(error)}`);
+      return { removed: 0, floor: null };
+    }
   }
 
   async read(consumer: string, count: number, blockMs: number): Promise<StreamEntry[]> {

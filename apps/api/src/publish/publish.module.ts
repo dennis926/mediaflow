@@ -12,6 +12,7 @@ import { PublishController } from './publish.controller';
 import { PublishQueueService } from './publish.queue';
 import { PublishService } from './publish.service';
 import { PublishWorker } from './publish.worker';
+import { QueueTrimTask } from './queue-trim.task';
 
 @Module({
   imports: [
@@ -21,7 +22,7 @@ import { PublishWorker } from './publish.worker';
     PlatformModule,
   ],
   controllers: [PublishController],
-  providers: [PublishService, PublishQueueService, PublishWorker],
+  providers: [PublishService, PublishQueueService, PublishWorker, QueueTrimTask],
   exports: [PublishService, PublishQueueService],
 })
 export class PublishModule {}

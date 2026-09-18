@@ -119,6 +119,8 @@ export interface PublishRuntimeConfig {
   /** Redis Stream 名称与消费组名（换环境可用独立队列） */
   streamName: string;
   groupName: string;
+  /** 队列 stream 的长度上限（近似修剪）。防止已 ack 的消息无限累积占内存。 */
+  maxLen: number;
   /** 站内通知保留天数，0 = 永久保留 */
   notificationRetentionDays: number;
   /** 发布时是否写入 AI 生成标识元数据 */
@@ -264,6 +266,7 @@ export const DEFAULT_COMPLIANCE_RULES: ComplianceRule[] = [
 export const DEFAULT_PUBLISH_RUNTIME: PublishRuntimeConfig = {
   streamName: 'mediaflow:publish:tasks',
   groupName: 'publish-workers',
+  maxLen: 10_000,
   notificationRetentionDays: 90,
   aiMetadataEnabled: true,
   readBlockMs: 5_000,
@@ -518,6 +521,7 @@ export function applyRuntimeConfig(flat: Record<string, string | undefined>, onE
   snapshot.publish = {
     streamName: text(flat.PUBLISH_STREAM_NAME, DEFAULT_PUBLISH_RUNTIME.streamName),
     groupName: text(flat.PUBLISH_GROUP_NAME, DEFAULT_PUBLISH_RUNTIME.groupName),
+    maxLen: num(flat.PUBLISH_STREAM_MAXLEN, DEFAULT_PUBLISH_RUNTIME.maxLen, 1_000, 1_000_000),
     notificationRetentionDays: num(flat.NOTIFICATION_RETENTION_DAYS, DEFAULT_PUBLISH_RUNTIME.notificationRetentionDays, 0, 3650),
     aiMetadataEnabled: bool(flat.AI_METADATA_ENABLED, DEFAULT_PUBLISH_RUNTIME.aiMetadataEnabled),
     readBlockMs: num(flat.PUBLISH_READ_BLOCK_MS, DEFAULT_PUBLISH_RUNTIME.readBlockMs, 200, 60_000),

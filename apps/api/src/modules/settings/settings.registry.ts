@@ -597,6 +597,15 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
     placeholder: 'publish-workers',
   },
   {
+    key: 'PUBLISH_STREAM_MAXLEN',
+    group: 'publish',
+    label: '队列最大长度（条）',
+    description: 'Redis Stream 近似修剪上限（MAXLEN ~）。已消费的旧消息会被丢弃，未确认的任务不受影响；默认 10000',
+    secret: false,
+    envKey: 'PUBLISH_STREAM_MAXLEN',
+    placeholder: '10000',
+  },
+  {
     key: 'PUBLISH_STUCK_MINUTES',
     group: 'publish',
     label: '任务卡住判定（分钟）',
