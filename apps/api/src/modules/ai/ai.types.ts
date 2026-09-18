@@ -20,6 +20,8 @@ export interface AiCompletionResult {
   tokensCached?: number;
   /** 输出里用于推理（思考）的 token，deepseek-flash 这类推理模型会有 */
   tokensReasoning?: number;
+  /** 缓存写入 token（Anthropic 等额外计费） */
+  tokensCacheWrite?: number;
 }
 
 export interface AiProvider {

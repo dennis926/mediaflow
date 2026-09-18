@@ -3,8 +3,11 @@ import { AiProvider } from './ai.types';
 import { DeepSeekProvider } from './providers/deepseek.provider';
 import { MockAiProvider } from './providers/mock.provider';
 import { SettingsService } from '../settings/settings.service';
+import { ProviderConfigService } from './provider-config.service';
 
 export interface AiProviderOverrides {
+  /** 指定供应商（不传则用当前生效的 AI_PROVIDER） */
+  provider?: string;
   apiKey?: string;
   model?: string;
   baseUrl?: string;
@@ -30,7 +33,10 @@ export class AiProviderFactory {
   private readonly logger = new Logger(AiProviderFactory.name);
   private cached: { revision: number; signature: string; provider: AiProvider } | null = null;
 
-  constructor(private readonly settings: SettingsService) {}
+  constructor(
+    private readonly settings: SettingsService,
+    private readonly providerConfigs: ProviderConfigService,
+  ) {}
 
   async get(): Promise<AiProvider> {
     const signature = await this.signature();
@@ -93,7 +99,22 @@ export class AiProviderFactory {
   }
 
   private async build(overrides: AiProviderOverrides = {}): Promise<AiProvider> {
-    const name = ((await this.settings.get('AI_PROVIDER')) ?? 'deepseek').trim().toLowerCase();
+    const name = overrides.provider?.trim().toLowerCase() || ((await this.settings.get('AI_PROVIDER')) ?? 'deepseek').trim().toLowerCase();
+
+    // 多供应商配置优先：同一实例里可以存多套凭据，按 provider 取对应的密钥/地址/模型
+    const config = await this.providerConfigs.find(name);
+    if (config && (config.apiKey || overrides.apiKey)) {
+      const configuredModel = overrides.model?.trim() || (await this.settings.get('AI_MODEL'))?.trim() || config.models[0] || DEFAULT_MODEL;
+      // 仅当"当前使用的供应商"就是它时，才用它的默认模型；否则用配置里的第一个模型
+      const model = config.models.includes(configuredModel) ? configuredModel : (config.models[0] ?? configuredModel);
+      return this.buildClient({
+        providerId: name,
+        model,
+        apiKey: overrides.apiKey?.trim() || config.apiKey,
+        baseUrl: overrides.baseUrl?.trim() || config.baseUrl || undefined,
+      });
+    }
+
     const model = overrides.model?.trim() || (await this.settings.get('AI_MODEL'))?.trim() || DEFAULT_MODEL;
 
     // Offline placeholder: keep the model name honest so nobody mistakes it for a real model run.
@@ -101,6 +122,11 @@ export class AiProviderFactory {
 
     const apiKey = overrides.apiKey?.trim() || (await this.settings.get('AI_API_KEY'))?.trim() || '';
     const baseUrl = overrides.baseUrl?.trim() || (await this.settings.get('AI_API_BASE'))?.trim() || undefined;
-    return new DeepSeekProvider({ apiKey, model, baseUrl });
+    return this.buildClient({ providerId: name, model, apiKey, baseUrl });
+  }
+
+  /** 统一的 OpenAI 兼容客户端（多数供应商都提供兼容接口）。 */
+  private buildClient(input: { providerId: string; model: string; apiKey: string; baseUrl?: string }): AiProvider {
+    return new DeepSeekProvider({ apiKey: input.apiKey, model: input.model, baseUrl: input.baseUrl, providerId: input.providerId });
   }
 }

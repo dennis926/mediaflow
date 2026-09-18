@@ -6,8 +6,29 @@ import { WorkspaceContextService } from '../../../common/workspace-context.servi
 import { AiProviderFactory } from '../ai-provider.factory';
 import { AiGeneration } from '../entities/ai-generation.entity';
 import { AiService } from '../ai.service';
+import { ModelPricingService } from '../model-pricing.service';
 
 const WORKSPACE_ID = '22222222-2222-2222-2222-222222222222';
+
+const pricing = {
+  priceFor: vi.fn(async () => ({
+    provider: 'deepseek', providerLabel: 'DeepSeek', model: 'mock-model', label: 'Mock',
+    price: { input: 2, output: 8, cacheWrite: 2, cacheRead: 0.5 },
+    officialUsd: { input: 0.28, output: 0.42, cacheWrite: 0, cacheRead: 0.028 },
+    ratioOfOfficial: 1, source: 'catalog', configured: true, reference: true, multiplier: 1,
+  })),
+  computeCost: vi.fn((tokens: { input: number; output: number; cacheWrite?: number; cacheRead?: number }) => {
+    const perMillion = (count: number, unit: number): number => (Math.max(0, count) / 1_000_000) * unit;
+    const input = perMillion(tokens.input, 2); const output = perMillion(tokens.output, 8);
+    const cacheWrite = perMillion(tokens.cacheWrite ?? 0, 2); const cacheRead = perMillion(tokens.cacheRead ?? 0, 0.5);
+    return { total: input + output + cacheWrite + cacheRead, input, output, cacheWrite, cacheRead };
+  }),
+  costOf: vi.fn(async () => ({ cost: '0.000010', price: { input: 2, output: 8, cacheWrite: 2, cacheRead: 0.5 }, source: 'catalog', breakdown: { total: 0.00001, input: 0, output: 0, cacheWrite: 0, cacheRead: 0 } })),
+  list: vi.fn(async () => []),
+  rules: vi.fn(async () => ({ usdToCny: 7, description: 'test' })),
+  rate: vi.fn(async () => 7),
+  catalog: vi.fn(() => []),
+} as unknown as ModelPricingService;
 
 function buildService(overrides: { recentCount?: number; dailyTokens?: number } = {}): AiService {
   const generations = {
@@ -32,7 +53,7 @@ function buildService(overrides: { recentCount?: number; dailyTokens?: number } 
   } as unknown as AiProviderFactory;
 
   const workspaceContext = { current: vi.fn(async () => ({ tenantId: 't', workspaceId: WORKSPACE_ID })) } as unknown as WorkspaceContextService;
-  return new AiService(generations, providers, workspaceContext);
+  return new AiService(generations, providers, workspaceContext, pricing);
 }
 
 describe('AI 额度保护（可配置）', () => {

@@ -188,7 +188,15 @@
 | POST | `/api/publish/tasks/:id/requeue` | 强制重排（无视锁定状态，用于卡住的任务） |
 | GET | `/api/audit-logs` | **审计日志**（`action`/`actionPrefix`/`actor`/`keyword`/`from`/`to`/分页），按工作区隔离，权限走 `audit.read` 能力点 |
 | GET | `/api/audit-logs/actions` | 动作清单与次数（筛选下拉用） |
-| GET | `/api/ai/usage` | **AI 用量与花费**：按天/任务/模型聚合（`days` 默认 14） |
+| GET | `/api/ai/usage` | **AI 用量与花费**：可按 `provider` + `model` 筛选；返回供应商/模型价目、四段计费明细（输入/输出/缓存写入/缓存读取）、按天/按任务/按模型统计 |
+| GET | `/api/ai/providers` | 供应商与模型价目（`onlyConfigured=false` 时包含未配置的，用于先看价再决定） |
+| GET | `/api/ai/provider-configs` | 已配置的供应商（密钥打码） |
+| PUT | `/api/ai/provider-configs` | 新增/更新供应商配置（`provider`、`label`、`baseUrl`、`apiKey`、`models[]`、`multiplier`；密钥留空表示不改） |
+| DELETE | `/api/ai/provider-configs/:provider` | 删除供应商配置（用量历史保留） |
+| GET | `/api/ai/catalog` | 预置供应商与模型目录（"添加供应商"下拉用） |
+| PUT | `/api/ai/model-price` | 覆盖单个模型的实付价（元/百万 token，四段） |
+| GET | `/api/ai/pricing-rules` | 当前计费规则（汇率与公式说明） |
+| GET | `/api/ai/usage-legacy` |（保留）旧版用量汇总 | **AI 用量与花费**：按天/任务/模型聚合（`days` 默认 14） |
 | POST | `/api/contents/batch` | 内容批量操作：`{ids[], action: archive\|unarchive\|delete}`，逐条返回失败原因 |
 | GET | `/api/contents/:id/revisions` | 内容版本历史（新到旧） |
 | POST | `/api/contents/:id/revisions/:revisionId/restore` | 回滚到指定版本（回滚前自动留档） |

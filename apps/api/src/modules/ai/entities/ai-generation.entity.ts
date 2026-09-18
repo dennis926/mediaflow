@@ -42,6 +42,17 @@ export class AiGeneration extends BaseEntity {
   @Column({ type: 'int', default: 0 })
   tokensReasoning!: number;
 
+  /** 缓存写入 token（Anthropic 等会额外计费，其他供应商通常为 0） */
+  @Column({ type: 'int', default: 0 })
+  tokensCacheWrite!: number;
+
+  /**
+   * 本次调用使用的价格快照（元/百万 token，四段）+ 供应商/模型，
+   * 便于日后核对账单：即使价目表改了，历史记录也能说明当时按什么价计费。
+   */
+  @Column({ type: 'jsonb', default: () => "'{}'" })
+  priceSnapshot!: Record<string, unknown>;
+
   @Column({ type: 'int', default: 0 })
   latencyMs!: number;
 

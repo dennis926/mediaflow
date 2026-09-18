@@ -7,6 +7,9 @@ import type {
   AdapterDescriptor,
   AiGeneration,
   AiTestResult,
+  AiUsageReport,
+  AiUsageSummary,
+  AuditLogItem,
   AuthUser,
   CalendarDay,
   CommitImportResult,
@@ -18,34 +21,38 @@ import type {
   ImportResult,
   KnowledgeAuditReport,
   KnowledgeCategoryView,
+  KnowledgeDraft,
   KnowledgeExportFile,
   KnowledgeImportPreview,
   KnowledgeImportResult,
-  KnowledgeDraft,
   KnowledgeItem,
-  AiUsageSummary,
-  AuditLogItem,
-  MediaAssetItem,
-  SiteConfigView,
   KnowledgeMatchItem,
   KnowledgeSourceGroup,
   LoginResult,
+  MediaAssetItem,
+  ModelPriceCnyView,
   NotificationItem,
   NotificationPage,
   OverviewData,
   Paged,
-  ParseResult,
-  PublishTask,
   QueueHealth,
+  ParseResult,
+  ProviderConfigItem,
+  ProviderPricingView,
+  PublishTask,
   QueueStats,
   ReviewItem,
   RoleItem,
   SettingGroupView,
+  SiteConfigView,
   TrendPointData,
   UserItem,
   WorkspaceMemberItem,
   WorkspaceSummaryItem,
 } from './types';
+
+
+
 
 export const usersApi = {
   list: (query: { keyword?: string; status?: string; role?: string; page?: number; pageSize?: number }) =>
@@ -158,6 +165,21 @@ export const aiApi = {
   complianceCheck: (payload: { text: string; platform?: PlatformCode; useAiReview?: boolean }) =>
     api.post<ComplianceReport>('/ai/compliance-check', payload),
   usage: (days = 14) => api.get<AiUsageSummary>('/ai/usage', { days }),
+  /** 用量报告（可按供应商 + 模型筛选） */
+  usageReport: (days = 14, filter: { provider?: string; model?: string } = {}) =>
+    api.get<AiUsageReport>('/ai/usage', { days, provider: filter.provider, model: filter.model }),
+  /** 供应商与模型价目 */
+  providers: (onlyConfigured = false) => api.get<ProviderPricingView[]>('/ai/providers', { onlyConfigured }),
+  providerConfigs: () => api.get<ProviderConfigItem[]>('/ai/provider-configs'),
+  upsertProvider: (payload: Partial<ProviderConfigItem> & { provider: string; apiKey?: string }) =>
+    api.put<ProviderConfigItem[]>('/ai/provider-configs', payload),
+  removeProvider: (provider: string) => api.delete<ProviderConfigItem[]>(`/ai/provider-configs/${provider}`),
+  catalog: () =>
+    api.get<{ providers: Array<{ provider: string; label: string; defaultBaseUrl: string }>; models: Array<{ provider: string; label: string; defaultBaseUrl: string; protocol: string; models: Array<{ model: string; label: string; officialUsd: ModelPriceCnyView }> }> }>('/ai/catalog'),
+  /** 覆盖单个模型的实付价（元/百万 token） */
+  setModelPrice: (payload: { provider: string; model: string; price: ModelPriceCnyView }) =>
+    api.put<{ ok: true }>('/ai/model-price', payload),
+  pricingRules: () => api.get<{ usdToCny: number; description: string }>('/ai/pricing-rules'),
   generations: (query: { page?: number; pageSize?: number; taskType?: string }) =>
     api.get<Paged<AiGeneration>>('/ai/generations', { ...query }),
 };

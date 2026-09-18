@@ -338,7 +338,7 @@ export class ContentService {
       await manager
         .createQueryBuilder()
         .update(ContentReview)
-        .set({ status: 'changes_requested', note: '内容已被删除，审核自动关闭', decidedAt: deletedAt })
+        .set({ status: 'changes_requested', comments: '内容已被删除，审核自动关闭', decidedAt: deletedAt })
         .where('content_id = :contentId AND status = :status', { contentId: content.id, status: 'pending' })
         .execute();
     });

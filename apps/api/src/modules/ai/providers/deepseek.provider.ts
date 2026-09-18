@@ -8,7 +8,9 @@ interface ChatCompletionResponse {
     /** DeepSeek 按"缓存命中/未命中"分段计价，这两项决定实际花费 */
     prompt_cache_hit_tokens?: number;
     prompt_cache_miss_tokens?: number;
-    prompt_tokens_details?: { cached_tokens?: number };
+    prompt_tokens_details?: { cached_tokens?: number; cache_write_tokens?: number };
+    /** Anthropic 原生协议的缓存写入计费字段 */
+    cache_creation_input_tokens?: number;
     completion_tokens_details?: { reasoning_tokens?: number };
   };
   error?: { message?: string };
@@ -17,6 +19,8 @@ interface ChatCompletionResponse {
 
 export interface DeepSeekProviderOptions {
   apiKey: string;
+  /** 供应商标识（deepseek / openai / anthropic …），用于用量归属与按模型计价 */
+  providerId?: string;
   model: string;
   baseUrl?: string;
   fetchImpl?: (input: string, init?: RequestInit) => Promise<Response>;
@@ -26,7 +30,8 @@ export interface DeepSeekProviderOptions {
 const DEFAULT_BASE_URL = 'https://api.deepseek.com';
 
 export class DeepSeekProvider implements AiProvider {
-  readonly name = 'deepseek';
+  /** 对外暴露的是"配置里的供应商"，而不是底层使用的兼容协议实现 */
+  readonly name: string;
   readonly model: string;
 
   private readonly apiKey: string;
@@ -35,6 +40,7 @@ export class DeepSeekProvider implements AiProvider {
   private readonly timeoutMs: number;
 
   constructor(options: DeepSeekProviderOptions) {
+    this.name = options.providerId ?? 'deepseek';
     this.apiKey = options.apiKey;
     this.model = options.model;
     this.baseUrl = options.baseUrl ?? DEFAULT_BASE_URL;
@@ -91,6 +97,7 @@ export class DeepSeekProvider implements AiProvider {
         tokensInput: payload.usage?.prompt_tokens ?? 0,
         tokensOutput: payload.usage?.completion_tokens ?? 0,
         tokensCached: payload.usage?.prompt_cache_hit_tokens ?? payload.usage?.prompt_tokens_details?.cached_tokens ?? 0,
+        tokensCacheWrite: payload.usage?.cache_creation_input_tokens ?? payload.usage?.prompt_tokens_details?.cache_write_tokens ?? 0,
         tokensReasoning: payload.usage?.completion_tokens_details?.reasoning_tokens ?? 0,
       };
     } finally {

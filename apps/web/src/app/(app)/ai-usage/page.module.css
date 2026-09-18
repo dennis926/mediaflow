@@ -84,3 +84,109 @@
   color: var(--mf-color-text-primary);
   font-variant-numeric: tabular-nums;
 }
+
+/* 供应商标签与模型价目表 */
+.tabs {
+  display: flex;
+  gap: var(--mf-space-2);
+  flex-wrap: wrap;
+  padding: var(--mf-space-1) 0;
+}
+
+.tab {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--mf-space-1);
+  min-height: var(--mf-size-touch-min);
+  padding: 0 var(--mf-space-3);
+  border: 1px solid var(--mf-color-border-subtle);
+  border-radius: var(--mf-radius-md);
+  background: var(--mf-color-surface-raised);
+  color: var(--mf-color-text-secondary);
+  font-size: var(--mf-font-size-sm);
+  cursor: pointer;
+}
+
+.tab:hover {
+  border-color: var(--mf-color-brand-500);
+  color: var(--mf-color-brand-600);
+}
+
+.tabActive {
+  border-color: var(--mf-color-brand-500);
+  background: var(--mf-color-brand-50);
+  color: var(--mf-color-brand-700);
+  font-weight: var(--mf-font-weight-medium);
+}
+
+.tabMuted {
+  opacity: 0.65;
+}
+
+.tabBadge {
+  font-size: var(--mf-font-size-xs);
+  color: var(--mf-color-text-tertiary);
+}
+
+.providerBar {
+  display: flex;
+  align-items: center;
+  gap: var(--mf-space-3);
+  flex-wrap: wrap;
+  padding-top: var(--mf-space-2);
+  border-top: 1px solid var(--mf-color-border-subtle);
+}
+
+.modelCell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.priceCell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.official {
+  font-size: var(--mf-font-size-xs);
+  color: var(--mf-color-text-tertiary);
+}
+
+.textareaLabel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mf-space-1);
+}
+
+.textarea {
+  width: 100%;
+  padding: var(--mf-space-2) var(--mf-space-3);
+  border: 1px solid var(--mf-color-border-subtle);
+  border-radius: var(--mf-radius-md);
+  background: var(--mf-color-surface-raised);
+  color: var(--mf-color-text-primary);
+  font-size: var(--mf-font-size-sm);
+  font-family: inherit;
+  resize: vertical;
+}
+
+.textarea:focus {
+  outline: none;
+  border-color: var(--mf-color-brand-500);
+}
+
+.reviewToolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--mf-space-2);
+  flex-wrap: wrap;
+}
+
+.actions {
+  display: flex;
+  gap: var(--mf-space-1);
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}

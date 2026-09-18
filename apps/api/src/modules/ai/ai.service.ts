@@ -15,7 +15,8 @@ import {
 } from './ai.types';
 import { checkCompliance, scoreViolations } from './compliance.rules';
 import { AiProviderFactory } from './ai-provider.factory';
-import { costBreakdown, estimateCost, runtime } from '../settings/runtime-config';
+import { estimateCost as estimateLegacyCost, runtime } from '../settings/runtime-config';
+import { ModelPricingService } from './model-pricing.service';
 
 export interface AiInvocationMeta {
   contentId?: string | null;
@@ -59,6 +60,7 @@ export class AiService {
     @InjectRepository(AiGeneration) private readonly generations: Repository<AiGeneration>,
     private readonly aiProviders: AiProviderFactory,
     private readonly workspaceContext: WorkspaceContextService,
+    private readonly pricing: ModelPricingService,
   ) {}
 
   /** Reads the effective provider from the runtime settings (database over .env). */
@@ -240,121 +242,245 @@ export class AiService {
   }
 
   /**
-   * AI 用量与花费统计：按天、按任务类型、按模型聚合。
-   * 花费依赖配置的 token 单价（设置 → AI 服务），未配置时为 0。
+   * AI 用量与花费。
+   *
+   * 与中转站价目表口径一致：
+   * - 按**供应商 + 模型**分组（可只统计选中的供应商/模型）；
+   * - 四段计费：输入 / 输出 / 缓存写入 / 缓存读取；
+   * - 每行都按"该模型的单价 × 该行实际 token"重新计算，保证卡片、明细、分组三处数字一致；
+   * - 同时返回调用当时记录的金额（costRecorded），单价调整后可对比差异。
    */
-  async usage(days = 14): Promise<{
+  async usage(days = 14, filter: { provider?: string; model?: string } = {}): Promise<{
+    range: { days: number; from: string };
+    filter: { provider: string | null; model: string | null };
     summary: {
       calls: number;
       failed: number;
       tokensInput: number;
       tokensOutput: number;
       tokensCached: number;
+      tokensCacheWrite: number;
       tokensReasoning: number;
       cacheHitRate: number;
       cost: string;
-      /** 调用当时记录的金额合计（与 cost 可能因调价而不同） */
       costRecorded: string;
       avgLatencyMs: number;
       avgCostPerCall: string;
       priceConfigured: boolean;
     };
-    pricing: { inputPerMTok: number; cachedInputPerMTok: number; outputPerMTok: number };
-    costBreakdown: ReturnType<typeof costBreakdown>;
+    costBreakdown: { input: string; output: string; cacheWrite: string; cacheRead: string; total: string };
+    pricing: {
+      provider: string;
+      model: string;
+      label: string;
+      price: { input: number; output: number; cacheWrite: number; cacheRead: number };
+      officialUsd: { input: number; output: number; cacheWrite: number; cacheRead: number };
+      source: string;
+      multiplier: number;
+      ratioOfOfficial: number;
+    } | null;
     byDay: Array<{ date: string; calls: number; tokens: number; cached: number; cost: string }>;
     byTask: Array<{ taskType: string; calls: number; tokens: number; cached: number; cost: string }>;
-    byModel: Array<{ model: string; calls: number; tokens: number; cached: number; cost: string }>;
+    byModel: Array<{ provider: string; model: string; calls: number; tokens: number; cost: string }>;
+    models: Array<{
+      provider: string;
+      providerLabel: string;
+      model: string;
+      label: string;
+      price: { input: number; output: number; cacheWrite: number; cacheRead: number };
+      officialUsd: { input: number; output: number; cacheWrite: number; cacheRead: number };
+      source: string;
+      ratioOfOfficial: number;
+      configured: boolean;
+      reference: boolean;
+      calls: number;
+      tokens: number;
+      cost: string;
+    }>;
+    providers: Array<{
+      provider: string;
+      label: string;
+      configured: boolean;
+      baseUrl: string;
+      multiplier: number;
+      models: Array<Record<string, unknown>>;
+    }>;
+    rules: { usdToCny: number; description: string };
+    note: string | null;
   }> {
     const scope = await this.workspaceContext.current();
-    const since = new Date(Date.now() - Math.min(Math.max(days, 1), 180) * 86_400_000);
-    const rows = await this.generations.find({
-      where: { workspaceId: scope.workspaceId, createdAt: MoreThan(since) },
-      order: { createdAt: 'DESC' },
-      take: 20_000,
-    });
+    const boundedDays = Math.min(Math.max(days, 1), 180);
+    const since = new Date(Date.now() - boundedDays * 86_400_000);
 
-    /**
-     * 展示口径统一：一律用**当前单价 × 该次实际 token** 计算（estimateCost）。
-     * 若直接用数据库里存的 cost，会出现"卡片合计"与"计费明细"两个数字对不上——
-     * 因为历史调用是在旧单价（甚至未配置单价=0）时记录的。存库的金额只作为当时的快照保留。
-     */
-    const costOf = (row: { tokensInput?: number | null; tokensOutput?: number | null; tokensCached?: number | null }): number =>
-      Number(estimateCost(row.tokensInput ?? 0, row.tokensOutput ?? 0, row.tokensCached ?? 0)) || 0;
-    const recordedOf = (value: string | null | undefined): number => Number(value ?? 0) || 0;
-    const dayKey = (date: Date): string => {
-      // 按北京时间归档，避免"昨天/今天"错位
-      const shifted = new Date(date.getTime() + 8 * 3600_000);
-      return shifted.toISOString().slice(0, 10);
+    const where: FindOptionsWhere<AiGeneration> = { workspaceId: scope.workspaceId, createdAt: MoreThan(since) };
+    if (filter.provider) where.provider = filter.provider;
+    if (filter.model) where.model = filter.model;
+
+    const rows = await this.generations.find({ where, order: { createdAt: 'DESC' }, take: 20_000 });
+
+    // 价格缓存：同一 (provider, model) 只解析一次
+    const priceCache = new Map<string, { price: { input: number; output: number; cacheWrite: number; cacheRead: number }; source: string }>();
+    const priceFor = async (provider: string, model: string): Promise<{ price: { input: number; output: number; cacheWrite: number; cacheRead: number }; source: string }> => {
+      const key = `${provider}/${model}`;
+      const cached = priceCache.get(key);
+      if (cached) return cached;
+      const resolved = await this.pricing.priceFor(provider, model).catch(() => null);
+      const value = resolved
+        ? { price: resolved.price, source: resolved.source }
+        : { price: { input: 0, output: 0, cacheWrite: 0, cacheRead: 0 }, source: 'unset' };
+      priceCache.set(key, value);
+      return value;
     };
 
     const dayMap = new Map<string, { calls: number; tokens: number; cached: number; cost: number }>();
     const taskMap = new Map<string, { calls: number; tokens: number; cached: number; cost: number }>();
-    const modelMap = new Map<string, { calls: number; tokens: number; cached: number; cost: number }>();
+    const modelMap = new Map<string, { provider: string; model: string; calls: number; tokens: number; cost: number }>();
+
     let tokensInput = 0;
     let tokensOutput = 0;
     let tokensCached = 0;
+    let tokensCacheWrite = 0;
     let tokensReasoning = 0;
     let cost = 0;
     let costRecorded = 0;
     let failed = 0;
     let latencyTotal = 0;
+    const breakdown = { input: 0, output: 0, cacheWrite: 0, cacheRead: 0 };
+
+    const dayKey = (date: Date): string => new Date(date.getTime() + 8 * 3600_000).toISOString().slice(0, 10);
 
     for (const row of rows) {
-      const cached = row.tokensCached ?? 0;
-      const tokens = (row.tokensInput ?? 0) + (row.tokensOutput ?? 0);
-      const entryCost = costOf(row);
-      costRecorded += recordedOf(row.cost);
+      const cachedTokens = Math.max(0, row.tokensCached ?? 0);
+      const cacheWriteTokens = Math.max(0, row.tokensCacheWrite ?? 0);
+      const inputTokens = Math.max(0, (row.tokensInput ?? 0) - cachedTokens);
+      const outputTokens = Math.max(0, row.tokensOutput ?? 0);
+      const tokens = inputTokens + cachedTokens + cacheWriteTokens + outputTokens;
+
+      const { price } = await priceFor(row.provider ?? 'unknown', row.model ?? 'unknown');
+      const rowCost = this.pricing.computeCost(
+        { input: inputTokens, output: outputTokens, cacheWrite: cacheWriteTokens, cacheRead: cachedTokens },
+        price,
+      );
+
       tokensInput += row.tokensInput ?? 0;
-      tokensOutput += row.tokensOutput ?? 0;
-      tokensCached += cached;
+      tokensOutput += outputTokens;
+      tokensCached += cachedTokens;
+      tokensCacheWrite += cacheWriteTokens;
       tokensReasoning += row.tokensReasoning ?? 0;
-      cost += entryCost;
+      cost += rowCost.total;
+      costRecorded += Number(row.cost ?? 0) || 0;
       latencyTotal += row.latencyMs ?? 0;
       if (row.status === 'failed') failed += 1;
+      breakdown.input += rowCost.input;
+      breakdown.output += rowCost.output;
+      breakdown.cacheWrite += rowCost.cacheWrite;
+      breakdown.cacheRead += rowCost.cacheRead;
 
-      for (const [map, key] of [
+      const groups: Array<[Map<string, { calls: number; tokens: number; cached: number; cost: number }>, string]> = [
         [dayMap, dayKey(new Date(row.createdAt))],
         [taskMap, row.taskType],
-        [modelMap, row.model ?? 'unknown'],
-      ] as Array<[Map<string, { calls: number; tokens: number; cached: number; cost: number }>, string]>) {
+      ];
+      for (const [map, key] of groups) {
         const current = map.get(key) ?? { calls: 0, tokens: 0, cached: 0, cost: 0 };
-        map.set(key, { calls: current.calls + 1, tokens: current.tokens + tokens, cached: current.cached + cached, cost: current.cost + entryCost });
+        map.set(key, { calls: current.calls + 1, tokens: current.tokens + tokens, cached: current.cached + cachedTokens, cost: current.cost + rowCost.total });
       }
+
+      const modelKey = `${row.provider ?? 'unknown'}/${row.model ?? 'unknown'}`;
+      const currentModel = modelMap.get(modelKey) ?? { provider: row.provider ?? 'unknown', model: row.model ?? 'unknown', calls: 0, tokens: 0, cost: 0 };
+      modelMap.set(modelKey, { ...currentModel, calls: currentModel.calls + 1, tokens: currentModel.tokens + tokens, cost: currentModel.cost + rowCost.total });
     }
 
-    const sortedDays = [...dayMap.entries()].sort((left, right) => right[0].localeCompare(left[0])).slice(0, days);
-    const priceConfigured = runtime().ai.priceInputPerMTok > 0 || runtime().ai.priceOutputPerMTok > 0;
+    // 供应商/模型清单：已配置的供应商 + 其模型（含未使用过的模型，便于直接切过去看价）
+    const providers = await this.pricing.list({ onlyConfigured: false });
+    const usageByModel = new Map(modelMap);
+    const models = providers.flatMap((provider) =>
+      provider.models.map((model) => {
+        const used = usageByModel.get(`${provider.provider}/${model.model}`);
+        return {
+          provider: provider.provider,
+          providerLabel: provider.label,
+          model: model.model,
+          label: model.label,
+          price: model.price,
+          officialUsd: model.officialUsd,
+          source: model.source,
+          ratioOfOfficial: model.ratioOfOfficial,
+          configured: provider.configured,
+          reference: model.reference,
+          multiplier: model.multiplier,
+          calls: used?.calls ?? 0,
+          tokens: used?.tokens ?? 0,
+          cost: (used?.cost ?? 0).toFixed(6),
+        };
+      }),
+    );
+
+    const selectedPricing =
+      filter.provider && filter.model
+        ? await this.pricing.priceFor(filter.provider, filter.model)
+        : (providers.find((provider) => provider.configured)?.models[0] ?? providers[0]?.models[0] ?? null);
+
+    const priceConfigured = models.some((model) => model.price.input > 0 || model.price.output > 0);
+    const sortedDays = [...dayMap.entries()].sort((left, right) => right[0].localeCompare(left[0])).slice(0, boundedDays);
 
     return {
+      range: { days: boundedDays, from: since.toISOString() },
+      filter: { provider: filter.provider ?? null, model: filter.model ?? null },
       summary: {
         calls: rows.length,
         failed,
         tokensInput,
         tokensOutput,
         tokensCached,
+        tokensCacheWrite,
         tokensReasoning,
         cacheHitRate: tokensInput > 0 ? Number(((tokensCached / tokensInput) * 100).toFixed(1)) : 0,
         cost: cost.toFixed(6),
-        // 调用当时记录的金额合计（价格未变时与 cost 一致；调价后会不同，用于提示差异）
         costRecorded: costRecorded.toFixed(6),
         avgLatencyMs: rows.length > 0 ? Math.round(latencyTotal / rows.length) : 0,
         avgCostPerCall: rows.length > 0 ? (cost / rows.length).toFixed(6) : '0',
         priceConfigured,
       },
-      pricing: {
-        inputPerMTok: runtime().ai.priceInputPerMTok,
-        cachedInputPerMTok:
-          runtime().ai.priceCachedInputPerMTok > 0 ? runtime().ai.priceCachedInputPerMTok : runtime().ai.priceInputPerMTok,
-        outputPerMTok: runtime().ai.priceOutputPerMTok,
+      costBreakdown: {
+        input: breakdown.input.toFixed(6),
+        output: breakdown.output.toFixed(6),
+        cacheWrite: breakdown.cacheWrite.toFixed(6),
+        cacheRead: breakdown.cacheRead.toFixed(6),
+        total: cost.toFixed(6),
       },
-      costBreakdown: costBreakdown({ tokensInput, tokensOutput, tokensCached }),
+      pricing: selectedPricing
+        ? {
+            provider: selectedPricing.provider,
+            model: selectedPricing.model,
+            label: selectedPricing.label,
+            price: selectedPricing.price,
+            officialUsd: selectedPricing.officialUsd,
+            source: selectedPricing.source,
+            multiplier: selectedPricing.multiplier,
+            ratioOfOfficial: selectedPricing.ratioOfOfficial,
+          }
+        : null,
       byDay: sortedDays.map(([date, value]) => ({ date, calls: value.calls, tokens: value.tokens, cached: value.cached, cost: value.cost.toFixed(6) })),
       byTask: [...taskMap.entries()]
         .sort((left, right) => right[1].calls - left[1].calls)
         .map(([taskType, value]) => ({ taskType, calls: value.calls, tokens: value.tokens, cached: value.cached, cost: value.cost.toFixed(6) })),
-      byModel: [...modelMap.entries()]
-        .sort((left, right) => right[1].calls - left[1].calls)
-        .map(([model, value]) => ({ model, calls: value.calls, tokens: value.tokens, cached: value.cached, cost: value.cost.toFixed(6) })),
+      byModel: [...modelMap.values()]
+        .sort((left, right) => right.calls - left.calls)
+        .map((value) => ({ provider: value.provider, model: value.model, calls: value.calls, tokens: value.tokens, cost: value.cost.toFixed(6) })),
+      models,
+      providers: providers.map((provider) => ({
+        provider: provider.provider,
+        label: provider.label,
+        configured: provider.configured,
+        baseUrl: provider.baseUrl,
+        multiplier: provider.multiplier,
+        models: provider.models as unknown as Array<Record<string, unknown>>,
+      })),
+      rules: await this.pricing.rules(),
+      note:
+        Math.abs(cost - costRecorded) > 0.000001
+          ? '金额按「当前模型单价 × 实际 token」重算；调用当时记录的金额与它不同，通常是因为之后调整过价格。'
+          : null,
     };
   }
 
@@ -399,6 +525,20 @@ export class AiService {
         temperature: runtime().ai.temperature,
         maxTokens: runtime().ai.maxTokens,
       });
+
+      /**
+       * 按"模型自己的价目"计价（供应商 × 模型），而不是全站一个价：
+       * 四段计费（输入 / 输出 / 缓存写入 / 缓存读取），并记录价格快照，日后调价也能说明当时的算法。
+       */
+      const modelTokens = {
+        input: Math.max(0, (completion.tokensInput ?? 0) - (completion.tokensCached ?? 0)),
+        output: completion.tokensOutput ?? 0,
+        cacheWrite: completion.tokensCacheWrite ?? 0,
+        cacheRead: completion.tokensCached ?? 0,
+      };
+      const priced = await this.pricing
+        .costOf(provider.name, completion.model ?? provider.model, modelTokens)
+        .catch(() => null);
       const parsed = params.parse(completion);
       const generation = await this.generations.save(
         this.generations.create({
@@ -415,8 +555,14 @@ export class AiService {
           tokensOutput: completion.tokensOutput,
           tokensCached: completion.tokensCached ?? 0,
           tokensReasoning: completion.tokensReasoning ?? 0,
+          tokensCacheWrite: completion.tokensCacheWrite ?? 0,
           latencyMs: Date.now() - startedAt,
-          cost: estimateCost(completion.tokensInput, completion.tokensOutput, completion.tokensCached ?? 0),
+          cost: priced
+            ? priced.cost
+            : estimateLegacyCost(completion.tokensInput, completion.tokensOutput, completion.tokensCached ?? 0),
+          priceSnapshot: priced
+            ? { provider: provider.name, model: completion.model ?? provider.model, price: priced.price, source: priced.source }
+            : {},
           errorMessage: null,
           requestedBy: params.meta.requestedBy ?? null,
           contentId: params.meta.contentId ?? null,
