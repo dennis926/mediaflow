@@ -75,12 +75,19 @@ const FIELD_ALIASES: Record<MappingTarget, string[]> = {
   isActive: ['isactive', 'is_active', '启用', '是否启用', 'active', 'enabled', '状态', 'status', '有效'],
 };
 
-/** 归一化表头：去空白、全角转半角、小写，去掉常见后缀/单位。 */
+/**
+ * 归一化表头：去空白、全角转半角、小写，去掉常见后缀/单位。
+ *
+ * 注意字符类里那个连字符必须转义或放到末尾：写成 `[\s_-（...]` 会被解析成
+ * `_`(U+005F) 到 `（`(U+FF08) 的**区间**，把英文字母数字全部吃掉 —— 英文表头
+ * （title/content/category/brand…）会被归一化成空串，字段映射退化成"按列顺序分配"，
+ * 于是 brand 与 category 会互相串位。中文表头恰好不在该区间内，所以之前没暴露。
+ */
 function normalizeHeader(value: string): string {
   return value
     .trim()
     .toLowerCase()
-    .replace(/[\s_-（）()【】[\]]/g, '')
+    .replace(/[\s_\-（）()【】[\]]/g, '')
     .replace(/[（(].*?[)）]/g, '');
 }
 

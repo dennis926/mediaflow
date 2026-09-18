@@ -3,6 +3,7 @@ import { AiProvider } from './ai.types';
 import { DeepSeekProvider } from './providers/deepseek.provider';
 import { MockAiProvider } from './providers/mock.provider';
 import { SettingsService } from '../settings/settings.service';
+import { runtime } from '../settings/runtime-config';
 import { ProviderConfigService } from './provider-config.service';
 
 export interface AiProviderOverrides {
@@ -56,14 +57,18 @@ export class AiProviderFactory {
 
   async test(overrides: AiProviderOverrides = {}): Promise<AiTestResult> {
     const startedAt = Date.now();
+    let provider: AiProvider | null = null;
     try {
-      const provider = await this.build(overrides);
+      provider = await this.build(overrides);
       const completion = await provider.complete({
         task: 'generate',
         system: '你是连接测试助手，只回复两个字。',
         user: '请回复：连接正常',
-        // Reasoning models need headroom for the thinking pass before the answer.
-        maxTokens: 512,
+        /**
+         * 推理模型（deepseek-flash）会先思考再回答，512 太小：实测光思考就 870 字，
+         * 于是"连接测试"永远报失败，让人误以为 Key 不对。这里给足预算。
+         */
+        maxTokens: Math.max(runtime().ai.maxTokens, 1024),
         temperature: 0,
       });
       return {
@@ -74,12 +79,26 @@ export class AiProviderFactory {
         reply: completion.text.slice(0, 80),
       };
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      /**
+       * 输出被截断只说明"答得太长"，不能说明凭据有问题：
+       * 能拿到模型响应就意味着鉴权与网络都通了，测试结果要如实区分。
+       */
+      if (/max_tokens 截断|只返回了思考过程/.test(message)) {
+        return {
+          ok: true,
+          provider: provider?.name ?? (await this.settings.get('AI_PROVIDER')) ?? 'unknown',
+          model: provider?.model ?? overrides.model ?? (await this.settings.get('AI_MODEL')) ?? DEFAULT_MODEL,
+          latencyMs: Date.now() - startedAt,
+          reply: '（模型只返回了思考过程，连接与鉴权正常）',
+        };
+      }
       return {
         ok: false,
-        provider: (await this.settings.get('AI_PROVIDER')) ?? 'unknown',
-        model: overrides.model ?? (await this.settings.get('AI_MODEL')) ?? DEFAULT_MODEL,
+        provider: provider?.name ?? (await this.settings.get('AI_PROVIDER')) ?? 'unknown',
+        model: provider?.model ?? overrides.model ?? (await this.settings.get('AI_MODEL')) ?? DEFAULT_MODEL,
         latencyMs: Date.now() - startedAt,
-        error: error instanceof Error ? error.message : String(error),
+        error: message,
       };
     }
   }
