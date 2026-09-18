@@ -27,7 +27,13 @@ describe.skipIf(!credentialsReady)('MediaFlow 端到端流程', () => {
 
   beforeAll(async () => {
     process.env.PUBLISH_WORKER_ENABLED = 'false';
-    process.env.AI_PROVIDER = 'mock';
+    /**
+     * 端到端测试必须离线、可重复：用 MEDIAFLOW_SETTING_OVERRIDE_* 锁住 AI 提供方（它优先级高于数据库配置），
+     * 否则测试会打真实模型接口——既慢又抖（实测 9~19 秒、偶发失败），还会消耗额度。
+     */
+    process.env.MEDIAFLOW_SETTING_OVERRIDE_AI_PROVIDER = 'mock';
+    process.env.MEDIAFLOW_SETTING_OVERRIDE_PUBLISH_WORKER_ENABLED = 'false';
+    process.env.MEDIAFLOW_SETTING_OVERRIDE_AI_MODEL = 'mock-model';
 
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
     app = moduleRef.createNestApplication();

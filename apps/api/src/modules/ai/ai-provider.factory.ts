@@ -101,6 +101,12 @@ export class AiProviderFactory {
   private async build(overrides: AiProviderOverrides = {}): Promise<AiProvider> {
     const name = overrides.provider?.trim().toLowerCase() || ((await this.settings.get('AI_PROVIDER')) ?? 'deepseek').trim().toLowerCase();
 
+    /**
+     * 离线模式必须在最前面判断：一旦配了真实供应商凭据，后面的"多供应商配置"分支会用它去发起真实请求，
+     * 于是把 AI_PROVIDER 设成 mock 反而会花钱（曾经真的用 mock-model 去调 DeepSeek 并报 400）。
+     */
+    if (name === 'mock') return new MockAiProvider('mock-model（离线占位，未配置真实 Key）');
+
     // 多供应商配置优先：同一实例里可以存多套凭据，按 provider 取对应的密钥/地址/模型
     const config = await this.providerConfigs.find(name);
     if (config && (config.apiKey || overrides.apiKey)) {

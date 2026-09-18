@@ -84,6 +84,14 @@ export class SettingsService implements OnModuleInit {
 
   /** Effective value: database override, then environment, then undefined. */
   async get(key: string): Promise<string | null> {
+    /**
+     * 测试专用覆盖：`MEDIAFLOW_SETTING_OVERRIDE_<KEY>` 优先级高于数据库。
+     * 用于端到端测试强制走离线 mock 提供方（数据库里的真实配置会覆盖普通环境变量，靠 env 是锁不住的）。
+     * 生产环境不设置这些变量，因此没有行为变化。
+     */
+    const override = process.env[`MEDIAFLOW_SETTING_OVERRIDE_${key}`];
+    if (override !== undefined) return override;
+
     if (this.cache.has(key)) return this.cache.get(key) ?? null;
     const definition = SETTING_BY_KEY.get(key);
     const scope = await this.workspaceContext.current();

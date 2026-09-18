@@ -123,12 +123,13 @@ export class ModelPricingService {
     const config = providerConfigs.find((item) => item.provider === provider);
     const catalogModel = findCatalogModel(provider, model);
     const officialUsd = catalogModel?.officialUsd ?? { input: 0, output: 0, cacheWrite: 0, cacheRead: 0 };
-    // 官方价按汇率折算（不做任何折扣/倍率）
+    // 官方价按汇率折算（不做任何折扣）；统一保留 4 位小数，避免 1.9600000000000002 这类浮点尾数进库
+    const round4 = (value: number): number => Math.round(value * 10_000) / 10_000;
     const converted: ModelPriceCny = {
-      input: officialUsd.input * rate,
-      output: officialUsd.output * rate,
-      cacheWrite: officialUsd.cacheWrite * rate,
-      cacheRead: officialUsd.cacheRead * rate,
+      input: round4(officialUsd.input * rate),
+      output: round4(officialUsd.output * rate),
+      cacheWrite: round4(officialUsd.cacheWrite * rate),
+      cacheRead: round4(officialUsd.cacheRead * rate),
     };
 
     const override = overrides[`${provider}/${model}`];
@@ -139,10 +140,10 @@ export class ModelPricingService {
     let source: ModelPricingView['source'];
     if (hasOverride && override) {
       price = {
-        input: Number(override.input ?? converted.input) || 0,
-        output: Number(override.output ?? converted.output) || 0,
-        cacheWrite: Number(override.cacheWrite ?? converted.cacheWrite) || 0,
-        cacheRead: Number(override.cacheRead ?? converted.cacheRead) || 0,
+        input: round4(Number(override.input ?? converted.input) || 0),
+        output: round4(Number(override.output ?? converted.output) || 0),
+        cacheWrite: round4(Number(override.cacheWrite ?? converted.cacheWrite) || 0),
+        cacheRead: round4(Number(override.cacheRead ?? converted.cacheRead) || 0),
       };
       source = 'override';
     } else if (hasUsableCatalog) {

@@ -45,7 +45,9 @@ export class ProviderConfigService {
     // 兼容旧配置：只有 AI_API_KEY 时，把它视为一个已配置的供应商
     const activeProvider = (await this.settings.get('AI_PROVIDER')) ?? '';
     const legacyKey = (await this.settings.get('AI_API_KEY')) ?? '';
-    if (legacyKey && activeProvider && !fromSettings.some((item) => item.provider === activeProvider)) {
+    // mock 是内置的离线提供方，没有凭据也不该被当成供应商——否则会出现"用真实 Key 调 mock-model"这种错误
+    const isMock = activeProvider === 'mock';
+    if (!isMock && legacyKey && activeProvider && !fromSettings.some((item) => item.provider === activeProvider)) {
       const activeModel = (await this.settings.get('AI_MODEL')) ?? '';
       const catalog = findCatalogProvider(activeProvider);
       fromSettings.unshift({
