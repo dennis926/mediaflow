@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
+import type { WorkbookMatrix } from './spreadsheet.reader';
 import { PlatformCode } from '@mediaflow/shared';
 
 /**
@@ -296,30 +297,29 @@ export class KnowledgeTransferService {
   }
 
   private async parseTabular(buffer: Buffer, lower: string, warnings: string[]): Promise<ParsedTable> {
-    const XLSX = await import('xlsx');
+    // 任务 5：xlsx（npm 上停在 0.18.5、有原型污染/ReDoS）→ exceljs
+    const { readWorkbook } = await import('./spreadsheet.reader');
     const isDelimited = lower.endsWith('.csv') || lower.endsWith('.tsv');
     if (isDelimited) {
       const { text, encoding } = this.decodeText(buffer);
       if (encoding !== 'utf-8') warnings.push(`文件按 ${encoding} 解码读取`);
-      const workbook = XLSX.read(text, { type: 'string', raw: false, FS: lower.endsWith('.tsv') ? '\t' : undefined });
-      return this.matrixToTable(XLSX, workbook, warnings);
+      const workbook = await readWorkbook({ text, delimiter: lower.endsWith('.tsv') ? '\t' : ',' });
+      return this.matrixToTable(workbook, warnings);
     }
-    const workbook = XLSX.read(buffer, { type: 'buffer' });
-    return this.matrixToTable(await import('xlsx'), workbook, warnings);
+    if (lower.endsWith('.xls')) {
+      throw new BadRequestException('暂不支持旧版 .xls 二进制格式，请在 Excel 里另存为 .xlsx 后重试');
+    }
+    const workbook = await readWorkbook({ buffer });
+    return this.matrixToTable(workbook, warnings);
   }
 
   /** 表格 → 行对象（表头为第一行）。 */
-  private matrixToTable(
-    XLSX: typeof import('xlsx'),
-    workbook: { SheetNames: string[]; Sheets: Record<string, unknown> },
-    warnings: string[],
-  ): ParsedTable {
-    const sheetName = workbook.SheetNames[0];
-    const sheet = sheetName ? workbook.Sheets[sheetName] : undefined;
-    if (!sheet) throw new BadRequestException('表格里没有可读的工作表');
-    if (workbook.SheetNames.length > 1) warnings.push(`表格含 ${workbook.SheetNames.length} 个工作表，已读取第一个「${sheetName}」`);
+  private matrixToTable(workbook: WorkbookMatrix, warnings: string[]): ParsedTable {
+    const sheetName = workbook.sheetNames[0];
+    if (!sheetName) throw new BadRequestException('表格里没有可读的工作表');
+    if (workbook.sheetNames.length > 1) warnings.push(`表格含 ${workbook.sheetNames.length} 个工作表，已读取第一个「${sheetName}」`);
 
-    const matrix = XLSX.utils.sheet_to_json<string[]>(sheet, { header: 1, blankrows: false, defval: '' });
+    const matrix = workbook.rowsOf(sheetName);
     if (matrix.length < 2) throw new BadRequestException('表格至少需要一行表头和一行数据');
 
     const headers = (matrix[0] as unknown as Array<string | number>).map((cell, index) => {

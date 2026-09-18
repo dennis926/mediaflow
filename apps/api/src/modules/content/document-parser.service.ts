@@ -40,7 +40,6 @@ export const SUPPORTED_DOCUMENT_TYPES = [
   '.docx',
   '.pptx',
   '.xlsx',
-  '.xls',
   '.csv',
   '.txt',
   '.md',
@@ -123,7 +122,6 @@ export class DocumentParserService {
           break;
         }
         case '.xlsx':
-        case '.xls':
         case '.csv':
           segments.push({ text: await this.parseSpreadsheet(buffer, type, warnings), fromOcr: false });
           break;
@@ -318,29 +316,23 @@ export class DocumentParserService {
   }
 
   private async parseSpreadsheet(buffer: Buffer, type: string, warnings: string[]): Promise<string> {
-    // 按需加载：xlsx 体积较大，只在真的解析表格时引入
-    const XLSX = await import('xlsx');
-    const workbook = type === '.csv'
-      ? XLSX.read(buffer.toString('utf8'), { type: 'string' })
-      : XLSX.read(buffer, { type: 'buffer' });
+    // 按需加载：表格库体积较大，只在真的解析表格时引入（任务 5：xlsx → exceljs）
+    const { readWorkbook } = await import('./spreadsheet.reader');
+    const workbook = type === '.csv' ? await readWorkbook({ text: buffer.toString('utf8') }) : await readWorkbook({ buffer });
 
     const lines: string[] = [];
-    for (const sheetName of workbook.SheetNames) {
-      const sheet = workbook.Sheets[sheetName];
-      if (!sheet) continue;
-      const rows = XLSX.utils.sheet_to_json<string[]>(sheet, { header: 1, blankrows: false });
+    for (const sheetName of workbook.sheetNames) {
+      const rows = workbook.rowsOf(sheetName);
       if (rows.length === 0) continue;
       lines.push(`【工作表：${sheetName}】`);
       for (const row of rows) {
-        const cells = (row as unknown as Array<string | number>).filter(
-          (cell) => cell !== undefined && cell !== null && String(cell).trim() !== '',
-        );
+        const cells = row.filter((cell) => cell !== undefined && cell !== null && String(cell).trim() !== '');
         if (cells.length === 0) continue;
         lines.push(cells.join(' | '));
       }
       lines.push('');
     }
-    if (workbook.SheetNames.length > 5) warnings.push(`文档含 ${workbook.SheetNames.length} 个工作表，已全部解析`);
+    if (workbook.sheetNames.length > 5) warnings.push(`文档含 ${workbook.sheetNames.length} 个工作表，已全部解析`);
     return lines.join('\n');
   }
 

@@ -29,5 +29,10 @@
     "eslint": "8.57.1",
     "prettier": "3.9.7",
     "typescript": "5.9.3"
+  },
+  "pnpm": {
+    "overrides": {
+      "multer": "^2.4.0"
+    }
   }
 }
