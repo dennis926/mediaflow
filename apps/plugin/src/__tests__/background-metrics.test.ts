@@ -15,6 +15,7 @@ type MessageListener = (message: MetricsMessage, sender: unknown, sendResponse: 
 interface Harness {
   chrome: Record<string, unknown>;
   store: Record<string, unknown>;
+  sessionStore: Record<string, unknown>;
   created: Array<{ name: string; options?: { periodInMinutes?: number; delayInMinutes?: number } }>;
   createdTabs: Array<{ url?: string; active?: boolean }>;
   removedTabs: number[];
@@ -28,14 +29,16 @@ interface Harness {
 const CONTENT_ID = '3f8b1c2d-4e5f-4a6b-8c7d-9e0f1a2b3c4d';
 const ACCOUNT_ID = '7a1b2c3d-4e5f-4a6b-9c8d-1e2f3a4b5c6d';
 const DATA_URL = 'https://creator.xiaohongshu.com/new/note-manager';
+const SWEEP_TABS_KEY = 'mediaflow:sweepTabs';
 
-function harness(overrides: Record<string, unknown> = {}): Harness {
+function harness(overrides: Record<string, unknown> = {}, sessionSeed: Record<string, unknown> = {}): Harness {
   const store: Record<string, unknown> = {
     'mediaflow.config': { apiBase: 'https://api.example.test', token: 'test-token' },
     metricsTargets: [DATA_URL],
     metricsIntervalMinutes: 90,
     ...overrides,
   };
+  const sessionStore: Record<string, unknown> = { ...sessionSeed };
   const created: Harness['created'] = [];
   const createdTabs: Harness['createdTabs'] = [];
   const removedTabs: number[] = [];
@@ -45,6 +48,8 @@ function harness(overrides: Record<string, unknown> = {}): Harness {
     runtime: {
       onInstalled: { addListener: vi.fn() },
       onStartup: { addListener: vi.fn() },
+      // Mirrors the manifest: the content script only runs on the xiaohongshu creator host here.
+      getManifest: () => ({ content_scripts: [{ matches: ['https://creator.xiaohongshu.com/*'] }] }),
       onMessage: {
         addListener: (fn: MessageListener) => {
           listeners.message = fn;
@@ -74,6 +79,16 @@ function harness(overrides: Record<string, unknown> = {}): Harness {
           Object.assign(store, values);
         }),
       },
+      session: {
+        get: vi.fn(async (keys: string[]) => {
+          const result: Record<string, unknown> = {};
+          for (const key of keys) if (key in sessionStore) result[key] = sessionStore[key];
+          return result;
+        }),
+        set: vi.fn(async (values: Record<string, unknown>) => {
+          Object.assign(sessionStore, values);
+        }),
+      },
       onChanged: {
         addListener: (fn: (changes: Record<string, unknown>, area: string) => void) => {
           listeners.changed = fn;
@@ -94,7 +109,7 @@ function harness(overrides: Record<string, unknown> = {}): Harness {
     },
   };
 
-  return { chrome, store, created, createdTabs, removedTabs, listeners };
+  return { chrome, store, sessionStore, created, createdTabs, removedTabs, listeners };
 }
 
 interface FetchCall {
@@ -116,11 +131,13 @@ function fetchStub(calls: FetchCall[]): void {
 }
 
 /** Loads a fresh copy of the worker against the stubs and returns the harness. */
-async function loadWorker(overrides: Record<string, unknown> = {}): Promise<Harness> {
-  const context = harness(overrides);
+async function loadWorker(overrides: Record<string, unknown> = {}, sessionSeed: Record<string, unknown> = {}): Promise<Harness> {
+  const context = harness(overrides, sessionSeed);
   vi.stubGlobal('chrome', context.chrome);
   vi.resetModules();
   await import('../background/index');
+  // `restoreOwnedTabs()` is fire-and-forget at module load: let its storage read settle.
+  await new Promise((resolve) => setTimeout(resolve, 0));
   return context;
 }
 
@@ -213,6 +230,23 @@ describe('service worker metric reporting', () => {
     await vi.waitFor(() => expect(context.removedTabs).toEqual([42]));
   });
 
+  it('still closes a sweep tab that a previous worker instance opened', async () => {
+    const calls: FetchCall[] = [];
+    fetchStub(calls);
+    // This worker starts fresh (as after an MV3 suspension) and finds tab 77 in session storage.
+    const context = await loadWorker({}, { [SWEEP_TABS_KEY]: [{ tabId: 77, url: DATA_URL, openedAt: Date.now() - 60_000 }] });
+
+    const response = await report(
+      context,
+      { url: DATA_URL, metrics: { platform: 'xiaohongshu', views: 4321, likes: 9 } },
+      { tab: { id: 77, url: DATA_URL } },
+    );
+
+    expect(response).toEqual({ ok: true, id: 'row-1' });
+    await vi.waitFor(() => expect(context.removedTabs).toEqual([77]));
+    expect(context.sessionStore[SWEEP_TABS_KEY]).toEqual([]);
+  });
+
   it('still accepts the legacy flat payload and resolves the target from the sender tab', async () => {
     const calls: FetchCall[] = [];
     fetchStub(calls);
@@ -257,6 +291,22 @@ describe('service worker metric reporting', () => {
     await vi.waitFor(() => expect(context.createdTabs).toHaveLength(1));
     expect(context.createdTabs[0]).toMatchObject({ url: DATA_URL, active: false });
     expect(context.created.some((alarm) => alarm.name === 'mediaflow:metrics-cleanup')).toBe(true);
+  });
+
+  it('skips targets the content script is not authorised to run on', async () => {
+    fetchStub([]);
+    // douyin has a parser but no manifest host permission, so its page could never report.
+    const context = await loadWorker({
+      metricsTargets: [DATA_URL, 'https://creator.douyin.com/creator-micro/content/manage', 'https://weibo.com/upload'],
+    });
+
+    const response = await new Promise((resolve) => {
+      context.listeners.message?.({ type: 'mediaflow:collect-now' }, {}, resolve);
+    });
+
+    expect(response).toEqual({ ok: true, opened: 1, skipped: 2 });
+    expect(context.createdTabs).toHaveLength(1);
+    expect(context.createdTabs[0]?.url).toBe(DATA_URL);
   });
 
   it('rebuilds the alarm when the stored interval changes', async () => {

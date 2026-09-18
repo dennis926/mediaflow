@@ -226,3 +226,24 @@ E2E_ADMIN_EMAIL=you@example.com E2E_ADMIN_PASSWORD=... pnpm --filter @mediaflow/
 ### 浏览器插件品牌
 - 插件名称、说明与 **API 域名**（`apiOrigin`，决定 host_permissions）都在 `apps/plugin/plugin.config.json`，或用环境变量 `PLUGIN_NAME` / `PLUGIN_DESCRIPTION` 覆盖后重新构建；
 - 插件弹窗里的站点名是运行时从 `/api/public/site-config` 读取的，改后台配置即可，不用重新打包。
+
+
+## 备份异地与健康巡检（可选，运维期）
+
+**备份**：`/root/.hermes/scripts/mediaflow_backup.sh`（cron 每天 04:30）已支持
+
+- `KEEP_DAYS`：本地保留天数（默认 14）；
+- `BACKUP_REMOTE_COMMAND`：异地同步命令，用 `{file}` 占位本次备份路径，例如
+  `BACKUP_REMOTE_COMMAND="rclone copy {file} mypan:mediaflow-backup/"`；
+- `ALERT_WEBHOOK_URL`：备份失败或异地同步失败时推送告警。
+
+把这些写进 `/root/.hermes/scripts/mediaflow-backup.env` 即可（不放进仓库）。
+
+**巡检**：`/root/.hermes/scripts/mediaflow_monitor.sh`（cron 每 5 分钟）检查 `/api/health`：
+
+- `MONITOR_PING_URL`：成功时 GET 一次，可对接 Uptime Kuma / Healthchecks.io 这样的外部心跳；
+- `ALERT_WEBHOOK_URL` + `ALERT_AFTER_FAILURES`：连续失败 N 次才告警（默认 3，避免网络抖动误报）；
+- 配置写 `/root/.hermes/scripts/mediaflow-monitor.env`。
+
+**端到端测试**：`pnpm test:e2e` 会读取 `.env.e2e`（包含 `E2E_ADMIN_EMAIL`/`E2E_ADMIN_PASSWORD`，不进仓库）后跑完整的
+登录 → 建内容 → AI 适配 → 建发布任务 → 查队列 → 通知 流程；缺少凭据文件时会明确报错而不是静默跳过。

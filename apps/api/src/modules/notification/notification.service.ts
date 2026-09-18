@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { WorkspaceContextService } from '../../common/workspace-context.service';
+import { runtime } from '../settings/runtime-config';
 import { NotificationChannelService } from './notification-channel.service';
 import { Notification, NotificationLevel } from './entities/notification.entity';
 
@@ -54,8 +55,12 @@ export class NotificationService {
 
     this.logger.log(`通知已写入：[${saved.level}] ${saved.title}`);
 
-    // 已配置群机器人/邮件时同步推出去；失败不影响业务（只记日志）
-    if (input.external !== false && this.channels.available().length > 0) {
+    // 已配置群机器人/邮件时同步推出去；级别过滤避免普通提示刷群，失败不影响业务（只记日志）
+    const minLevel = runtime().notify.minLevel;
+    const levelRank: Record<string, number> = { info: 0, warning: 1, error: 2 };
+    const levelAllowed = (levelRank[saved.level] ?? 0) >= (levelRank[minLevel] ?? 1);
+
+    if (input.external !== false && levelAllowed && this.channels.available().length > 0) {
       const results = await this.channels.dispatch({ title: saved.title, text: saved.body, context: saved.payload });
       for (const result of results) {
         if (!result.ok) this.logger.warn(`外部通知发送失败(${result.channel})：${result.error}`);

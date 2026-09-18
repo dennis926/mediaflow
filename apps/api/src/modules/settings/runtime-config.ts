@@ -120,6 +120,8 @@ export interface MediaRuntimeConfig {
 }
 
 export interface NotifyRuntimeConfig {
+  /** 推送到外部渠道的最低级别（info = 全部） */
+  minLevel: 'info' | 'warning' | 'error';
   webhookUrl: string;
   webhookType: 'auto' | 'dingtalk' | 'feishu' | 'wecom' | 'generic';
   emailEnabled: boolean;
@@ -272,6 +274,7 @@ export const DEFAULT_MEDIA_RUNTIME: MediaRuntimeConfig = {
 };
 
 export const DEFAULT_NOTIFY_RUNTIME: NotifyRuntimeConfig = {
+  minLevel: 'warning',
   webhookUrl: '',
   webhookType: 'auto',
   emailEnabled: false,
@@ -358,6 +361,10 @@ export function applyRuntimeConfig(flat: Record<string, string | undefined>, onE
   };
 
   snapshot.notify = {
+    minLevel: ((): NotifyRuntimeConfig['minLevel'] => {
+      const value = (flat.NOTIFY_MIN_LEVEL ?? 'warning').trim();
+      return (['info', 'warning', 'error'] as const).includes(value as never) ? (value as NotifyRuntimeConfig['minLevel']) : 'warning';
+    })(),
     webhookUrl: text(flat.NOTIFY_WEBHOOK_URL, DEFAULT_NOTIFY_RUNTIME.webhookUrl),
     webhookType: ((): NotifyRuntimeConfig['webhookType'] => {
       const value = (flat.NOTIFY_WEBHOOK_TYPE ?? 'auto').trim();

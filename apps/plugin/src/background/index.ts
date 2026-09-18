@@ -254,6 +254,34 @@ async function openTargetTab(target: MetricsTarget): Promise<number | null> {
   }
 }
 
+/** Glob-ish match for a manifest match pattern such as `https://creator.xiaohongshu.com/*`. */
+function matchesPattern(pattern: string, url: string): boolean {
+  const source = pattern
+    .split('*')
+    .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .join('.*');
+  try {
+    return new RegExp(`^${source}$`).test(url);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * True when the content script is actually injected into `url`.
+ * Read from the manifest instead of duplicating the host list here: opening a page whose
+ * content script is not authorised would leave a tab that can never report anything.
+ */
+function isInjectable(url: string): boolean {
+  try {
+    const patterns = (chrome.runtime.getManifest().content_scripts ?? []).flatMap((entry) => entry.matches ?? []);
+    if (patterns.length === 0) return true; // No manifest information: trust the platform registry.
+    return patterns.some((pattern) => matchesPattern(pattern, url));
+  } catch {
+    return true;
+  }
+}
+
 /**
  * One collection round: open every configured creator data page in an inactive tab.
  * Each page reports back through `mediaflow:metrics-collected`, which this worker turns into a
@@ -262,9 +290,11 @@ async function openTargetTab(target: MetricsTarget): Promise<number | null> {
 async function runMetricsSweep(): Promise<{ ok: boolean; opened: number; skipped: number }> {
   await closeStaleTabs();
   const settings = await loadMetricsSettings();
-  const supported = settings.targets.filter((target) => platformForUrl(target.url) !== null);
+  const supported = settings.targets.filter((target) => platformForUrl(target.url) !== null && isInjectable(target.url));
   const skipped = settings.targets.length - supported.length;
-  if (skipped > 0) console.warn('[mediaflow] 跳过不支持的平台域名，共', skipped, '个');
+  if (skipped > 0) {
+    console.warn('[mediaflow] 跳过', skipped, '个数据页：平台无抓取器，或内容脚本未授权该域名（见 manifest host_permissions）');
+  }
 
   const tabIds = await Promise.all(supported.map((target) => openTargetTab(target)));
   const opened = tabIds.filter((id) => id !== null).length;

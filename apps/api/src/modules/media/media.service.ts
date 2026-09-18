@@ -233,14 +233,41 @@ export class MediaService {
 
   /**
    * 读取磁盘文件用于对外访问。
-   * 文件名必须是"uuid + 扩展名"形态，避免路径穿越；文件不存在返回 null 由控制器给 404。
+   *
+   * 注意两点：
+   * 1. 文件名必须是"uuid + 扩展名"形态，避免路径穿越；
+   * 2. Content-Type 必须是**真实类型**——早期统一返回 application/octet-stream，
+   *    浏览器在 <img> 里可能直接当成下载而不是显示图片。
    */
-  openFile(storedName: string): { stream: Readable; contentType: string; size: number } | null {
+  async openFile(storedName: string): Promise<{ stream: Readable; contentType: string; size: number } | null> {
     if (!/^[a-f0-9-]{36}(\.[A-Za-z0-9]{1,12})?$/.test(storedName)) return null;
     const path = join(this.storageDir(), storedName);
     if (!existsSync(path)) return null;
     const stat = statSync(path);
-    return { stream: createReadStream(path), contentType: 'application/octet-stream', size: stat.size };
+    const asset = await this.assets.findOne({ where: { storedName } });
+    return {
+      stream: createReadStream(path),
+      contentType: asset?.mimeType ?? MediaService.mimeFromExtension(storedName),
+      size: stat.size,
+    };
+  }
+
+  /** 兜底：磁盘文件存在但数据库记录缺失（例如手工拷进来的文件）时按扩展名判断。 */
+  private static mimeFromExtension(fileName: string): string {
+    const extension = extname(fileName).toLowerCase();
+    const table: Record<string, string> = {
+      '.png': 'image/png',
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.webp': 'image/webp',
+      '.gif': 'image/gif',
+      '.mp4': 'video/mp4',
+      '.mov': 'video/quicktime',
+      '.webm': 'video/webm',
+      '.mp3': 'audio/mpeg',
+      '.wav': 'audio/wav',
+    };
+    return table[extension] ?? 'application/octet-stream';
   }
 
   /** 供其他模块校验"这个 URL 是否来自本系统素材"。 */

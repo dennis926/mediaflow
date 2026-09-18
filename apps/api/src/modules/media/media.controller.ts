@@ -79,8 +79,8 @@ export class PublicMediaController {
   constructor(private readonly mediaService: Service) {}
 
   @Get(':storedName')
-  serve(@Param('storedName') storedName: string, @Res() response: Response): void {
-    const file = this.mediaService.openFile(storedName);
+  async serve(@Param('storedName') storedName: string, @Res() response: Response): Promise<void> {
+    const file = await this.mediaService.openFile(storedName);
     if (!file) {
       response.status(404).json({ code: 40400, message: '素材不存在', data: null });
       return;

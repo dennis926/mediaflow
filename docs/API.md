@@ -168,6 +168,18 @@
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
+| POST | `/api/media` | **上传素材**（multipart `file` + `groupName?`）：图片/视频/音频，按文件头校验真实类型，大小上限可配 |
+| GET | `/api/media` | 素材列表（`kind`/`keyword`/`group`/分页） |
+| GET | `/api/media/groups` | 素材分组与数量 |
+| DELETE | `/api/media/:id` | 删除素材（软删除 + 移除磁盘文件） |
+| GET | `/api/public/media/:storedName` | 素材公开访问（uuid 文件名，供平台抓取） |
+| GET | `/api/audit-logs` | **审计日志**（`action`/`actionPrefix`/`actor`/`keyword`/`from`/`to`/分页），按工作区隔离，权限走 `audit.read` 能力点 |
+| GET | `/api/audit-logs/actions` | 动作清单与次数（筛选下拉用） |
+| GET | `/api/ai/usage` | **AI 用量与花费**：按天/任务/模型聚合（`days` 默认 14） |
+| POST | `/api/contents/batch` | 内容批量操作：`{ids[], action: archive\|unarchive\|delete}`，逐条返回失败原因 |
+| GET | `/api/contents/:id/revisions` | 内容版本历史（新到旧） |
+| POST | `/api/contents/:id/revisions/:revisionId/restore` | 回滚到指定版本（回滚前自动留档） |
+| POST | `/api/publish/tasks/batch` | 发布任务批量：`{ids[], action: cancel\|retry}` |
 | GET | `/api/knowledge` | 列表（分页/品牌/分类/状态/关键字；关键字同时匹配标签，所以按「来源：文件名」可找回某次导入的那批资料） |
 | GET | `/api/knowledge` | 列表：`keyword`（标题/正文/品牌）、`brand`、`category`、`isActive`、分页（全员可读） |
 | GET | `/api/knowledge/brands` | 品牌聚合（含条数），用于筛选下拉 |

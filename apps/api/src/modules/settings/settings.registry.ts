@@ -173,6 +173,19 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
     placeholder: '20',
   },
   {
+    key: 'NOTIFY_MIN_LEVEL',
+    group: 'notify',
+    label: '推送到群/邮件的最低级别',
+    description: '默认只推 warning 与 error；选 info 会把所有站内通知都推出去（较吵）',
+    secret: false,
+    envKey: 'NOTIFY_MIN_LEVEL',
+    options: [
+      { value: 'warning', label: '警告及以上（推荐）' },
+      { value: 'info', label: '全部（含普通提示）' },
+      { value: 'error', label: '仅错误' },
+    ],
+  },
+  {
     key: 'NOTIFY_WEBHOOK_URL',
     group: 'notify',
     label: '群机器人 Webhook 地址',

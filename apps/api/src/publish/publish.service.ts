@@ -469,12 +469,13 @@ export class PublishService {
         failed.push({ id, reason: error instanceof Error ? error.message : String(error) });
       }
     }
+    const scope = await this.workspaceContext.current();
     await this.audit.record({
       action: `publish_task.batch_${action}`,
       resourceType: 'publish_task',
       resourceId: ids[0] ?? null,
-      tenantId: '00000000-0000-0000-0000-000000000000',
-      workspaceId: (await this.workspaceContext.current()).workspaceId,
+      tenantId: scope.tenantId,
+      workspaceId: scope.workspaceId,
       actorId: actor.id ?? null,
       actorName: actor.name ?? null,
       payload: { total: ids.length, affected, failed: failed.length },

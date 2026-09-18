@@ -250,10 +250,17 @@ export class ContentService {
         failed.push({ id, reason: error instanceof Error ? error.message : String(error) });
       }
     }
-    await this.record({ id: ids[0] ?? '', title: '', tenantId: '', workspaceId: '' } as Content, `content.batch_${action}`, actor, {
-      total: ids.length,
-      affected,
-      failed: failed.length,
+    // 审计必须带真实租户/工作区，否则 uuid 转换失败会被静默吞掉（批量操作就查不到了）
+    const scope = await this.workspaceContext.current();
+    await this.audit.record({
+      action: `content.batch_${action}`,
+      resourceType: 'content',
+      resourceId: ids[0] ?? null,
+      tenantId: scope.tenantId,
+      workspaceId: scope.workspaceId,
+      actorId: actor.id ?? null,
+      actorName: actor.name ?? null,
+      payload: { total: ids.length, affected, failed: failed.length },
     });
     return { affected, failed };
   }
