@@ -3,7 +3,7 @@ import { useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Dialog } from '../components/Dialog';
 import { PageHeader } from '../components/PageHeader';
-import { ApiError, setToken } from '../lib/api/client';
+import { ApiError, clearSession, getRefreshToken } from '../lib/api/client';
 import { authApi } from '../lib/api/endpoints';
 import { roleLabel, roleTone } from '../lib/roles';
 
@@ -72,13 +72,11 @@ export function ProfilePage() {
 
   const handleLogout = () => {
     // 通知服务端作废刷新令牌（失败不阻塞本地登出）
-    const refreshToken = window.localStorage.getItem('mediaflow.refreshToken') ?? undefined;
     void authApi
-      .logout(refreshToken)
+      .logout(getRefreshToken() ?? undefined)
       .catch(() => undefined)
       .finally(() => {
-        setToken(null);
-        window.localStorage.removeItem('mediaflow.refreshToken');
+        clearSession();
         queryClient.clear();
         navigate('/login', { replace: true });
       });

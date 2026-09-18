@@ -32,7 +32,11 @@
   },
   "pnpm": {
     "overrides": {
-      "multer": "^2.4.0"
+      "multer": "^2.4.0",
+      "qs": "^6.15.3",
+      "body-parser": "^1.20.6",
+      "postcss": "^8.5.28",
+      "lodash": "^4.18.1"
     }
   }
 }

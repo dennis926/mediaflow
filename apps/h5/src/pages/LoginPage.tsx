@@ -2,7 +2,7 @@ import { useMutation } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { loadSiteConfig, type SiteConfig } from '../lib/site';
 import { useNavigate } from 'react-router-dom';
-import { ApiError, setToken } from '../lib/api/client';
+import { ApiError, setSession } from '../lib/api/client';
 import { authApi } from '../lib/api/endpoints';
 
 export function LoginPage() {
@@ -19,7 +19,8 @@ export function LoginPage() {
   const login = useMutation({
     mutationFn: () => authApi.login(email.trim(), password),
     onSuccess: (result) => {
-      setToken(result.accessToken);
+      // 同时保存访问令牌与刷新令牌（H5 与 PC 端口径一致，任务 6b）
+      setSession(result.accessToken, result.refreshToken);
       navigate('/dashboard', { replace: true });
     },
     onError: (mutationError: unknown) =>

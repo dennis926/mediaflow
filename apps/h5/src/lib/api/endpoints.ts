@@ -15,7 +15,7 @@ export interface MobileAuthUser {
 
 export const authApi = {
   login: (email: string, password: string) =>
-    api.post<{ accessToken: string; expiresIn: string; user: MobileAuthUser }>('/auth/login', { email, password }),
+    api.post<{ accessToken: string; refreshToken: string; expiresIn: string; user: MobileAuthUser }>('/auth/login', { email, password }),
   me: () => api.get<MobileAuthUser>('/auth/me'),
   changePassword: (currentPassword: string, newPassword: string) =>
     api.post<{ success: true }>('/auth/change-password', { currentPassword, newPassword }),
