@@ -1,6 +1,19 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { createReadStream, existsSync, mkdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import {
+  closeSync,
+  copyFileSync,
+  createReadStream,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readSync,
+  renameSync,
+  rmSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { extname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { Readable } from 'node:stream';
@@ -54,6 +67,43 @@ export const DEFAULT_MEDIA_TYPES = [
   'audio/mpeg',
   'audio/wav',
 ];
+
+/**
+ * 只读取文件头若干字节用于魔数判断 —— 大文件不必整块读进内存。
+ */
+export function readHead(path: string, bytes = 32): Buffer {
+  const fd = openSync(path, 'r');
+  try {
+    const buffer = Buffer.alloc(bytes);
+    const read = readSync(fd, buffer, 0, bytes, 0);
+    return buffer.subarray(0, Math.max(read, 0));
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/**
+ * 原子移动：优先 rename（同分区是原子操作）；跨分区（EXDEV）退化为 copyFile + unlink。
+ */
+export function moveAtomic(from: string, to: string): void {
+  try {
+    renameSync(from, to);
+    return;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EXDEV') throw error;
+  }
+  copyFileSync(from, to);
+  unlinkSync(from);
+}
+
+/** 尽力删除临时/残留文件（失败只记日志，不影响主流程）。 */
+function safeUnlink(path: string): void {
+  try {
+    if (existsSync(path)) unlinkSync(path);
+  } catch {
+    /* ignore */
+  }
+}
 
 function kindOf(mimeType: string): MediaKind {
   if (mimeType.startsWith('image/')) return 'image';
@@ -116,6 +166,72 @@ export class MediaService {
       throw new BadRequestException(`文件过大（${(size / 1024 / 1024).toFixed(1)}MB），上限 ${config.maxFileMb}MB（可在「设置 → 素材库」调整）`);
     }
     if (size === 0) throw new BadRequestException('文件内容为空');
+  }
+
+  /**
+   * 从磁盘临时文件完成上传（任务 4 / 审计 P2-3 的主路径）。
+   *
+   * 流程：读文件头做魔数+白名单+大小校验 → 原子移动到最终目录 → 落库。
+   * 任何一步失败都会删掉临时文件（校验失败）或最终文件（落库失败），不留垃圾。
+   */
+  async uploadFromTemp(
+    file: { path: string; originalname: string; mimetype: string; size: number },
+    actor: MediaActor,
+    groupName?: string,
+  ): Promise<MediaAsset> {
+    const scope = await this.workspaceContext.current();
+    const dir = this.storageDir();
+    const extension = extname(file.originalname).slice(0, 12) || '';
+    const storedName = `${randomUUID()}${extension}`;
+    const destination = join(dir, storedName);
+    let moved = false;
+
+    try {
+      // 只读文件头就能判断真实类型，避免大文件进内存
+      const head = readHead(file.path, 32);
+      this.assertAllowed(file.mimetype, file.size, head);
+      const detected = detectMimeType(head) ?? file.mimetype;
+
+      mkdirSync(dir, { recursive: true });
+      moveAtomic(file.path, destination);
+      moved = true;
+
+      const saved = await this.assets.save(
+        this.assets.create({
+          tenantId: scope.tenantId,
+          workspaceId: scope.workspaceId,
+          storedName,
+          originalName: file.originalname,
+          // 以文件头识别出的真实类型入库（不信任客户端声明）
+          mimeType: detected,
+          kind: kindOf(detected),
+          size: String(file.size),
+          url: this.publicUrl(storedName),
+          uploadedBy: actor.id ?? null,
+          uploadedByName: actor.name ?? null,
+          groupName: groupName?.trim() ? groupName.trim() : null,
+          deletedAt: null,
+        }),
+      );
+
+      await this.audit.record({
+        action: 'media.upload',
+        resourceType: 'media_asset',
+        resourceId: saved.id,
+        tenantId: scope.tenantId,
+        workspaceId: scope.workspaceId,
+        actorId: actor.id ?? null,
+        actorName: actor.name ?? null,
+        payload: { originalName: file.originalname, mimeType: detected, declaredType: file.mimetype, size: file.size, mode: 'disk' },
+      });
+      this.logger.log(`素材已上传（磁盘暂存）：${file.originalname}（${(file.size / 1024).toFixed(0)}KB）`);
+      return saved;
+    } catch (error) {
+      // 校验失败：删临时文件；移动成功但落库失败：连最终文件一起清掉
+      safeUnlink(file.path);
+      if (moved) safeUnlink(destination);
+      throw error;
+    }
   }
 
   async upload(

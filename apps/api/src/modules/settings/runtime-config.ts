@@ -152,6 +152,12 @@ export interface AuthRuntimeConfig {
 export interface MediaRuntimeConfig {
   /** 素材存放目录（相对仓库根或绝对路径，可指向挂载盘/对象存储挂载点） */
   storageDir: string;
+  /** 上传临时目录（留空=系统临时目录下的 mediaflow-upload），权限 0700 */
+  tmpDir: string;
+  /** 同一用户同时进行的上传数上限（0=不限），超限返回 429 */
+  maxConcurrentUploads: number;
+  /** 上传并发计数的 TTL（秒），进程被杀也能自动解锁 */
+  uploadLockTtlSeconds: number;
   maxFileMb: number;
   /** 允许的 MIME 类型白名单 */
   allowedTypes: string[];
@@ -305,6 +311,9 @@ export const DEFAULT_AUTH_RUNTIME: AuthRuntimeConfig = { accessExpires: '2h', re
 
 export const DEFAULT_MEDIA_RUNTIME: MediaRuntimeConfig = {
   storageDir: 'uploads/media',
+  tmpDir: '',
+  maxConcurrentUploads: 3,
+  uploadLockTtlSeconds: 60,
   maxFileMb: 50,
   allowedTypes: [
     'image/jpeg',
@@ -439,6 +448,9 @@ export function applyRuntimeConfig(flat: Record<string, string | undefined>, onE
 
   snapshot.media = {
     storageDir: text(flat.MEDIA_STORAGE_DIR, DEFAULT_MEDIA_RUNTIME.storageDir),
+    tmpDir: text(flat.MEDIA_TMP_DIR, DEFAULT_MEDIA_RUNTIME.tmpDir),
+    maxConcurrentUploads: num(flat.MEDIA_MAX_CONCURRENT_UPLOADS, DEFAULT_MEDIA_RUNTIME.maxConcurrentUploads, 0, 50),
+    uploadLockTtlSeconds: num(flat.MEDIA_UPLOAD_TTL_SECONDS, DEFAULT_MEDIA_RUNTIME.uploadLockTtlSeconds, 10, 3600),
     maxFileMb: num(flat.MEDIA_MAX_FILE_MB, DEFAULT_MEDIA_RUNTIME.maxFileMb, 1, 2048),
     allowedTypes: (() => {
       const raw = flat.MEDIA_ALLOWED_TYPES?.trim();

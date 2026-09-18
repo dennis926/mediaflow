@@ -3,9 +3,7 @@ import {
   Controller,
   Delete,
   Get,
-  MaxFileSizeValidator,
   Param,
-  ParseFilePipe,
   ParseUUIDPipe,
   Post,
   Query,
@@ -13,9 +11,7 @@ import {
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
-import { memoryStorage } from 'multer';
 import { Public } from '../auth/public.decorator';
 import { AuthUser } from '../auth/auth.types';
 import { toActor } from '../auth/actor.util';
@@ -24,9 +20,7 @@ import { CurrentUser } from '../auth/current-user.decorator';
 import { MediaAsset } from './entities/media-asset.entity';
 import { MediaPage, MediaService } from './media.service';
 import { MediaService as Service } from './media.service';
-
-/** 上传层的硬上限：真正的业务上限来自配置 MEDIA_MAX_FILE_MB，这里只防内存被打爆。 */
-const UPLOAD_CEILING_BYTES = 2048 * 1024 * 1024;
+import { MediaUploadInterceptor } from './media-upload.interceptor';
 
 interface UploadMediaDto {
   groupName?: string;
@@ -36,17 +30,22 @@ interface UploadMediaDto {
 export class MediaController {
   constructor(private readonly mediaService: MediaService) {}
 
+  /**
+   * 上传素材。
+   *
+   * 文件由 MediaUploadInterceptor 流式写到磁盘临时目录（不再整块进内存），
+   * 超限由 multer 拦成 413，并发超限拦成 429；这里只负责校验 + 原子移动 + 落库。
+   */
   @Post()
   @Capability('content.write')
-  @UseInterceptors(FileInterceptor('file', { storage: memoryStorage(), limits: { fileSize: UPLOAD_CEILING_BYTES } }))
+  @UseInterceptors(MediaUploadInterceptor)
   upload(
-    @UploadedFile(new ParseFilePipe({ validators: [new MaxFileSizeValidator({ maxSize: UPLOAD_CEILING_BYTES })] }))
-    file: Express.Multer.File,
+    @UploadedFile() file: { path: string; originalname: string; mimetype: string; size: number },
     @Body() dto: UploadMediaDto,
     @CurrentUser() user?: AuthUser,
   ): Promise<MediaAsset> {
-    return this.mediaService.upload(
-      { originalname: file.originalname, buffer: file.buffer, size: file.size, mimetype: file.mimetype },
+    return this.mediaService.uploadFromTemp(
+      { path: file.path, originalname: file.originalname, size: file.size, mimetype: file.mimetype },
       toActor(user),
       dto.groupName,
     );
