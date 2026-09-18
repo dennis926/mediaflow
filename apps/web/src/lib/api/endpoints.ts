@@ -12,6 +12,7 @@ import type {
   CommitImportResult,
   ComplianceReport,
   Content,
+  ContentRevisionItem,
   ContentVariant,
   ImportResult,
   KnowledgeAuditReport,
@@ -21,6 +22,9 @@ import type {
   KnowledgeImportResult,
   KnowledgeDraft,
   KnowledgeItem,
+  AiUsageSummary,
+  AuditLogItem,
+  MediaAssetItem,
   SiteConfigView,
   KnowledgeMatchItem,
   KnowledgeSourceGroup,
@@ -103,6 +107,13 @@ export const contentApi = {
   variants: (id: string) => api.get<ContentVariant[]>(`/contents/${id}/variants`),
   aiAdapt: (id: string, payload: { platforms: PlatformCode[]; tone?: string; keywords?: string[]; overwrite?: boolean }) =>
     api.post<AdaptResult>(`/contents/${id}/ai-adapt`, payload),
+  /** 批量归档/取消归档/删除（逐条返回失败原因） */
+  batch: (ids: string[], action: 'archive' | 'unarchive' | 'delete') =>
+    api.post<{ affected: number; failed: Array<{ id: string; reason: string }> }>('/contents/batch', { ids, action }),
+  /** 版本历史（新到旧） */
+  revisions: (id: string) => api.get<ContentRevisionItem[]>(`/contents/${id}/revisions`),
+  /** 回滚到指定版本 */
+  restoreRevision: (id: string, revisionId: string) => api.post<Content>(`/contents/${id}/revisions/${revisionId}/restore`, {}),
   aiFlagCheck: (id: string, checked: boolean, note?: string) =>
     api.patch<Content>(`/contents/${id}/ai-flag-check`, { checked, note }),
 };
@@ -122,6 +133,9 @@ export const publishApi = {
   adapters: () => api.get<AdapterDescriptor[]>('/publish/adapters'),
   retry: (id: string) => api.post<PublishTask>(`/publish/tasks/${id}/retry`),
   cancel: (id: string) => api.delete<PublishTask>(`/publish/tasks/${id}`),
+  /** 批量取消/重试 */
+  batch: (ids: string[], action: 'cancel' | 'retry') =>
+    api.post<{ affected: number; failed: Array<{ id: string; reason: string }> }>('/publish/tasks/batch', { ids, action }),
   calendar: (weekStart?: string) => api.get<CalendarDay[]>('/publish/calendar', { weekStart }),
   queueStats: () => api.get<QueueStats>('/publish/queue/stats'),
 };
@@ -132,6 +146,7 @@ export const aiApi = {
     api.post<{ titles: string[]; generationId: string }>('/ai/optimize-title', payload),
   complianceCheck: (payload: { text: string; platform?: PlatformCode; useAiReview?: boolean }) =>
     api.post<ComplianceReport>('/ai/compliance-check', payload),
+  usage: (days = 14) => api.get<AiUsageSummary>('/ai/usage', { days }),
   generations: (query: { page?: number; pageSize?: number; taskType?: string }) =>
     api.get<Paged<AiGeneration>>('/ai/generations', { ...query }),
 };
@@ -187,6 +202,27 @@ export const accountsApi = {
 /** 站点信息（未登录可读）：登录页、侧边栏、浏览器标题都用它 */
 export const publicApi = {
   siteConfig: () => api.get<SiteConfigView>('/public/site-config'),
+};
+
+/** 审计日志：谁在什么时候改了什么 */
+export const auditApi = {
+  list: (query: { action?: string; actionPrefix?: string; actor?: string; keyword?: string; from?: string; to?: string; page?: number; pageSize?: number } = {}) =>
+    api.get<Paged<AuditLogItem>>('/audit-logs', { ...query }),
+  actions: (days = 90) => api.get<Array<{ action: string; count: number }>>('/audit-logs/actions', { days }),
+};
+
+/** 素材库：图片/视频上传与选择（发布到平台必需） */
+export const mediaApi = {
+  list: (query: { kind?: string; keyword?: string; group?: string; page?: number; pageSize?: number } = {}) =>
+    api.get<Paged<MediaAssetItem>>('/media', { ...query }),
+  groups: () => api.get<Array<{ group: string; count: number }>>('/media/groups'),
+  upload: (file: File, groupName?: string) => {
+    const form = new FormData();
+    form.append('file', file);
+    if (groupName) form.append('groupName', groupName);
+    return apiUpload<MediaAssetItem>('/media', form);
+  },
+  remove: (id: string) => api.delete<{ id: string }>(`/media/${id}`),
 };
 
 export const knowledgeApi = {

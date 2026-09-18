@@ -239,6 +239,82 @@ export class AiService {
     return report;
   }
 
+  /**
+   * AI 用量与花费统计：按天、按任务类型、按模型聚合。
+   * 花费依赖配置的 token 单价（设置 → AI 服务），未配置时为 0。
+   */
+  async usage(days = 14): Promise<{
+    summary: { calls: number; failed: number; tokensInput: number; tokensOutput: number; cost: string; avgLatencyMs: number; priceConfigured: boolean };
+    byDay: Array<{ date: string; calls: number; tokens: number; cost: string }>;
+    byTask: Array<{ taskType: string; calls: number; tokens: number; cost: string }>;
+    byModel: Array<{ model: string; calls: number; tokens: number; cost: string }>;
+  }> {
+    const scope = await this.workspaceContext.current();
+    const since = new Date(Date.now() - Math.min(Math.max(days, 1), 180) * 86_400_000);
+    const rows = await this.generations.find({
+      where: { workspaceId: scope.workspaceId, createdAt: MoreThan(since) },
+      order: { createdAt: 'DESC' },
+      take: 20_000,
+    });
+
+    const costOf = (value: string | null | undefined): number => Number(value ?? 0) || 0;
+    const dayKey = (date: Date): string => {
+      // 按北京时间归档，避免"昨天/今天"错位
+      const shifted = new Date(date.getTime() + 8 * 3600_000);
+      return shifted.toISOString().slice(0, 10);
+    };
+
+    const dayMap = new Map<string, { calls: number; tokens: number; cost: number }>();
+    const taskMap = new Map<string, { calls: number; tokens: number; cost: number }>();
+    const modelMap = new Map<string, { calls: number; tokens: number; cost: number }>();
+    let tokensInput = 0;
+    let tokensOutput = 0;
+    let cost = 0;
+    let failed = 0;
+    let latencyTotal = 0;
+
+    for (const row of rows) {
+      const tokens = (row.tokensInput ?? 0) + (row.tokensOutput ?? 0);
+      const entryCost = costOf(row.cost);
+      tokensInput += row.tokensInput ?? 0;
+      tokensOutput += row.tokensOutput ?? 0;
+      cost += entryCost;
+      latencyTotal += row.latencyMs ?? 0;
+      if (row.status === 'failed') failed += 1;
+
+      for (const [map, key] of [
+        [dayMap, dayKey(new Date(row.createdAt))],
+        [taskMap, row.taskType],
+        [modelMap, row.model ?? 'unknown'],
+      ] as Array<[Map<string, { calls: number; tokens: number; cost: number }>, string]>) {
+        const current = map.get(key) ?? { calls: 0, tokens: 0, cost: 0 };
+        map.set(key, { calls: current.calls + 1, tokens: current.tokens + tokens, cost: current.cost + entryCost });
+      }
+    }
+
+    const sortedDays = [...dayMap.entries()].sort((left, right) => right[0].localeCompare(left[0])).slice(0, days);
+    const priceConfigured = runtime().ai.priceInputPerMTok > 0 || runtime().ai.priceOutputPerMTok > 0;
+
+    return {
+      summary: {
+        calls: rows.length,
+        failed,
+        tokensInput,
+        tokensOutput,
+        cost: cost.toFixed(6),
+        avgLatencyMs: rows.length > 0 ? Math.round(latencyTotal / rows.length) : 0,
+        priceConfigured,
+      },
+      byDay: sortedDays.map(([date, value]) => ({ date, calls: value.calls, tokens: value.tokens, cost: value.cost.toFixed(6) })),
+      byTask: [...taskMap.entries()]
+        .sort((left, right) => right[1].calls - left[1].calls)
+        .map(([taskType, value]) => ({ taskType, calls: value.calls, tokens: value.tokens, cost: value.cost.toFixed(6) })),
+      byModel: [...modelMap.entries()]
+        .sort((left, right) => right[1].calls - left[1].calls)
+        .map(([model, value]) => ({ model, calls: value.calls, tokens: value.tokens, cost: value.cost.toFixed(6) })),
+    };
+  }
+
   async listGenerations(query: { taskType?: AiTaskType; page?: number; pageSize?: number }): Promise<{
     items: AiGeneration[];
     meta: { page: number; pageSize: number; total: number; totalPages: number };

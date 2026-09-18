@@ -304,6 +304,201 @@ a {
   animation: shimmer 1.4s ease infinite;
 }
 
+/* ---------- lists & review cards ---------- */
+.list-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mf-space-3);
+}
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mf-space-2);
+  align-items: center;
+  text-align: center;
+  padding: var(--mf-space-8) var(--mf-space-4);
+}
+
+.review-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mf-space-2);
+}
+
+.review-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--mf-space-3);
+}
+
+.review-card-head .title {
+  font-size: var(--mf-font-size-lg);
+  font-weight: var(--mf-font-weight-medium);
+  word-break: break-word;
+}
+
+.review-card-head .tag {
+  flex: 0 0 auto;
+}
+
+.task-card-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--mf-space-2);
+  flex-wrap: wrap;
+  font-size: var(--mf-font-size-xs);
+  color: var(--mf-color-text-tertiary);
+}
+
+.btn-row {
+  display: flex;
+  gap: var(--mf-space-3);
+  margin-top: var(--mf-space-2);
+}
+
+.btn-row .btn {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.btn-danger { background: var(--mf-color-danger-500); color: var(--mf-color-text-inverse); }
+.btn-danger:disabled { opacity: 0.55; }
+.btn:disabled { cursor: not-allowed; }
+
+/* ---------- pull to refresh ---------- */
+.pull-indicator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  font-size: var(--mf-font-size-sm);
+  color: var(--mf-color-text-tertiary);
+  transition: height var(--mf-duration-fast) var(--mf-easing-standard);
+}
+
+/* ---------- profile ---------- */
+.profile-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mf-space-3);
+}
+
+.profile-identity {
+  display: flex;
+  align-items: center;
+  gap: var(--mf-space-3);
+}
+
+.avatar {
+  flex: 0 0 auto;
+  width: var(--mf-size-touch-min);
+  height: var(--mf-size-touch-min);
+  border-radius: var(--mf-radius-full);
+  background: var(--mf-color-brand-500);
+  color: var(--mf-color-text-inverse);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--mf-font-size-xl);
+  font-weight: var(--mf-font-weight-semibold);
+}
+
+.profile-text {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mf-space-1);
+  min-width: 0;
+}
+
+.profile-text strong {
+  font-size: var(--mf-font-size-lg);
+  word-break: break-word;
+}
+
+.profile-text .muted {
+  word-break: break-all;
+}
+
+.profile-roles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--mf-space-2);
+}
+
+.password-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mf-space-4);
+  margin-top: var(--mf-space-4);
+}
+
+.field textarea {
+  padding: var(--mf-space-3);
+  border-radius: var(--mf-radius-md);
+  border: 1px solid var(--mf-color-border-base);
+  background: var(--mf-color-bg-surface);
+  color: var(--mf-color-text-primary);
+  resize: vertical;
+  line-height: var(--mf-font-lineHeight-normal);
+}
+
+.field textarea:focus {
+  outline: none;
+  border-color: var(--mf-color-border-focus);
+  box-shadow: var(--mf-shadow-focus);
+}
+
+.field-error {
+  font-size: var(--mf-font-size-xs);
+  color: var(--mf-color-danger-600);
+}
+
+/* ---------- bottom sheet dialog ---------- */
+.modal-mask {
+  position: fixed;
+  inset: 0;
+  z-index: var(--mf-zIndex-modal);
+  background: var(--mf-color-bg-mask);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.modal-card {
+  width: 100%;
+  max-width: var(--mf-size-h5-viewport);
+  background: var(--mf-color-bg-surface);
+  border-radius: var(--mf-radius-xl) var(--mf-radius-xl) 0 0;
+  padding: var(--mf-space-4);
+  padding-bottom: calc(var(--mf-space-4) + env(safe-area-inset-bottom, 0px));
+  box-shadow: var(--mf-shadow-xl);
+}
+
+.modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mf-space-2);
+}
+
+.modal-title {
+  margin: 0;
+  font-size: var(--mf-font-size-xl);
+  font-weight: var(--mf-font-weight-semibold);
+}
+
+.modal-actions {
+  display: flex;
+  gap: var(--mf-space-3);
+  margin-top: var(--mf-space-4);
+}
+
+.modal-actions .btn {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
 @keyframes shimmer {
   from { background-position: 100% 50%; }
   to { background-position: 0 50%; }

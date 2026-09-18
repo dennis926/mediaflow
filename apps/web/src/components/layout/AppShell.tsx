@@ -20,6 +20,7 @@ import {
   PublishIcon,
   WarningIcon,
   SettingsIcon,
+  SparkleIcon,
 } from '../../lib/icons';
 import { NotificationBell } from './NotificationBell';
 import { PasswordDialog } from './PasswordDialog';
@@ -33,16 +34,22 @@ const NAV_ITEMS: SidebarItem[] = [
   { href: '/publish/queue', label: '发布队列', icon: <PublishIcon /> },
   { href: '/publish/calendar', label: '排期日历', icon: <CalendarIcon /> },
   { href: '/reviews', label: '内容审核', icon: <ReviewIcon /> },
+  { href: '/media', label: '素材库', icon: <ContentIcon /> },
   { href: '/knowledge', label: '知识库管理', icon: <KnowledgeIcon /> },
   { href: '/analytics', label: '数据中心', icon: <AnalyticsIcon /> },
   { href: '/accounts', label: '账号管理', icon: <AccountIcon /> },
   { href: '/users', label: '用户管理', icon: <AccountIcon /> },
+  { href: '/ai-usage', label: 'AI 用量', icon: <SparkleIcon /> },
+  { href: '/audit', label: '审计日志', icon: <ReviewIcon /> },
   { href: '/settings', label: '系统设置', icon: <SettingsIcon /> },
 ];
 
 const PAGE_META: Array<{ prefix: string; title: string; subtitle: string }> = [
+  { prefix: '/ai-usage', title: 'AI 用量与花费', subtitle: '调用次数、token 消耗与成本估算' },
+  { prefix: '/audit', title: '审计日志', subtitle: '谁在什么时候改了什么' },
   { prefix: '/settings', title: '系统设置', subtitle: 'AI 与平台密钥、发布队列参数' },
   { prefix: '/reviews', title: '内容审核', subtitle: '提交审核与审核决定' },
+  { prefix: '/media', title: '素材库', subtitle: '图片与视频素材：上传、分组、复制外链' },
   { prefix: '/knowledge', title: '知识库管理', subtitle: '品牌资料维护 · AI 生成时的引用口径' },
   { prefix: '/users', title: '用户管理', subtitle: '成员、角色与密码管理' },
   { prefix: '/analytics', title: '数据中心', subtitle: '核心指标、趋势与账号排行' },

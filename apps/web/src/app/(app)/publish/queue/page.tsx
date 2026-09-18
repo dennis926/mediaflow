@@ -52,6 +52,7 @@ export default function PublishQueuePage() {
   const [page, setPage] = useState(1);
   const [detail, setDetail] = useState<PublishTask | null>(null);
   const [feedback, setFeedback] = useState<{ tone: 'success' | 'danger' | 'info'; text: string } | null>(null);
+  const [selected, setSelected] = useState<string[]>([]);
 
   const tab = TABS.find((item) => item.key === active) ?? TABS[0];
   const tasks = useQuery({
@@ -82,7 +83,48 @@ export default function PublishQueuePage() {
       setFeedback({ tone: 'danger', text: error instanceof ApiError ? error.message : '重试失败' }),
   });
 
+  const batch = useMutation({
+    mutationFn: ({ ids, action }: { ids: string[]; action: 'cancel' | 'retry' }) => publishApi.batch(ids, action),
+    onSuccess: (result, variables) => {
+      const label = variables.action === 'cancel' ? '取消' : '重试';
+      setFeedback({
+        tone: 'info',
+        text:
+          result.failed.length === 0
+            ? `批量${label}完成：${result.affected} 条`
+            : `批量${label}：成功 ${result.affected} 条，失败 ${result.failed.length} 条（${result.failed[0].reason}）`,
+      });
+      setSelected([]);
+      void queryClient.invalidateQueries({ queryKey: ['publish', 'queue'] });
+      void queryClient.invalidateQueries({ queryKey: ['publish', 'calendar'] });
+    },
+    onError: (error: unknown) => setFeedback({ tone: 'danger', text: error instanceof ApiError ? error.message : '批量操作失败' }),
+  });
+
+  const rows = tasks.data?.items ?? [];
+  const allSelected = rows.length > 0 && rows.every((row) => selected.includes(row.id));
+
   const columns: Array<Column<PublishTask>> = [
+    {
+      key: 'select',
+      title: (
+        <input
+          type="checkbox"
+          aria-label="全选"
+          checked={allSelected}
+          onChange={(event) => setSelected(event.target.checked ? rows.map((row) => row.id) : [])}
+        />
+      ),
+      width: '44px',
+      render: (row) => (
+        <input
+          type="checkbox"
+          aria-label={`选择任务 ${row.id}`}
+          checked={selected.includes(row.id)}
+          onChange={(event) => setSelected((prev) => (event.target.checked ? [...prev, row.id] : prev.filter((id) => id !== row.id)))}
+        />
+      ),
+    },
     {
       key: 'content',
       title: '内容',
@@ -159,6 +201,23 @@ export default function PublishQueuePage() {
             知道了
           </button>
         </Banner>
+      ) : null}
+
+      {selected.length > 0 ? (
+        <Card>
+          <div className={styles.bulkBar}>
+            <span className={styles.meta}>已选 {selected.length} 条</span>
+            <Button variant="secondary" size="sm" loading={batch.isPending} onClick={() => batch.mutate({ ids: selected, action: 'retry' })}>
+              批量重试
+            </Button>
+            <Button variant="secondary" size="sm" loading={batch.isPending} onClick={() => batch.mutate({ ids: selected, action: 'cancel' })}>
+              批量取消
+            </Button>
+            <Button variant="text" size="sm" onClick={() => setSelected([])}>
+              取消选择
+            </Button>
+          </div>
+        </Card>
       ) : null}
 
       <Card flush>

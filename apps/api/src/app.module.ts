@@ -9,6 +9,7 @@ import { JwtAuthGuard } from './modules/auth/jwt-auth.guard';
 import { RolesGuard } from './modules/auth/roles.guard';
 import { CapabilityGuard } from './modules/auth/capability.guard';
 import { AnalyticsModule } from './modules/analytics/analytics.module';
+import { MediaModule } from './modules/media/media.module';
 import { NotificationModule } from './modules/notification/notification.module';
 import { PlatformModule } from './modules/platform/platform.module';
 import { WorkspaceModule } from './modules/workspace/workspace.module';
@@ -44,6 +45,7 @@ import { RedisModule } from './redis/redis.module';
     ContentModule,
     AuthModule,
     SettingsModule,
+    MediaModule,
     NotificationModule,
     AnalyticsModule,
     PlatformModule,

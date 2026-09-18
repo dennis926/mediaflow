@@ -107,8 +107,21 @@ export interface AuthRuntimeConfig {
   refreshExpires: string;
 }
 
+export interface MediaRuntimeConfig {
+  /** 素材存放目录（相对仓库根或绝对路径，可指向挂载盘/对象存储挂载点） */
+  storageDir: string;
+  maxFileMb: number;
+  /** 允许的 MIME 类型白名单 */
+  allowedTypes: string[];
+  /** 对外访问前缀；留空则用 /api/public/media/<文件名> */
+  publicBaseUrl: string;
+  /** 内容版本历史保留条数，0 = 不留历史 */
+  contentHistoryLimit: number;
+}
+
 export interface RuntimeConfig {
   site: SiteConfig;
+  media: MediaRuntimeConfig;
   auth: AuthRuntimeConfig;
   knowledge: KnowledgeRuntimeConfig;
   ai: AiRuntimeConfig;
@@ -216,6 +229,7 @@ export const DEFAULT_PERMISSION_MATRIX_RUNTIME: Record<string, string[]> = {
   'knowledge.write': ['owner', 'admin', 'editor'],
   'platform.bind': ['owner', 'admin'],
   'analytics.sync': ['owner', 'admin'],
+  'audit.read': ['owner', 'admin'],
 };
 
 export const DEFAULT_ROLE_LABELS_RUNTIME: Record<string, string> = {
@@ -228,9 +242,28 @@ export const DEFAULT_ROLE_LABELS_RUNTIME: Record<string, string> = {
 
 export const DEFAULT_AUTH_RUNTIME: AuthRuntimeConfig = { accessExpires: '2h', refreshExpires: '7d' };
 
+export const DEFAULT_MEDIA_RUNTIME: MediaRuntimeConfig = {
+  storageDir: 'uploads/media',
+  maxFileMb: 50,
+  allowedTypes: [
+    'image/jpeg',
+    'image/png',
+    'image/webp',
+    'image/gif',
+    'video/mp4',
+    'video/quicktime',
+    'video/webm',
+    'audio/mpeg',
+    'audio/wav',
+  ],
+  publicBaseUrl: '',
+  contentHistoryLimit: 20,
+};
+
 const snapshot: RuntimeConfig = {
   site: { ...DEFAULT_SITE },
   auth: { ...DEFAULT_AUTH_RUNTIME },
+  media: { ...DEFAULT_MEDIA_RUNTIME },
   knowledge: { ...DEFAULT_KNOWLEDGE_RUNTIME },
   ai: { ...DEFAULT_AI_RUNTIME, platformGuidance: { ...DEFAULT_AI_RUNTIME.platformGuidance } },
   compliance: DEFAULT_COMPLIANCE_RULES.map((rule) => ({ ...rule, terms: [...rule.terms] })),
@@ -300,6 +333,21 @@ export function applyRuntimeConfig(flat: Record<string, string | undefined>, onE
     logoUrl: text(flat.SITE_LOGO_URL, DEFAULT_SITE.logoUrl),
     pageSize: num(flat.UI_PAGE_SIZE, DEFAULT_SITE.pageSize, 5, 100),
     aiDisclosureSuffix: text(flat.AI_DISCLOSURE_SUFFIX, DEFAULT_SITE.aiDisclosureSuffix),
+  };
+
+  snapshot.media = {
+    storageDir: text(flat.MEDIA_STORAGE_DIR, DEFAULT_MEDIA_RUNTIME.storageDir),
+    maxFileMb: num(flat.MEDIA_MAX_FILE_MB, DEFAULT_MEDIA_RUNTIME.maxFileMb, 1, 2048),
+    allowedTypes: (() => {
+      const raw = flat.MEDIA_ALLOWED_TYPES?.trim();
+      if (!raw) return DEFAULT_MEDIA_RUNTIME.allowedTypes;
+      return raw
+        .split(/[,，\s]+/)
+        .map((item) => item.trim())
+        .filter(Boolean);
+    })(),
+    publicBaseUrl: text(flat.MEDIA_PUBLIC_BASE_URL, DEFAULT_MEDIA_RUNTIME.publicBaseUrl),
+    contentHistoryLimit: num(flat.CONTENT_HISTORY_LIMIT, DEFAULT_MEDIA_RUNTIME.contentHistoryLimit, 0, 200),
   };
 
   snapshot.knowledge = {
@@ -386,6 +434,7 @@ export function defaultConfigSnapshot(): RuntimeConfig {
   return {
     site: { ...DEFAULT_SITE },
     auth: { ...DEFAULT_AUTH_RUNTIME },
+    media: { ...DEFAULT_MEDIA_RUNTIME },
     knowledge: { ...DEFAULT_KNOWLEDGE_RUNTIME },
     ai: { ...DEFAULT_AI_RUNTIME, platformGuidance: { ...DEFAULT_AI_RUNTIME.platformGuidance } },
     compliance: DEFAULT_COMPLIANCE_RULES.map((rule) => ({ ...rule, terms: [...rule.terms] })),

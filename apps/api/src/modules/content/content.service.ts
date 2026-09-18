@@ -8,6 +8,7 @@ import { WorkspaceContextService } from '../../common/workspace-context.service'
 import { AiService } from '../ai/ai.service';
 import { KnowledgeService } from './knowledge.service';
 import { AiAdaptDto } from '../ai/dto/ai.dto';
+import { ContentRevision } from './entities/content-revision.entity';
 import { ContentVariant } from './entities/content-variant.entity';
 import { Content } from './entities/content.entity';
 import type { KnowledgeMatch } from './knowledge.service';
@@ -42,6 +43,7 @@ export class ContentService {
   constructor(
     @InjectRepository(Content) private readonly contents: Repository<Content>,
     @InjectRepository(ContentVariant) private readonly variants: Repository<ContentVariant>,
+    @InjectRepository(ContentRevision) private readonly revisions: Repository<ContentRevision>,
     private readonly aiService: AiService,
     private readonly knowledgeService: KnowledgeService,
     private readonly audit: AuditService,
@@ -140,6 +142,11 @@ export class ContentService {
       status: contentChanged && previousStatus === ContentStatus.Approved ? ContentStatus.Draft : (dto.status ?? content.status),
     });
 
+    // 保存前把"上一版"留档，改错可回滚（保留条数可配置）
+    if (contentChanged) {
+      await this.snapshot(content, actor, '编辑保存');
+    }
+
     const saved = await this.contents.save(content);
     await this.record(saved, 'content.update', actor, {
       aiFlagType,
@@ -149,6 +156,106 @@ export class ContentService {
       this.logger.log(`内容已修改，审核结论失效并退回草稿：${saved.title}`);
     }
     return saved;
+  }
+
+  /** 把当前状态存成一条历史版本，并按配置裁剪超出的旧版本。 */
+  private async snapshot(content: Content, actor: ContentActor, note: string): Promise<void> {
+    const limit = runtime().media.contentHistoryLimit;
+    if (limit <= 0) return;
+    try {
+      const scope = await this.workspaceContext.current();
+      const latest = await this.revisions.findOne({
+        where: { contentId: content.id },
+        order: { version: 'DESC' },
+      });
+      await this.revisions.save(
+        this.revisions.create({
+          tenantId: content.tenantId ?? scope.tenantId,
+          workspaceId: content.workspaceId ?? scope.workspaceId,
+          contentId: content.id,
+          version: (latest?.version ?? 0) + 1,
+          title: content.title,
+          summary: content.summary ?? null,
+          body: content.body,
+          tags: content.tags ?? [],
+          mediaUrls: content.mediaUrls ?? [],
+          coverUrl: content.coverUrl ?? null,
+          aiFlagType: content.aiFlagType,
+          status: content.status,
+          note,
+          createdBy: actor.id ?? null,
+          createdByName: actor.name ?? null,
+        }),
+      );
+
+      // 只保留最近 limit 条，避免历史无限增长
+      const all = await this.revisions.find({ where: { contentId: content.id }, order: { version: 'DESC' } });
+      const stale = all.slice(limit);
+      if (stale.length > 0) {
+        await this.revisions.remove(stale);
+      }
+    } catch (error) {
+      // 历史留档失败不能影响正常保存
+      this.logger.warn(`写入内容版本失败：${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  /** 版本历史列表（新到旧）。 */
+  async listRevisions(contentId: string): Promise<ContentRevision[]> {
+    await this.get(contentId);
+    return this.revisions.find({ where: { contentId }, order: { version: 'DESC' }, take: 100 });
+  }
+
+  /** 回滚到指定版本：先把当前状态留一份，再套用旧版本内容（审核结论会退回草稿）。 */
+  async restoreRevision(contentId: string, revisionId: string, actor: ContentActor): Promise<Content> {
+    const content = await this.get(contentId);
+    const revision = await this.revisions.findOne({ where: { id: revisionId, contentId } });
+    if (!revision) throw new NotFoundException('历史版本不存在');
+
+    await this.snapshot(content, actor, `恢复前留档（第 ${revision.version} 版）`);
+
+    await this.contents.update(
+      { id: contentId },
+      {
+        title: revision.title,
+        summary: revision.summary,
+        body: revision.body,
+        tags: revision.tags,
+        mediaUrls: revision.mediaUrls,
+        coverUrl: revision.coverUrl,
+        aiFlagType: revision.aiFlagType,
+        aiGenerated: revision.aiFlagType !== AiFlagType.None,
+        // 内容变了，之前的审核结论不再成立
+        status: ContentStatus.Draft,
+      },
+    );
+    await this.record(content, 'content.restore_revision', actor, { version: revision.version });
+    this.logger.log(`内容 ${contentId} 已回滚到第 ${revision.version} 版`);
+    return this.get(contentId);
+  }
+
+  /**
+   * 批量操作：归档/取消归档/删除。
+   * 返回成功数量与逐条失败原因，避免一条失败整批中断。
+   */
+  async batch(ids: string[], action: 'archive' | 'unarchive' | 'delete', actor: ContentActor): Promise<{ affected: number; failed: Array<{ id: string; reason: string }> }> {
+    const failed: Array<{ id: string; reason: string }> = [];
+    let affected = 0;
+    for (const id of ids) {
+      try {
+        if (action === 'delete') await this.remove(id, actor);
+        else await this.archive(id, action === 'archive', actor);
+        affected += 1;
+      } catch (error) {
+        failed.push({ id, reason: error instanceof Error ? error.message : String(error) });
+      }
+    }
+    await this.record({ id: ids[0] ?? '', title: '', tenantId: '', workspaceId: '' } as Content, `content.batch_${action}`, actor, {
+      total: ids.length,
+      affected,
+      failed: failed.length,
+    });
+    return { affected, failed };
   }
 
   /** Soft delete: the row is kept, only deleted_at is set, and it disappears from every query. */

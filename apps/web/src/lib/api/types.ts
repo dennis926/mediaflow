@@ -20,6 +20,8 @@ export interface AiGeneration {
   tokensInput: number;
   tokensOutput: number;
   latencyMs: number;
+  /** 估算花费（元），单价未配置时恒为 0 */
+  cost: string;
   createdAt: string;
 }
 
@@ -223,6 +225,51 @@ export interface SiteConfigView {
   /** 列表默认每页条数（可在「设置 → 站点信息」调整） */
   pageSize: number;
   aiDisclosureSuffix: string;
+}
+
+export interface ContentRevisionItem {
+  id: string;
+  contentId: string;
+  version: number;
+  title: string;
+  body: string;
+  status: string;
+  note: string | null;
+  createdByName: string | null;
+  createdAt: string;
+}
+
+export interface AuditLogItem {
+  id: string;
+  action: string;
+  resourceType: string;
+  resourceId: string | null;
+  actorId: string | null;
+  actorName: string | null;
+  ip: string | null;
+  userAgent: string | null;
+  payload: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface AiUsageSummary {
+  summary: { calls: number; failed: number; tokensInput: number; tokensOutput: number; cost: string; avgLatencyMs: number; priceConfigured: boolean };
+  byDay: Array<{ date: string; calls: number; tokens: number; cost: string }>;
+  byTask: Array<{ taskType: string; calls: number; tokens: number; cost: string }>;
+  byModel: Array<{ model: string; calls: number; tokens: number; cost: string }>;
+}
+
+export interface MediaAssetItem {
+  id: string;
+  storedName: string;
+  originalName: string;
+  mimeType: string;
+  kind: 'image' | 'video' | 'audio' | 'file';
+  size: string;
+  url: string;
+  groupName: string | null;
+  uploadedByName: string | null;
+  createdAt: string;
 }
 
 export interface KnowledgeExportFile {

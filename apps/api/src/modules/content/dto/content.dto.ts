@@ -2,6 +2,7 @@ import { PartialType } from '@nestjs/mapped-types';
 import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
+  ArrayMinSize,
   IsArray,
   IsBoolean,
   IsIn,
@@ -62,6 +63,18 @@ export class CreateContentDto {
 export class ArchiveContentDto {
   @IsBoolean()
   archived!: boolean;
+}
+
+/** 批量操作：一次最多 100 条，避免误点把整库删了。 */
+export class BatchContentDto {
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(100)
+  @IsUUID('4', { each: true })
+  ids!: string[];
+
+  @IsIn(['archive', 'unarchive', 'delete'])
+  action!: 'archive' | 'unarchive' | 'delete';
 }
 
 export class UpdateContentDto extends PartialType(CreateContentDto) {}

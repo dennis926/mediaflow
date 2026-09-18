@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { AuditService } from '../../../audit/audit.service';
 import { WorkspaceContextService } from '../../../common/workspace-context.service';
 import { AiService } from '../../ai/ai.service';
+import { ContentRevision } from '../entities/content-revision.entity';
 import { ContentVariant } from '../entities/content-variant.entity';
 import { Content } from '../entities/content.entity';
 import { ContentService } from '../content.service';
@@ -31,6 +32,14 @@ interface ContentServiceHarness {
   manager: { softDelete: ReturnType<typeof vi.fn> };
   knowledge: { findRelevant: ReturnType<typeof vi.fn>; markUsed: ReturnType<typeof vi.fn> };
 }
+
+const revisions = {
+  findOne: vi.fn(async () => null),
+  find: vi.fn(async () => []),
+  save: vi.fn(async (value: unknown) => value),
+  create: vi.fn((value: unknown) => value),
+  remove: vi.fn(async () => undefined),
+} as unknown as Repository<ContentRevision>;
 
 function buildService(options: { existingVariants?: Partial<ContentVariant>[] } = {}): ContentServiceHarness {
   const contents = repositoryMock<Content>();
@@ -60,7 +69,7 @@ function buildService(options: { existingVariants?: Partial<ContentVariant>[] } 
     transaction: async (work: (m: typeof manager) => Promise<unknown>) => work(manager),
   } as unknown as import('typeorm').DataSource;
   return {
-    service: new ContentService(contents, variants, ai, knowledge as never, audit, workspaceContext, dataSource),
+    service: new ContentService(contents, variants, revisions, ai, knowledge as never, audit, workspaceContext, dataSource),
     contents,
     variants,
     ai,

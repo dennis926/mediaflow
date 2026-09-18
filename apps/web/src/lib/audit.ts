@@ -1,0 +1,62 @@
+/** 审计动作的中文说明：新增动作忘记翻译时会回退显示原始代码，不会空白。 */
+export const AUDIT_ACTION_LABELS: Record<string, string> = {
+  'auth.login': '登录',
+  'user.create': '创建用户',
+  'user.invite': '邀请用户',
+  'user.update': '修改用户',
+  'user.delete': '删除用户',
+  'user.reset_password': '重置密码',
+  'user.change_password': '修改密码',
+  'user.roles_changed': '调整角色',
+  'user.status_changed': '启用/停用账号',
+  'settings.update': '修改系统设置',
+  'content.create': '创建内容',
+  'content.update': '修改内容',
+  'content.delete': '删除内容',
+  'content.archive': '归档内容',
+  'content.unarchive': '取消归档',
+  'content.ai_adapt': 'AI 生成平台版本',
+  'content.ai_flag_checked': 'AI 标识复核',
+  'review.submit': '提交审核',
+  'review.approved': '审核通过',
+  'review.rejected': '审核驳回',
+  'review.changes_requested': '要求修改',
+  'publish_task.create': '创建发布任务',
+  'publish_task.retry': '重试发布',
+  'publish_task.cancel': '取消发布任务',
+  'publish_task.attempt_failed': '发布失败一次',
+  'publish_task.manual_required': '需人工发布',
+  'publish_task.awaiting_human': '等待人工确认',
+  'account.bind': '绑定平台账号',
+  'account.unbind': '解绑平台账号',
+  'knowledge.create': '新增品牌资料',
+  'knowledge.update': '修改品牌资料',
+  'knowledge.delete': '删除品牌资料',
+  'knowledge.import': '导入文档',
+  'knowledge.commit_import': '导入资料入库',
+  'knowledge.save_categories': '修改知识库分类',
+  'knowledge.ai_draft': 'AI 起草资料',
+  'knowledge.ai_polish': 'AI 润色资料',
+  'knowledge.batch_activate': '批量启用/停用资料',
+  'knowledge.batch_delete': '批量删除资料',
+  'media.upload': '上传素材',
+  'media.delete': '删除素材',
+};
+
+export function auditActionLabel(action: string): string {
+  return AUDIT_ACTION_LABELS[action] ?? action;
+}
+
+/** 动作按前缀归组，便于筛选。 */
+export const AUDIT_ACTION_GROUPS: Array<{ prefix: string; label: string }> = [
+  { prefix: '', label: '全部动作' },
+  { prefix: 'auth.', label: '登录相关' },
+  { prefix: 'content.', label: '内容相关' },
+  { prefix: 'review.', label: '审核相关' },
+  { prefix: 'publish_task.', label: '发布相关' },
+  { prefix: 'knowledge.', label: '知识库相关' },
+  { prefix: 'media.', label: '素材相关' },
+  { prefix: 'user.', label: '用户相关' },
+  { prefix: 'account.', label: '账号绑定' },
+  { prefix: 'settings.', label: '系统设置' },
+];

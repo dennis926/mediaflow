@@ -20,6 +20,12 @@ export class AiController {
     return this.aiService.describe();
   }
 
+  /** AI 用量与花费统计（读操作，所有登录角色可见） */
+  @Get('usage')
+  usage(@Query('days') days?: string) {
+    return this.aiService.usage(days ? Number(days) : 14);
+  }
+
   @Capability('content.write')
   @Post('generate')
   generate(

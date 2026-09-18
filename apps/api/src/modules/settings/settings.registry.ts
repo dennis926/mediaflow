@@ -1,4 +1,4 @@
-export type SettingGroup = 'site' | 'permissions' | 'ai' | 'compliance' | 'knowledge' | 'publish' | 'platform';
+export type SettingGroup = 'site' | 'permissions' | 'media' | 'ai' | 'compliance' | 'knowledge' | 'publish' | 'platform';
 
 export interface SettingDefinition {
   key: string;
@@ -131,7 +131,7 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
     group: 'permissions',
     label: '权限矩阵（JSON）',
     description:
-      '能力点 → 允许的角色。可用能力点：settings.write（改设置）、users.manage（管用户）、users.privileged（删用户/改角色）、content.write（写内容）、content.review（审核）、publish.execute（发布）、knowledge.write（知识库）、platform.bind（绑账号）、analytics.sync（同步数据）',
+      '能力点 → 允许的角色。可用能力点：settings.write（改设置）、users.manage（管用户）、users.privileged（删用户/改角色）、content.write（写内容）、content.review（审核）、publish.execute（发布）、knowledge.write（知识库）、platform.bind（绑账号）、analytics.sync（同步数据）、audit.read（看审计日志）',
     secret: false,
     envKey: 'PERMISSION_MATRIX',
     placeholder: '{"settings.write":["owner","admin"],"publish.execute":["owner","admin","editor"]}',
@@ -162,6 +162,50 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
     secret: false,
     envKey: 'ROLE_LABELS',
     placeholder: '{"admin":"运营主管"}',
+  },
+  {
+    key: 'CONTENT_HISTORY_LIMIT',
+    group: 'media',
+    label: '内容版本历史保留条数',
+    description: '每次保存前自动留一份上一版，改错可回滚；默认 20，填 0 表示不留历史',
+    secret: false,
+    envKey: 'CONTENT_HISTORY_LIMIT',
+    placeholder: '20',
+  },
+  {
+    key: 'MEDIA_STORAGE_DIR',
+    group: 'media',
+    label: '素材存放目录',
+    description: '相对仓库根或绝对路径；换服务器时可指到数据盘/对象存储挂载点',
+    secret: false,
+    envKey: 'MEDIA_STORAGE_DIR',
+    placeholder: 'uploads/media',
+  },
+  {
+    key: 'MEDIA_MAX_FILE_MB',
+    group: 'media',
+    label: '单个文件大小上限（MB）',
+    description: '默认 50',
+    secret: false,
+    envKey: 'MEDIA_MAX_FILE_MB',
+    placeholder: '50',
+  },
+  {
+    key: 'MEDIA_ALLOWED_TYPES',
+    group: 'media',
+    label: '允许的文件类型（MIME，逗号分隔）',
+    description: '默认图片 jpeg/png/webp/gif、视频 mp4/quicktime/webm、音频 mpeg/wav',
+    secret: false,
+    envKey: 'MEDIA_ALLOWED_TYPES',
+    placeholder: 'image/jpeg,image/png,image/webp,video/mp4',
+  },
+  {
+    key: 'MEDIA_PUBLIC_BASE_URL',
+    group: 'media',
+    label: '素材访问前缀',
+    description: '留空用 /api/public/media/；也可填 CDN/对象存储域名，例如 https://cdn.example.com/media',
+    secret: false,
+    envKey: 'MEDIA_PUBLIC_BASE_URL',
   },
   {
     key: 'AI_SYSTEM_PROMPT',
@@ -515,6 +559,7 @@ export const SETTING_BY_KEY = new Map(SETTING_DEFINITIONS.map((definition) => [d
 export const SETTING_GROUP_LABELS: Record<SettingGroup, string> = {
   site: '站点信息',
   permissions: '角色与权限',
+  media: '素材库',
   ai: 'AI 服务',
   compliance: '合规词库',
   knowledge: '知识库',

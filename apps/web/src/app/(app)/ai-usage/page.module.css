@@ -1,0 +1,60 @@
+.toolbar {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--mf-space-3);
+  flex-wrap: wrap;
+}
+
+.meta {
+  font-size: var(--mf-font-size-xs);
+  color: var(--mf-color-text-tertiary);
+}
+
+.mono {
+  font-size: var(--mf-font-size-sm);
+  font-variant-numeric: tabular-nums;
+  color: var(--mf-color-text-primary);
+}
+
+.statGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--mf-space-3);
+}
+
+@media (max-width: 900px) {
+  .statGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.statLabel {
+  font-size: var(--mf-font-size-xs);
+  color: var(--mf-color-text-tertiary);
+}
+
+.statValue {
+  font-size: var(--mf-font-size-2xl);
+  font-weight: var(--mf-font-weight-semibold);
+  color: var(--mf-color-text-primary);
+  line-height: var(--mf-line-height-tight);
+}
+
+.sectionTitle {
+  font-weight: var(--mf-font-weight-medium);
+  color: var(--mf-color-text-primary);
+}
+
+.sectionHead {
+  display: flex;
+  align-items: center;
+  gap: var(--mf-space-2);
+  padding: var(--mf-space-4) var(--mf-space-4) 0;
+}
+
+.modelRow {
+  display: flex;
+  gap: var(--mf-space-2);
+  flex-wrap: wrap;
+  padding: var(--mf-space-3) var(--mf-space-4);
+}

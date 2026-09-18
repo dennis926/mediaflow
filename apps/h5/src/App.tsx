@@ -1,8 +1,9 @@
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { TabBar } from './components/TabBar';
+import { ApprovalPage } from './pages/ApprovalPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { LoginPage } from './pages/LoginPage';
-import { PlaceholderPage } from './pages/PlaceholderPage';
+import { ProfilePage } from './pages/ProfilePage';
 import { QueuePage } from './pages/QueuePage';
 import { TaskDetailPage } from './pages/TaskDetailPage';
 import { getToken } from './lib/api/client';
@@ -47,7 +48,7 @@ export function App() {
           path="/approval"
           element={
             <RequireAuth>
-              <PlaceholderPage title="审批" hint="审批中心将在后续阶段实现（内容审批、发布审批）。" />
+              <ApprovalPage />
             </RequireAuth>
           }
         />
@@ -55,7 +56,7 @@ export function App() {
           path="/profile"
           element={
             <RequireAuth>
-              <PlaceholderPage title="我的" hint="账号信息与退出登录将在后续阶段实现。" />
+              <ProfilePage />
             </RequireAuth>
           }
         />

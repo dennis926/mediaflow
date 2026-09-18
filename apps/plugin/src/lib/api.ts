@@ -44,6 +44,19 @@ export interface SiteBranding {
   tagline: string;
 }
 
+/** Body of `POST /api/analytics/plugin-metrics` (see apps/api analytics plugin-metrics.dto.ts). */
+export interface PluginMetricsPayload {
+  platform: PlatformCode;
+  socialAccountId?: string;
+  contentId?: string;
+  postId?: string;
+  views?: number;
+  likes?: number;
+  comments?: number;
+  shares?: number;
+  favorites?: number;
+}
+
 const CONFIG_KEY = 'mediaflow.config';
 
 export async function loadConfig(): Promise<PluginConfig> {
@@ -98,16 +111,8 @@ export const api = {
   confirm: (taskId: string, platformUrl?: string) =>
     request<{ id: string }>(`/publish/tasks/${taskId}/retry`, { method: 'POST' }).then(() => ({ id: taskId, platformUrl })),
   /** Pushes numbers scraped from a platform analytics page. */
-  reportMetrics: (payload: {
-    platform: PlatformCode;
-    socialAccountId?: string;
-    views?: number;
-    likes?: number;
-    comments?: number;
-    shares?: number;
-    favorites?: number;
-    postId?: string;
-  }) => request<{ id: string }>('/analytics/plugin-metrics', { method: 'POST', body: JSON.stringify(payload) }),
+  reportMetrics: (payload: PluginMetricsPayload) =>
+    request<{ id: string }>('/analytics/plugin-metrics', { method: 'POST', body: JSON.stringify(payload) }),
 };
 
 /**

@@ -452,6 +452,36 @@ export class PublishService {
     return this.get(task.id);
   }
 
+  /** 批量取消/重试：逐条执行并返回失败原因，一条失败不影响其它。 */
+  async batch(
+    ids: string[],
+    action: 'cancel' | 'retry',
+    actor: PublishActor,
+  ): Promise<{ affected: number; failed: Array<{ id: string; reason: string }> }> {
+    const failed: Array<{ id: string; reason: string }> = [];
+    let affected = 0;
+    for (const id of ids) {
+      try {
+        if (action === 'cancel') await this.cancel(id, actor);
+        else await this.retry(id, actor);
+        affected += 1;
+      } catch (error) {
+        failed.push({ id, reason: error instanceof Error ? error.message : String(error) });
+      }
+    }
+    await this.audit.record({
+      action: `publish_task.batch_${action}`,
+      resourceType: 'publish_task',
+      resourceId: ids[0] ?? null,
+      tenantId: '00000000-0000-0000-0000-000000000000',
+      workspaceId: (await this.workspaceContext.current()).workspaceId,
+      actorId: actor.id ?? null,
+      actorName: actor.name ?? null,
+      payload: { total: ids.length, affected, failed: failed.length },
+    });
+    return { affected, failed };
+  }
+
   /**
    * Cancel a task that has not been published yet. Tasks in flight must not be cancelled
    * (the worker may already have called the platform) and published ones are final.

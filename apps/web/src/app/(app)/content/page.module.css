@@ -275,3 +275,10 @@
 .historyItem:first-of-type {
   border-top: none;
 }
+
+.bulkBar {
+  display: flex;
+  align-items: center;
+  gap: var(--mf-space-2);
+  flex-wrap: wrap;
+}

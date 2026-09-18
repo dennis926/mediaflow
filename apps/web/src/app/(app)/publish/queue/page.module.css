@@ -77,3 +77,10 @@
   color: var(--mf-color-text-tertiary);
   flex-shrink: 0;
 }
+
+.bulkBar {
+  display: flex;
+  align-items: center;
+  gap: var(--mf-space-2);
+  flex-wrap: wrap;
+}

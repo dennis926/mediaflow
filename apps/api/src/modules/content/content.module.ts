@@ -15,11 +15,12 @@ import { ContentService } from './content.service';
 import { ContentVariantController } from './content-variant.controller';
 import { BrandKnowledge } from './entities/brand-knowledge.entity';
 import { ContentReview } from './entities/content-review.entity';
+import { ContentRevision } from './entities/content-revision.entity';
 import { ContentVariant } from './entities/content-variant.entity';
 import { Content } from './entities/content.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Content, ContentVariant, ContentReview, BrandKnowledge]), AiModule, NotificationModule, SettingsModule],
+  imports: [TypeOrmModule.forFeature([Content, ContentVariant, ContentReview, BrandKnowledge, ContentRevision]), AiModule, NotificationModule, SettingsModule],
   controllers: [ContentController, ContentVariantController, ContentReviewController, KnowledgeController],
   providers: [ContentService, ContentReviewService, KnowledgeService, KnowledgeTransferService, DocumentParserService, OcrService],
   exports: [ContentService, ContentReviewService, KnowledgeService],

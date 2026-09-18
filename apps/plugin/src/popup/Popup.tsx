@@ -14,6 +14,13 @@ import {
   type PluginAccount,
   type PluginTask,
 } from '../lib/api';
+import { MSG_COLLECT_NOW } from '../lib/messages';
+import {
+  DEFAULT_METRICS_INTERVAL_MINUTES,
+  loadMetricsSettings,
+  parseTargetLines,
+  saveMetricsSettings,
+} from '../lib/metrics-settings';
 
 const EDITOR_URLS: Record<string, string> = {
   wechat_video: 'https://channels.weixin.qq.com/platform/post/create',
@@ -38,6 +45,10 @@ export function Popup() {
   const [message, setMessage] = useState<{ tone: 'info' | 'danger'; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // Scheduled metric collection: interval + the creator pages to visit, both stored locally.
+  const [metricsInterval, setMetricsInterval] = useState(String(DEFAULT_METRICS_INTERVAL_MINUTES));
+  const [metricsTargets, setMetricsTargets] = useState('');
+  const [metricsBusy, setMetricsBusy] = useState(false);
 
   const refresh = useCallback(async () => {
     const config = await loadConfig();
@@ -46,6 +57,9 @@ export function Popup() {
     const branding = await loadSiteBranding();
     setSiteName(branding.name);
     setSiteTagline(branding.tagline);
+    const settings = await loadMetricsSettings();
+    setMetricsInterval(String(settings.intervalMinutes));
+    setMetricsTargets(settings.targets.map((target) => target.url).join('\n'));
     setLoggedIn(Boolean(config.token));
     if (!config.token) {
       setTasks([]);
@@ -132,6 +146,54 @@ export function Popup() {
       }
     } finally {
       setBusy(false);
+    }
+  };
+
+  /** Stores the collection interval and target list, then shows what was actually saved. */
+  const saveMetrics = async (): Promise<void> => {
+    setMetricsBusy(true);
+    setMessage(null);
+    try {
+      const saved = await saveMetricsSettings({
+        intervalMinutes: Number(metricsInterval),
+        targets: parseTargetLines(metricsTargets),
+      });
+      setMetricsInterval(String(saved.intervalMinutes));
+      setMetricsTargets(saved.targets.map((target) => target.url).join('\n'));
+      setMessage({
+        tone: 'info',
+        text: `已保存：每 ${saved.intervalMinutes} 分钟回收 ${saved.targets.length} 个数据页`,
+      });
+    } catch (error) {
+      setMessage({ tone: 'danger', text: error instanceof Error ? error.message : '保存失败' });
+    } finally {
+      setMetricsBusy(false);
+    }
+  };
+
+  /** Asks the worker to sweep now instead of waiting for the next alarm tick. */
+  const collectNow = async (): Promise<void> => {
+    setMetricsBusy(true);
+    setMessage(null);
+    try {
+      const response = (await chrome.runtime.sendMessage({ type: MSG_COLLECT_NOW })) as
+        | { ok?: boolean; opened?: number; skipped?: number; error?: string }
+        | undefined;
+      if (response?.ok) {
+        setMessage({
+          tone: 'info',
+          text:
+            (response.opened ?? 0) > 0
+              ? `已在后台打开 ${response.opened} 个数据页，抓到数据后自动回传`
+              : '没有可回收的数据页：请先保存数据页地址，并确认对应平台已登录',
+        });
+      } else {
+        setMessage({ tone: 'danger', text: response?.error ?? '回收失败' });
+      }
+    } catch (error) {
+      setMessage({ tone: 'danger', text: error instanceof Error ? error.message : '回收失败' });
+    } finally {
+      setMetricsBusy(false);
     }
   };
 
@@ -223,6 +285,37 @@ export function Popup() {
                   </div>
                 ))
               )}
+            </div>
+
+            <div className="card">
+              <strong>平台数据回收</strong>
+              <span className="muted">定时打开各平台创作者数据页，抓取阅读/点赞/评论/分享/收藏并回传后台（不发布、不修改内容）</span>
+              <div className="field">
+                <span className="muted">回收间隔（分钟，1–1440）</span>
+                <input
+                  value={metricsInterval}
+                  inputMode="numeric"
+                  onChange={(event) => setMetricsInterval(event.target.value)}
+                  placeholder={String(DEFAULT_METRICS_INTERVAL_MINUTES)}
+                />
+              </div>
+              <div className="field">
+                <span className="muted">创作者数据页地址（每行一个）</span>
+                <textarea
+                  rows={4}
+                  value={metricsTargets}
+                  onChange={(event) => setMetricsTargets(event.target.value)}
+                  placeholder={'https://creator.xiaohongshu.com/new/note-manager\nhttps://channels.weixin.qq.com/platform/post/list'}
+                />
+              </div>
+              <div className="row">
+                <button disabled={metricsBusy} onClick={() => void saveMetrics()}>
+                  {metricsBusy ? '处理中…' : '保存回收设置'}
+                </button>
+                <button disabled={metricsBusy} onClick={() => void collectNow()}>
+                  立即回收一次
+                </button>
+              </div>
             </div>
 
             <div className="card">

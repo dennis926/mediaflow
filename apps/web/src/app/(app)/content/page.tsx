@@ -47,6 +47,8 @@ export default function ContentListPage() {
   const [status, setStatus] = useState('');
   const [platform, setPlatform] = useState('');
   const [page, setPage] = useState(1);
+  /** 勾选的批量操作对象 */
+  const [selected, setSelected] = useState<string[]>([]);
   const [pendingDelete, setPendingDelete] = useState<Content | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
 
@@ -76,6 +78,21 @@ export default function ContentListPage() {
     },
   });
 
+  const batch = useMutation({
+    mutationFn: ({ ids, action }: { ids: string[]; action: 'archive' | 'unarchive' | 'delete' }) => contentApi.batch(ids, action),
+    onSuccess: (result, variables) => {
+      const label = variables.action === 'delete' ? '删除' : variables.action === 'archive' ? '归档' : '取消归档';
+      setFeedback(
+        result.failed.length === 0
+          ? `批量${label}完成：${result.affected} 条`
+          : `批量${label}：成功 ${result.affected} 条，失败 ${result.failed.length} 条（${result.failed[0].reason}）`,
+      );
+      setSelected([]);
+      void queryClient.invalidateQueries({ queryKey: ['contents'] });
+    },
+    onError: (error: unknown) => setFeedback(error instanceof ApiError ? error.message : '批量操作失败'),
+  });
+
   const archive = useMutation({
     mutationFn: ({ id, archived }: { id: string; archived: boolean }) => contentApi.archive(id, archived),
     onSuccess: (_result, variables) => {
@@ -85,7 +102,32 @@ export default function ContentListPage() {
     onError: (error: unknown) => setFeedback(error instanceof ApiError ? error.message : '归档失败'),
   });
 
+  const rows = contents.data?.items ?? [];
+  const allSelected = rows.length > 0 && rows.every((row) => selected.includes(row.id));
+
   const columns: Array<Column<Content>> = [
+    {
+      key: 'select',
+      title: (
+        <input
+          type="checkbox"
+          aria-label="全选"
+          checked={allSelected}
+          onChange={(event) => setSelected(event.target.checked ? rows.map((row) => row.id) : [])}
+        />
+      ),
+      width: '44px',
+      render: (row) => (
+        <input
+          type="checkbox"
+          aria-label={`选择 ${row.title}`}
+          checked={selected.includes(row.id)}
+          onChange={(event) =>
+            setSelected((prev) => (event.target.checked ? [...prev, row.id] : prev.filter((id) => id !== row.id)))
+          }
+        />
+      ),
+    },
     {
       key: 'title',
       title: '内容',
@@ -185,6 +227,35 @@ export default function ContentListPage() {
             知道了
           </button>
         </Banner>
+      ) : null}
+
+      {selected.length > 0 ? (
+        <Card>
+          <div className={styles.bulkBar}>
+            <span className={styles.meta}>已选 {selected.length} 条</span>
+            <Button variant="secondary" size="sm" loading={batch.isPending} onClick={() => batch.mutate({ ids: selected, action: 'archive' })}>
+              批量归档
+            </Button>
+            <Button variant="secondary" size="sm" loading={batch.isPending} onClick={() => batch.mutate({ ids: selected, action: 'unarchive' })}>
+              批量取消归档
+            </Button>
+            <Button
+              variant="danger"
+              size="sm"
+              loading={batch.isPending}
+              onClick={() => {
+                if (window.confirm(`确定删除选中的 ${selected.length} 条内容吗？（软删除，可在数据库中恢复）`)) {
+                  batch.mutate({ ids: selected, action: 'delete' });
+                }
+              }}
+            >
+              批量删除
+            </Button>
+            <Button variant="text" size="sm" onClick={() => setSelected([])}>
+              取消选择
+            </Button>
+          </div>
+        </Card>
       ) : null}
 
       <Card flush>
