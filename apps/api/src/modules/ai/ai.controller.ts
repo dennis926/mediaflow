@@ -57,7 +57,6 @@ export class AiController {
       baseUrl: body.baseUrl === undefined ? undefined : String(body.baseUrl),
       apiKey: body.apiKey === undefined ? undefined : String(body.apiKey),
       models: Array.isArray(body.models) ? body.models.map((item) => String(item)) : undefined,
-      multiplier: body.multiplier === undefined ? undefined : Number(body.multiplier),
       protocol: body.protocol as never,
     });
   }

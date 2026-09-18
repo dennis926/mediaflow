@@ -41,7 +41,7 @@ function yuan(value: string | number, digits = 4): string {
 
 function priceText(value: number): string {
   const number = Number(value ?? 0);
-  // 四段单价可能是"官方价 × 汇率 × 倍率"算出来的浮点数，展示时统一收敛，避免 1.9600000000000002 这种尾数
+  // 四段单价是"官方价 × 汇率"算出来的浮点数，展示时统一收敛，避免 1.9600000000000002 这种尾数
   return `￥${(Math.round(number * 10000) / 10000).toFixed(number < 1 ? 4 : 2)}`;
 }
 
@@ -56,7 +56,7 @@ function tokens(value: number): string {
  * 1. 顶部按**供应商**分组（只列你配置过的，未配置的灰显可先看价）；
  * 2. 供应商下按**模型**列价：输入 / 输出 / 缓存写入 / 缓存读取，每格显示实付价与官方价；
  * 3. 点某个模型即筛选出**该模型的用量**（调用、token、四段计费明细、按天趋势、最近调用）；
- * 4. 计价规则（汇率、分组倍率、公式）直接写在页面上，价格可点击修改。
+ * 4. 计价规则（官方价 × 汇率）直接写在页面上，价格可点击修改。
  */
 export default function AiUsagePage() {
   const queryClient = useQueryClient();
@@ -122,8 +122,7 @@ export default function AiUsagePage() {
           <span className={styles.strong}>{row.model}</span>
           <span className={styles.meta}>
             {row.label !== row.model ? `${row.label} · ` : ''}
-            {row.source === 'override' ? '自定义价' : row.source === 'catalog' ? '预置参考价' : '全局兜底价'}
-            {row.multiplier !== 1 ? ` · 倍率 ${row.multiplier}` : ''}
+            {row.source === 'override' ? '已按官方调价' : row.source === 'catalog' ? '官方价' : '全局兜底价'}
           </span>
         </div>
       ),
@@ -277,7 +276,7 @@ export default function AiUsagePage() {
           </Button>
           {data ? (
             <span className={styles.meta}>
-              计价规则：官方美元价 × 汇率 {data.rules.usdToCny} × 分组倍率 = 实付人民币
+              计价规则：官方美元价 × 汇率 {data.rules.usdToCny} = 人民币价
               {data.rules.description ? ` · ${data.rules.description}` : ''}
             </span>
           ) : null}
@@ -333,7 +332,7 @@ export default function AiUsagePage() {
             {activeProvider ? (
               <div className={styles.providerBar}>
                 <span className={styles.meta}>
-                  地址 {activeProvider.baseUrl || '（未填写）'} · 分组倍率 {activeProvider.multiplier} · 模型 {activeProvider.models.length} 个
+                  地址 {activeProvider.baseUrl || '（未填写）'} · 模型 {activeProvider.models.length} 个
                 </span>
                 {activeProvider.configured ? (
                   <>
@@ -363,7 +362,7 @@ export default function AiUsagePage() {
           <Card flush>
             <div className={styles.sectionHead}>
               <span className={styles.titleStrong}>{activeProvider ? `${activeProvider.label} 的模型价格与用量` : '全部模型的用量'}</span>
-              <span className={styles.meta}>点「看用量」按模型筛选下方的统计；点「改价」可按自己的分组价覆盖</span>
+              <span className={styles.meta}>点「看用量」按模型筛选下方的统计；点「改价」可在官方调价时覆盖</span>
             </div>
             <DataTable
               columns={modelColumns}
@@ -371,6 +370,12 @@ export default function AiUsagePage() {
               rowKey={(row) => `${row.provider}/${row.model}`}
               empty={<span className={styles.meta}>还没有模型：先点「添加供应商」配置密钥与模型</span>}
             />
+            <div className={styles.priceNote}>
+              <span className={styles.meta}>
+                价格为各供应商<strong>官方价</strong>：目录里存官方美元价，按汇率 {data?.rules.usdToCny ?? 7} 折算成人民币展示（不加价、不打折）；
+                官方调价后点「改价」即可覆盖该模型。
+              </span>
+            </div>
           </Card>
 
           <div className={styles.statGrid}>
@@ -404,7 +409,7 @@ export default function AiUsagePage() {
               <span className={styles.sectionTitle}>计费明细（单价 × 用量 = 金额）</span>
               <span className={styles.meta}>
                 {selectedModel
-                  ? `当前模型：${selectedModel.model}（${selectedModel.source === 'override' ? '自定义价' : selectedModel.source === 'catalog' ? '预置参考价' : '全局兜底价'}）`
+                  ? `当前模型：${selectedModel.model}（${selectedModel.source === 'override' ? '已按官方调价' : selectedModel.source === 'catalog' ? '官方价' : '全局兜底价'}）`
                   : data?.pricing
                     ? `当前模型：${data.pricing.model}`
                     : ''}

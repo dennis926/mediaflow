@@ -34,7 +34,6 @@ export function ProviderDialog({ open, current, onClose, onSaved, onError }: Pro
     baseUrl: '',
     apiKey: '',
     modelsText: '',
-    multiplier: 1,
     protocol: 'openai-compatible',
   });
 
@@ -47,11 +46,10 @@ export function ProviderDialog({ open, current, onClose, onSaved, onError }: Pro
         baseUrl: current.baseUrl,
         apiKey: '', // 留空表示不修改
         modelsText: (current.models ?? []).map((model) => model.model).join('\n'),
-        multiplier: current.multiplier,
         protocol: current.protocol ?? 'openai-compatible',
       });
     } else {
-      setForm({ provider: 'deepseek', label: '', baseUrl: '', apiKey: '', modelsText: '', multiplier: 1, protocol: 'openai-compatible' });
+      setForm({ provider: 'deepseek', label: '', baseUrl: '', apiKey: '', modelsText: '', protocol: 'openai-compatible' });
     }
   }, [open, current]);
 
@@ -66,7 +64,6 @@ export function ProviderDialog({ open, current, onClose, onSaved, onError }: Pro
           .split(/[\n,，\s]+/)
           .map((item) => item.trim())
           .filter(Boolean),
-        multiplier: Number(form.multiplier) || 1,
         protocol: form.protocol,
       }),
     onSuccess: () => onSaved(`供应商「${form.label || form.provider}」已保存`),
@@ -106,8 +103,8 @@ export function ProviderDialog({ open, current, onClose, onSaved, onError }: Pro
       <div className={styles.form}>
         <Banner tone="info">
           <span>
-            可同时配置多个供应商：密钥加密存储、界面只显示打码值。模型列表一行一个，用于生成「按模型看用量」的标签；
-            若用的是第三方中转，把「分组倍率」填成它的折扣（例如官方价的 0.8 倍就填 0.8），实付价会按倍率折算。
+            可同时配置多个供应商：密钥加密存储、界面上只显示打码值。模型列表一行一个，用于生成「按模型看用量」的标签。
+            价格统一按**供应商官方价**计算（官方美元价 × 汇率），如果官方调价了，可在「AI 用量」里对个别模型改价。
           </span>
         </Banner>
 
@@ -118,16 +115,7 @@ export function ProviderDialog({ open, current, onClose, onSaved, onError }: Pro
           value={form.provider}
           onChange={(event) => applyPreset(event.target.value)}
         />
-        <div className={styles.twoCol}>
-          <Input label="显示名" name="label" placeholder="例如：DeepSeek 官方 / 某中转 GPT" value={form.label} onChange={(event) => setForm({ ...form, label: event.target.value })} />
-          <Input
-            label="分组倍率（实付 = 官方 × 汇率 × 倍率）"
-            name="multiplier"
-            type="number"
-            value={String(form.multiplier)}
-            onChange={(event) => setForm({ ...form, multiplier: Number(event.target.value) })}
-          />
-        </div>
+        <Input label="显示名" name="label" placeholder="例如：DeepSeek / GPT" value={form.label} onChange={(event) => setForm({ ...form, label: event.target.value })} />
         <Input label="接口地址（OpenAI 兼容）" name="baseUrl" placeholder="https://api.deepseek.com/v1" value={form.baseUrl} onChange={(event) => setForm({ ...form, baseUrl: event.target.value })} />
         <Input
           label={current ? 'API Key（留空表示不修改）' : 'API Key'}

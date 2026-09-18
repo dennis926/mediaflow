@@ -22,8 +22,8 @@ export interface ModelPriceDialogProps {
 const EMPTY: ModelPriceCnyView = { input: 0, output: 0, cacheWrite: 0, cacheRead: 0 };
 
 /**
- * 修改单个模型的实付价（元/百万 token，四段）。
- * 中转站的分组价与官方价不同，这里填的就是你的实际结算价，用量页会据此算钱。
+ * 修改单个模型的人民币价（元/百万 token，四段）。
+ * 默认按「官方美元价 × 汇率」折算；只有官方调价时才需要在这里手工覆盖。
  */
 export function ModelPriceDialog({ open, row, onClose, onSaved, onError }: ModelPriceDialogProps) {
   const [price, setPrice] = useState<ModelPriceCnyView>(EMPTY);
@@ -39,16 +39,16 @@ export function ModelPriceDialog({ open, row, onClose, onSaved, onError }: Model
     onError: (error: unknown) => onError(error instanceof ApiError ? error.message : '保存失败'),
   });
 
-  /** 一键按"官方价 × 汇率 × 倍率"填回（汇率取当前计费规则里的值）。 */
+  /** 一键按"官方价 × 汇率"填回（汇率取当前计费规则里的值）。 */
   const fillFromOfficial = async (): Promise<void> => {
     if (!row) return;
     try {
       const rules = await aiApi.pricingRules();
       setPrice({
-        input: Number((row.officialUsd.input * rules.usdToCny * row.multiplier).toFixed(4)),
-        output: Number((row.officialUsd.output * rules.usdToCny * row.multiplier).toFixed(4)),
-        cacheWrite: Number((row.officialUsd.cacheWrite * rules.usdToCny * row.multiplier).toFixed(4)),
-        cacheRead: Number((row.officialUsd.cacheRead * rules.usdToCny * row.multiplier).toFixed(4)),
+        input: Number((row.officialUsd.input * rules.usdToCny).toFixed(4)),
+        output: Number((row.officialUsd.output * rules.usdToCny).toFixed(4)),
+        cacheWrite: Number((row.officialUsd.cacheWrite * rules.usdToCny).toFixed(4)),
+        cacheRead: Number((row.officialUsd.cacheRead * rules.usdToCny).toFixed(4)),
       });
     } catch (error) {
       onError(error instanceof ApiError ? error.message : '读取计费规则失败');
@@ -76,7 +76,7 @@ export function ModelPriceDialog({ open, row, onClose, onSaved, onError }: Model
           <Banner tone="info">
             <span>
               官方价（美元/百万 token）：输入 ${row.officialUsd.input} · 输出 ${row.officialUsd.output} · 缓存写入 ${row.officialUsd.cacheWrite} · 缓存读取 $
-              {row.officialUsd.cacheRead}。填这里的实付价会覆盖官方折算结果，用于对齐你在中转站的真实账单。
+              {row.officialUsd.cacheRead}。这里填的是人民币价，默认按「官方价 × 汇率」折算；只有官方调价时才需要手工改。
             </span>
           </Banner>
           <div className={styles.twoCol}>
@@ -101,9 +101,8 @@ export function ModelPriceDialog({ open, row, onClose, onSaved, onError }: Model
           </div>
           <div className={styles.reviewToolbar}>
             <Button variant="secondary" size="sm" onClick={() => void fillFromOfficial()}>
-              按官方价 × 汇率 × 倍率 填充
+              按官方价 × 汇率 填充
             </Button>
-            <span className={styles.meta}>当前倍率 {row.multiplier}（在供应商配置里可改）</span>
           </div>
         </div>
       ) : null}

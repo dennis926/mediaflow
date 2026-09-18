@@ -276,8 +276,6 @@ export class AiService {
       price: { input: number; output: number; cacheWrite: number; cacheRead: number };
       officialUsd: { input: number; output: number; cacheWrite: number; cacheRead: number };
       source: string;
-      multiplier: number;
-      ratioOfOfficial: number;
     } | null;
     byDay: Array<{ date: string; calls: number; tokens: number; cached: number; cost: string }>;
     byTask: Array<{ taskType: string; calls: number; tokens: number; cached: number; cost: string }>;
@@ -290,7 +288,6 @@ export class AiService {
       price: { input: number; output: number; cacheWrite: number; cacheRead: number };
       officialUsd: { input: number; output: number; cacheWrite: number; cacheRead: number };
       source: string;
-      ratioOfOfficial: number;
       configured: boolean;
       reference: boolean;
       calls: number;
@@ -302,7 +299,6 @@ export class AiService {
       label: string;
       configured: boolean;
       baseUrl: string;
-      multiplier: number;
       models: Array<Record<string, unknown>>;
     }>;
     rules: { usdToCny: number; description: string };
@@ -404,10 +400,8 @@ export class AiService {
           price: model.price,
           officialUsd: model.officialUsd,
           source: model.source,
-          ratioOfOfficial: model.ratioOfOfficial,
           configured: provider.configured,
           reference: model.reference,
-          multiplier: model.multiplier,
           calls: used?.calls ?? 0,
           tokens: used?.tokens ?? 0,
           cost: (used?.cost ?? 0).toFixed(6),
@@ -456,8 +450,6 @@ export class AiService {
             price: selectedPricing.price,
             officialUsd: selectedPricing.officialUsd,
             source: selectedPricing.source,
-            multiplier: selectedPricing.multiplier,
-            ratioOfOfficial: selectedPricing.ratioOfOfficial,
           }
         : null,
       byDay: sortedDays.map(([date, value]) => ({ date, calls: value.calls, tokens: value.tokens, cached: value.cached, cost: value.cost.toFixed(6) })),
@@ -473,7 +465,6 @@ export class AiService {
         label: provider.label,
         configured: provider.configured,
         baseUrl: provider.baseUrl,
-        multiplier: provider.multiplier,
         models: provider.models as unknown as Array<Record<string, unknown>>,
       })),
       rules: await this.pricing.rules(),

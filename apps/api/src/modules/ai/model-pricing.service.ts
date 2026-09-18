@@ -28,16 +28,12 @@ export interface ModelPricingView {
   price: ModelPriceCny;
   /** 官方价（美元 / 百万 token），用于并排展示 */
   officialUsd: ModelPriceUsd;
-  /** 实付相对官方的折扣（0.11 = 约官方的 11%） */
-  ratioOfOfficial: number;
-  /** 价格来源：override=自定义覆盖，catalog=预置参考价，global=全局兜底价 */
+  /** 价格来源：override=自定义覆盖，catalog=官方价（预置），global=全局兜底价 */
   source: 'override' | 'catalog' | 'global';
   /** 该模型是否已被配置为可用 */
   configured: boolean;
   reference: boolean;
   note?: string;
-  /** 供应商分组倍率（实付 = 官方 × 汇率 × 倍率） */
-  multiplier: number;
 }
 
 export interface ProviderPricingView {
@@ -49,22 +45,22 @@ export interface ProviderPricingView {
   hasApiKey: boolean;
   baseUrl: string;
   protocol: string;
-  multiplier: number;
   /** 该供应商下模型：自定义的模型优先，预置模型补充 */
   models: ModelPricingView[];
 }
 
 export interface PricingRuleView {
   usdToCny: number;
-  /** 示例：官方 $5.00 的模型在当前倍率下的实付价 */
+  /** 说明：官方美元价按汇率折算成人民币展示 */
   description: string;
 }
 
 /**
  * 模型价格解析。
  *
- * 三层优先级：用户覆盖价（人民币，AI_MODEL_PRICES）> 预置目录（美元 × 汇率 × 供应商倍率）> 全局兜底价。
- * 这样既开箱可用，又能让用户按自己买的中转分组价精确对上账单。
+ * 价格一律采用**供应商官方价**：目录里存官方美元价，按汇率折算成人民币展示；
+ * 需要时用户可以按官方调价自行覆盖某个模型（AI_MODEL_PRICES）。
+ * 三层优先级：用户覆盖价 > 官方价 × 汇率 > 全局兜底价。
  */
 @Injectable()
 export class ModelPricingService {
@@ -125,14 +121,14 @@ export class ModelPricingService {
     ]);
 
     const config = providerConfigs.find((item) => item.provider === provider);
-    const multiplier = config?.multiplier && config.multiplier > 0 ? config.multiplier : 1;
     const catalogModel = findCatalogModel(provider, model);
     const officialUsd = catalogModel?.officialUsd ?? { input: 0, output: 0, cacheWrite: 0, cacheRead: 0 };
+    // 官方价按汇率折算（不做任何折扣/倍率）
     const converted: ModelPriceCny = {
-      input: officialUsd.input * rate * multiplier,
-      output: officialUsd.output * rate * multiplier,
-      cacheWrite: officialUsd.cacheWrite * rate * multiplier,
-      cacheRead: officialUsd.cacheRead * rate * multiplier,
+      input: officialUsd.input * rate,
+      output: officialUsd.output * rate,
+      cacheWrite: officialUsd.cacheWrite * rate,
+      cacheRead: officialUsd.cacheRead * rate,
     };
 
     const override = overrides[`${provider}/${model}`];
@@ -157,9 +153,6 @@ export class ModelPricingService {
       source = 'global';
     }
 
-    const officialCny = officialUsd.input * rate;
-    const ratioOfOfficial = officialCny > 0 ? Number((price.input / (officialCny * multiplier)).toFixed(3)) : 1;
-
     return {
       provider,
       providerLabel: config?.label ?? providerLabel(provider),
@@ -167,12 +160,10 @@ export class ModelPricingService {
       label: catalogModel?.label ?? model,
       price,
       officialUsd,
-      ratioOfOfficial,
       source,
       configured: Boolean(config),
       reference: catalogModel?.reference ?? false,
       note: catalogModel?.note,
-      multiplier,
     };
   }
 
@@ -194,7 +185,6 @@ export class ModelPricingService {
         hasApiKey: Boolean(config.apiKey),
         baseUrl: config.baseUrl,
         protocol: config.protocol,
-        multiplier: config.multiplier,
         models,
       });
     }
@@ -211,7 +201,6 @@ export class ModelPricingService {
           hasApiKey: false,
           baseUrl: catalog.defaultBaseUrl,
           protocol: catalog.protocol,
-          multiplier: 1,
           models,
         });
       }
@@ -247,8 +236,8 @@ export class ModelPricingService {
     const example = configs[0];
     const exampleModel = example ? (await this.modelsFor(example))[0] : undefined;
     const description = exampleModel
-      ? `实付价 = 官方美元价 × 汇率 ${rate} × 分组倍率。例如 ${exampleModel.model} 输入价：官方 $${exampleModel.officialUsd.input.toFixed(2)} × ${rate} × ${exampleModel.multiplier} = ￥${exampleModel.price.input.toFixed(2)} / 百万 token`
-      : `实付价 = 官方美元价 × 汇率 ${rate} × 分组倍率（先在「AI 服务」里配置供应商）`;
+      ? `人民币价 = 官方美元价 × 汇率 ${rate}。例如 ${exampleModel.model} 输入价：官方 $${exampleModel.officialUsd.input.toFixed(2)} × ${rate} = ￥${exampleModel.price.input.toFixed(2)} / 百万 token`
+      : `人民币价 = 官方美元价 × 汇率 ${rate}（先在「AI 用量」里配置供应商）`;
     return { usdToCny: rate, description };
   }
 

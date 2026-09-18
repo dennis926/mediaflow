@@ -15,7 +15,7 @@ const pricing = {
     provider: 'deepseek', providerLabel: 'DeepSeek', model: 'mock-model', label: 'Mock',
     price: { input: 2, output: 8, cacheWrite: 2, cacheRead: 0.5 },
     officialUsd: { input: 0.28, output: 0.42, cacheWrite: 0, cacheRead: 0.028 },
-    ratioOfOfficial: 1, source: 'catalog', configured: true, reference: true, multiplier: 1,
+    source: 'catalog', configured: true, reference: true,
   })),
   computeCost: vi.fn((tokens: { input: number; output: number; cacheWrite?: number; cacheRead?: number }) => {
     const perMillion = (count: number, unit: number): number => (Math.max(0, count) / 1_000_000) * unit;

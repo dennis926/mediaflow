@@ -335,12 +335,10 @@ export interface ModelPricingView {
   label: string;
   price: ModelPriceCnyView;
   officialUsd: ModelPriceCnyView;
-  ratioOfOfficial: number;
   source: 'override' | 'catalog' | 'global';
   configured: boolean;
   reference: boolean;
   note?: string;
-  multiplier: number;
 }
 
 export interface ProviderPricingView {
@@ -350,7 +348,6 @@ export interface ProviderPricingView {
   hasApiKey: boolean;
   baseUrl: string;
   protocol: string;
-  multiplier: number;
   models: ModelPricingView[];
 }
 
@@ -359,7 +356,6 @@ export interface ProviderConfigItem {
   label: string;
   baseUrl: string;
   models: string[];
-  multiplier: number;
   protocol: string;
   apiKeyMasked: string;
   hasApiKey: boolean;

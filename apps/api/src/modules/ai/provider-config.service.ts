@@ -14,11 +14,6 @@ export interface ProviderConfig {
   apiKey: string;
   /** 该供应商下要用的模型列表（界面上的模型标签） */
   models: string[];
-  /**
-   * 分组倍率：中转站的"实付 = 官方 USD × 汇率 × 倍率"。
-   * 官方直连填 1；第三方分组按其价目表填（例如官方价的 0.8 倍填 0.8）。
-   */
-  multiplier: number;
   protocol: 'openai-compatible' | 'anthropic';
 }
 
@@ -33,7 +28,7 @@ export interface ProviderConfigView extends Omit<ProviderConfig, 'apiKey'> {
  * 多供应商配置。
  *
  * 之前只能配一套（AI_PROVIDER / AI_API_KEY），而用户实际会在 DeepSeek、GPT、Claude、GLM 之间切换。
- * 这里把"多套凭据 + 各自模型 + 分组倍率"存成一份加密配置（AI_PROVIDER_CONFIGS），
+ * 这里把"多套凭据 + 各自模型"存成一份加密配置（AI_PROVIDER_CONFIGS），
  * 与旧的单套配置并存：旧配置作为"当前使用的供应商"，多套配置用于价目展示与逐模型用量归属。
  */
 @Injectable()
@@ -59,7 +54,6 @@ export class ProviderConfigService {
         baseUrl: (await this.settings.get('AI_API_BASE')) ?? catalog?.defaultBaseUrl ?? '',
         apiKey: legacyKey,
         models: activeModel ? [activeModel] : (catalog?.models.map((model) => model.model) ?? []),
-        multiplier: 1,
         protocol: 'openai-compatible',
       });
     }
@@ -74,7 +68,6 @@ export class ProviderConfigService {
       label: config.label,
       baseUrl: config.baseUrl,
       models: config.models,
-      multiplier: config.multiplier,
       protocol: config.protocol,
       apiKeyMasked: ProviderConfigService.mask(config.apiKey),
       hasApiKey: Boolean(config.apiKey),
@@ -99,7 +92,6 @@ export class ProviderConfigService {
       baseUrl: input.baseUrl?.trim() || existing?.baseUrl || catalog?.defaultBaseUrl || '',
       apiKey,
       models: [...new Set(models)],
-      multiplier: Number.isFinite(Number(input.multiplier)) && Number(input.multiplier) > 0 ? Number(input.multiplier) : (existing?.multiplier ?? 1),
       protocol: input.protocol ?? existing?.protocol ?? catalog?.protocol ?? 'openai-compatible',
     };
 
@@ -110,7 +102,7 @@ export class ProviderConfigService {
       [{ key: PROVIDER_CONFIGS_KEY, value: JSON.stringify(configs) }],
       { id: null, name: '系统' },
     );
-    this.logger.log(`AI 供应商配置已更新：${next.provider}（${next.models.length} 个模型，倍率 ${next.multiplier}）`);
+    this.logger.log(`AI 供应商配置已更新：${next.provider}（${next.models.length} 个模型）`);
     return this.listMasked();
   }
 
@@ -146,7 +138,6 @@ export class ProviderConfigService {
           baseUrl: item.baseUrl ?? '',
           apiKey: item.apiKey ?? '',
           models: Array.isArray(item.models) ? item.models : [],
-          multiplier: Number.isFinite(Number(item.multiplier)) && Number(item.multiplier) > 0 ? Number(item.multiplier) : 1,
           protocol: item.protocol ?? 'openai-compatible',
         }));
     } catch {
