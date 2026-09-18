@@ -21,3 +21,6 @@ export class Role extends BaseEntity {
   @Column({ type: 'boolean', default: true })
   isSystem!: boolean;
 }
+
+/** 内置角色代码（与权限矩阵里的角色取值一致）。 */
+export const ROLE_CODES = ['owner', 'admin', 'editor', 'reviewer', 'viewer'] as const;

@@ -91,6 +91,8 @@ export interface PublishRuntimeConfig {
   maxAttempts: number;
   retryIntervalMs: number;
   workerEnabled: boolean;
+  /** 超过这个时间仍未结束的任务视为卡住 */
+  stuckMinutes: number;
 }
 
 export interface PermissionsRuntimeConfig {
@@ -230,6 +232,7 @@ export const DEFAULT_PUBLISH_RUNTIME: PublishRuntimeConfig = {
   maxAttempts: 3,
   retryIntervalMs: 300_000,
   workerEnabled: true,
+  stuckMinutes: 15,
 };
 
 export const DEFAULT_PERMISSION_MATRIX_RUNTIME: Record<string, string[]> = {
@@ -243,6 +246,7 @@ export const DEFAULT_PERMISSION_MATRIX_RUNTIME: Record<string, string[]> = {
   'platform.bind': ['owner', 'admin'],
   'analytics.sync': ['owner', 'admin'],
   'audit.read': ['owner', 'admin'],
+  'workspace.manage': ['owner', 'admin'],
 };
 
 export const DEFAULT_ROLE_LABELS_RUNTIME: Record<string, string> = {
@@ -480,6 +484,7 @@ export function applyRuntimeConfig(flat: Record<string, string | undefined>, onE
     maxAttempts: num(flat.PUBLISH_MAX_ATTEMPTS, DEFAULT_PUBLISH_RUNTIME.maxAttempts, 1, 10),
     retryIntervalMs: num(flat.PUBLISH_RETRY_INTERVAL_MS, DEFAULT_PUBLISH_RUNTIME.retryIntervalMs, 1000, 86_400_000),
     workerEnabled: bool(flat.PUBLISH_WORKER_ENABLED, DEFAULT_PUBLISH_RUNTIME.workerEnabled),
+    stuckMinutes: num(flat.PUBLISH_STUCK_MINUTES, DEFAULT_PUBLISH_RUNTIME.stuckMinutes, 1, 1440),
   };
 }
 

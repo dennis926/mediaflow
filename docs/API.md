@@ -173,6 +173,19 @@
 | GET | `/api/media/groups` | 素材分组与数量 |
 | DELETE | `/api/media/:id` | 删除素材（软删除 + 移除磁盘文件） |
 | GET | `/api/public/media/:storedName` | 素材公开访问（uuid 文件名，供平台抓取） |
+| GET | `/api/content-templates` | **文案模板库**列表（`keyword`/`platform`/`category`/分页） |
+| POST | `/api/content-templates` | 新建模板（`content.write`） |
+| PUT | `/api/content-templates/:id` | 修改模板 |
+| DELETE | `/api/content-templates/:id` | 删除模板（软删除） |
+| POST | `/api/content-templates/:id/use` | 套用模板：累加引用次数并返回内容 |
+| GET | `/api/workspaces` | **我能切换的工作区**列表（含当前标记与我的角色） |
+| POST | `/api/workspaces` | 新建工作区（创建者成为所有者，`workspace.manage`） |
+| GET | `/api/workspaces/:id/members` | 工作区成员与角色 |
+| PUT | `/api/workspaces/:id/members` | 添加成员 / 调整角色 |
+| DELETE | `/api/workspaces/:id/members/:userId` | 移出成员（保留至少一名所有者） |
+| POST | `/api/auth/switch-workspace` | **切换工作区**：校验成员身份后重新签发令牌 |
+| GET | `/api/publish/queue/health` | **队列运维**：消费组/消费者/队列长度 + 卡住任务 + 死信 |
+| POST | `/api/publish/tasks/:id/requeue` | 强制重排（无视锁定状态，用于卡住的任务） |
 | GET | `/api/audit-logs` | **审计日志**（`action`/`actionPrefix`/`actor`/`keyword`/`from`/`to`/分页），按工作区隔离，权限走 `audit.read` 能力点 |
 | GET | `/api/audit-logs/actions` | 动作清单与次数（筛选下拉用） |
 | GET | `/api/ai/usage` | **AI 用量与花费**：按天/任务/模型聚合（`days` 默认 14） |

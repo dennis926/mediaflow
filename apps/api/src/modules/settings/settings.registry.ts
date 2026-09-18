@@ -131,7 +131,7 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
     group: 'permissions',
     label: '权限矩阵（JSON）',
     description:
-      '能力点 → 允许的角色。可用能力点：settings.write（改设置）、users.manage（管用户）、users.privileged（删用户/改角色）、content.write（写内容）、content.review（审核）、publish.execute（发布）、knowledge.write（知识库）、platform.bind（绑账号）、analytics.sync（同步数据）、audit.read（看审计日志）',
+      '能力点 → 允许的角色。可用能力点：settings.write（改设置）、users.manage（管用户）、users.privileged（删用户/改角色）、content.write（写内容）、content.review（审核）、publish.execute（发布）、knowledge.write（知识库）、platform.bind（绑账号）、analytics.sync（同步数据）、audit.read（看审计日志）、workspace.manage（管工作区）',
     secret: false,
     envKey: 'PERMISSION_MATRIX',
     placeholder: '{"settings.write":["owner","admin"],"publish.execute":["owner","admin","editor"]}',
@@ -551,6 +551,15 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
     secret: false,
     envKey: 'PUBLISH_GROUP_NAME',
     placeholder: 'publish-workers',
+  },
+  {
+    key: 'PUBLISH_STUCK_MINUTES',
+    group: 'publish',
+    label: '任务卡住判定（分钟）',
+    description: '任务被 worker 领取后超过这个时间仍未结束，就在「队列运维」里标为卡住并可强制重排（默认 15）',
+    secret: false,
+    envKey: 'PUBLISH_STUCK_MINUTES',
+    placeholder: '15',
   },
   {
     key: 'PUBLISH_MAX_ATTEMPTS',

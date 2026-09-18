@@ -19,7 +19,7 @@ import {
   appendAiDisclosure,
   buildAiMetadata,
 } from '@mediaflow/shared';
-import { IsNull, Repository } from 'typeorm';
+import { In, IsNull, Repository } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
 import { runtime } from '../modules/settings/runtime-config';
 import { WorkspaceContextService } from '../common/workspace-context.service';
@@ -238,6 +238,146 @@ export class PublishService {
     return this.queue.stats();
   }
 
+  /**
+   * 队列运维视图：卡住的任务、死信（重试次数用尽）以及队列本身的状态。
+   * 运维界面据此可以直接把卡住的任务重排，不用登服务器看日志。
+   */
+  async queueHealth(): Promise<{
+    stream: string;
+    group: string;
+    length: number;
+    pending: number;
+    consumers: number;
+    workerEnabled: boolean;
+    stuckMinutes: number;
+    stuckTasks: Array<{
+      id: string;
+      title: string | null;
+      platform: PlatformCode;
+      status: PublishTaskStatus;
+      attempts: number;
+      maxAttempts: number;
+      lockedBy: string | null;
+      lockedAt: string | null;
+      lockedMinutes: number;
+    }>;
+    deadLetters: Array<{
+      id: string;
+      title: string | null;
+      platform: PlatformCode;
+      attempts: number;
+      maxAttempts: number;
+      errorMessage: string | null;
+      finishedAt: string | null;
+    }>;
+  }> {
+    const scope = await this.workspaceContext.current();
+    const stuckMinutes = runtime().publish.stuckMinutes;
+    const deadline = new Date(Date.now() - stuckMinutes * 60_000);
+    const stats = await this.queue.stats();
+
+    const stuck = await this.tasks
+      .createQueryBuilder('task')
+      .where('task.workspaceId = :workspaceId', { workspaceId: scope.workspaceId })
+      .andWhere('task.lockedAt IS NOT NULL AND task.lockedAt < :deadline', { deadline })
+      .andWhere('task.status IN (:...statuses)', {
+        statuses: [PublishTaskStatus.Pending, PublishTaskStatus.Publishing, PublishTaskStatus.Scheduled],
+      })
+      .orderBy('task.lockedAt', 'ASC')
+      .limit(50)
+      .getMany();
+
+    const dead = await this.tasks.find({
+      where: { workspaceId: scope.workspaceId, status: PublishTaskStatus.Failed },
+      order: { finishedAt: 'DESC' },
+      take: 50,
+    });
+
+    const titles = new Map<string, string>();
+    const contentIds = [...new Set([...stuck, ...dead].map((task) => task.contentId))];
+    if (contentIds.length > 0) {
+      const contents = await this.contents.find({ where: { id: In(contentIds) }, select: ['id', 'title'] });
+      for (const content of contents) titles.set(content.id, content.title);
+    }
+
+    return {
+      stream: runtime().publish.streamName,
+      group: runtime().publish.groupName,
+      length: stats.length,
+      pending: stats.pending,
+      consumers: stats.consumers,
+      workerEnabled: runtime().publish.workerEnabled,
+      stuckMinutes,
+      stuckTasks: stuck.map((task) => ({
+        id: task.id,
+        title: titles.get(task.contentId) ?? null,
+        platform: task.platform,
+        status: task.status,
+        attempts: task.attempts,
+        maxAttempts: task.maxAttempts,
+        lockedBy: task.lockedBy,
+        lockedAt: task.lockedAt?.toISOString() ?? null,
+        lockedMinutes: task.lockedAt ? Math.round((Date.now() - new Date(task.lockedAt).getTime()) / 60_000) : 0,
+      })),
+      deadLetters: dead.map((task) => ({
+        id: task.id,
+        title: titles.get(task.contentId) ?? null,
+        platform: task.platform,
+        attempts: task.attempts,
+        maxAttempts: task.maxAttempts,
+        errorMessage: task.errorMessage,
+        finishedAt: task.finishedAt?.toISOString() ?? null,
+      })),
+    };
+  }
+
+  /**
+   * 强制重排：清掉锁与重试计数后重新入队。
+   * 与 retry() 的区别是**无视锁定状态**——卡住的任务锁还在，普通 retry 会拒绝。
+   */
+  async requeue(id: string, actor: PublishActor): Promise<PublishTask> {
+    const task = await this.tasks.findOne({ where: { id } });
+    if (!task) throw new NotFoundException('发布任务不存在');
+    if (task.status === PublishTaskStatus.Published) {
+      throw new BadRequestException('已发布的任务不能重排');
+    }
+
+    const previousStatus = task.status;
+    const extra = { ...task.extra };
+    delete extra.awaitingConfirmation;
+    delete extra.manualMessage;
+    delete extra.pluginMessage;
+
+    await this.tasks.update(
+      { id: task.id },
+      {
+        status: PublishTaskStatus.Pending,
+        attempts: 0,
+        scheduledAt: null,
+        startedAt: null,
+        finishedAt: null,
+        errorMessage: null,
+        lockedBy: null,
+        lockedAt: null,
+        extra,
+      } as never,
+    );
+    await this.queue.enqueue(task.id);
+
+    await this.audit.record({
+      action: 'publish_task.requeue',
+      resourceType: 'publish_task',
+      resourceId: task.id,
+      tenantId: task.tenantId,
+      workspaceId: task.workspaceId,
+      actorId: actor.id ?? null,
+      actorName: actor.name ?? null,
+      payload: { platform: task.platform, previousStatus, forced: Boolean(task.lockedBy) },
+    });
+    this.logger.log(`任务 ${task.id} 已强制重排（原状态 ${previousStatus}）`);
+    return this.get(task.id);
+  }
+
   /** Builds the platform payload, including the mandatory AI disclosure suffix. */
   async buildPayload(task: PublishTask): Promise<PublishPayload> {
     const content = await this.contents.findOne({ where: { id: task.contentId } });
@@ -301,6 +441,13 @@ export class PublishService {
   }
 
   /** Conditional update that makes concurrent workers idempotent. */
+  /** 读取任务所属的租户/工作区（后台 worker 建立作用域用，不能受当前作用域过滤影响）。 */
+  async scopeOf(taskId: string): Promise<{ tenantId: string; workspaceId: string } | null> {
+    const task = await this.tasks.findOne({ where: { id: taskId }, select: ['id', 'tenantId', 'workspaceId'] });
+    if (!task) return null;
+    return { tenantId: task.tenantId, workspaceId: task.workspaceId };
+  }
+
   async claim(taskId: string, workerName: string): Promise<boolean> {
     const result = await this.tasks
       .createQueryBuilder()

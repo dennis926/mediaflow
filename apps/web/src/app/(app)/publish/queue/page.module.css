@@ -84,3 +84,39 @@
   gap: var(--mf-space-2);
   flex-wrap: wrap;
 }
+
+.opsGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--mf-space-3);
+}
+
+@media (max-width: 900px) {
+  .opsGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.opsLabel {
+  font-size: var(--mf-font-size-xs);
+  color: var(--mf-color-text-tertiary);
+}
+
+.opsValue {
+  font-size: var(--mf-font-size-xl);
+  font-weight: var(--mf-font-weight-semibold);
+  color: var(--mf-color-text-primary);
+}
+
+.opsHead {
+  display: flex;
+  align-items: baseline;
+  gap: var(--mf-space-2);
+  flex-wrap: wrap;
+  padding: var(--mf-space-4) var(--mf-space-4) 0;
+}
+
+.strong {
+  font-weight: var(--mf-font-weight-medium);
+  color: var(--mf-color-text-primary);
+}

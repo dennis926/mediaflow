@@ -179,3 +179,33 @@
 .mustChange > span {
   flex: 1;
 }
+
+.workspaceSwitcher {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mf-space-1);
+  margin: 0 var(--mf-space-4) var(--mf-space-3);
+  padding: var(--mf-space-2) var(--mf-space-3);
+  border: 1px solid var(--mf-color-border-subtle);
+  border-radius: var(--mf-radius-md);
+  background: var(--mf-color-surface-raised);
+}
+
+.workspaceLabel {
+  font-size: var(--mf-font-size-xs);
+  color: var(--mf-color-text-tertiary);
+}
+
+.workspaceSelect {
+  min-height: var(--mf-size-touch-min);
+  border: none;
+  background: transparent;
+  color: var(--mf-color-text-primary);
+  font-size: var(--mf-font-size-sm);
+  cursor: pointer;
+}
+
+.workspaceError {
+  font-size: var(--mf-font-size-xs);
+  color: var(--mf-color-danger-600, var(--mf-color-text-secondary));
+}

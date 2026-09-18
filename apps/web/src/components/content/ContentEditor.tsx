@@ -22,6 +22,7 @@ import { aiApi, contentApi, knowledgeApi, publishApi, reviewsApi } from '../../l
 import type { ComplianceReport } from '../../lib/api/types';
 import { AI_FLAG_LABELS, CONTENT_STATUS_LABELS, formatDateTime } from '../../lib/format';
 import { MediaPicker } from '../media/MediaPicker';
+import { templatesApi } from '../../lib/api/endpoints';
 import { CheckIcon, PlusIcon, SparkleIcon, TrashIcon, WarningIcon } from '../../lib/icons';
 import styles from '../../app/(app)/content/page.module.css';
 
@@ -63,13 +64,35 @@ const EMPTY_FORM: FormState = {
   aiFlagType: AiFlagType.None,
 };
 
-export function ContentEditor({ mode }: { mode: 'new' | 'edit' }): React.JSX.Element {
+export function ContentEditor({ mode, templateId }: { mode: 'new' | 'edit'; templateId?: string | null }): React.JSX.Element {
   const router = useRouter();
   /** 素材选择器：'media' 选正文素材，'cover' 选封面 */
   const [mediaPicker, setMediaPicker] = useState<'media' | 'cover' | null>(null);
   const params = useParams<{ id?: string }>();
   const queryClient = useQueryClient();
   const contentId = mode === 'edit' ? (params?.id ?? null) : null;
+
+  /** 套用模板：把模板的标题/正文/标签填进表单，并累加模板引用次数 */
+  const appliedTemplate = useMutation({
+    mutationFn: (id: string) => templatesApi.use(id),
+    onSuccess: (template) => {
+      setForm((prev) => ({
+        ...prev,
+        title: template.title,
+        body: template.body,
+        tagsText: template.tags.join('、'),
+      }));
+      setFeedback({ tone: 'info', text: `已套用模板「${template.name}」，可以在此基础上修改` });
+    },
+    onError: (error: unknown) => setFeedback({ tone: 'danger', text: error instanceof ApiError ? error.message : '套用模板失败' }),
+  });
+
+  useEffect(() => {
+    if (mode !== 'new' || !templateId || appliedTemplate.isPending || appliedTemplate.isSuccess) return;
+    appliedTemplate.mutate(templateId);
+    // 只在首次拿到模板 id 时套用一次，避免重复累加引用次数
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, templateId]);
 
   /** 版本历史（仅编辑模式加载） */
   const revisions = useQuery({

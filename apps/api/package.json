@@ -17,7 +17,8 @@
     "seed": "ts-node src/database/seeds/run-seed.ts",
     "schema:log": "typeorm-ts-node-commonjs schema:log -d src/database/data-source.ts",
     "seed:knowledge": "ts-node src/database/seeds/seed-knowledge.ts",
-    "test:e2e": "vitest run test/app.e2e.spec.ts"
+    "test:e2e": "vitest run test/app.e2e.spec.ts",
+    "seed:templates": "ts-node src/database/seeds/seed-templates.ts"
   },
   "dependencies": {
     "@mediaflow/channel-adapters": "workspace:*",

@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { APP_GUARD } from '@nestjs/core';
+import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { ScheduleModule } from '@nestjs/schedule';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
@@ -8,6 +8,7 @@ import { AuthModule } from './modules/auth/auth.module';
 import { JwtAuthGuard } from './modules/auth/jwt-auth.guard';
 import { RolesGuard } from './modules/auth/roles.guard';
 import { CapabilityGuard } from './modules/auth/capability.guard';
+import { WorkspaceScopeInterceptor } from './common/workspace-scope.interceptor';
 import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { MediaModule } from './modules/media/media.module';
 import { NotificationModule } from './modules/notification/notification.module';
@@ -56,6 +57,7 @@ import { RedisModule } from './redis/redis.module';
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
     { provide: APP_GUARD, useClass: CapabilityGuard },
+    { provide: APP_INTERCEPTOR, useClass: WorkspaceScopeInterceptor },
   ],
 })
 export class AppModule {}

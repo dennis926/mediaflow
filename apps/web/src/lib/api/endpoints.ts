@@ -13,6 +13,7 @@ import type {
   ComplianceReport,
   Content,
   ContentRevisionItem,
+  ContentTemplateItem,
   ContentVariant,
   ImportResult,
   KnowledgeAuditReport,
@@ -35,12 +36,15 @@ import type {
   Paged,
   ParseResult,
   PublishTask,
+  QueueHealth,
   QueueStats,
   ReviewItem,
   RoleItem,
   SettingGroupView,
   TrendPointData,
   UserItem,
+  WorkspaceMemberItem,
+  WorkspaceSummaryItem,
 } from './types';
 
 export const usersApi = {
@@ -73,6 +77,9 @@ export const reviewsApi = {
 export const authApi = {
   login: (email: string, password: string) => api.post<LoginResult>('/auth/login', { email, password }),
   me: () => api.get<AuthUser>('/auth/me'),
+  /** 切换工作区：服务端重新签发令牌 */
+  switchWorkspace: (workspaceId: string) =>
+    api.post<{ accessToken: string; refreshToken: string; expiresIn: string; user: AuthUser }>('/auth/switch-workspace', { workspaceId }),
   changePassword: (currentPassword: string, newPassword: string) =>
     api.post<{ success: true }>('/auth/change-password', { currentPassword, newPassword }),
 };
@@ -138,6 +145,10 @@ export const publishApi = {
     api.post<{ affected: number; failed: Array<{ id: string; reason: string }> }>('/publish/tasks/batch', { ids, action }),
   calendar: (weekStart?: string) => api.get<CalendarDay[]>('/publish/calendar', { weekStart }),
   queueStats: () => api.get<QueueStats>('/publish/queue/stats'),
+  /** 队列运维视图：卡住任务与死信 */
+  queueHealth: () => api.get<QueueHealth>('/publish/queue/health'),
+  /** 强制重排（无视锁定状态） */
+  requeue: (id: string) => api.post<PublishTask>(`/publish/tasks/${id}/requeue`),
 };
 
 export const aiApi = {
@@ -204,6 +215,16 @@ export const publicApi = {
   siteConfig: () => api.get<SiteConfigView>('/public/site-config'),
 };
 
+/** 工作区：同一实例里可以放多个业务空间，数据按工作区隔离 */
+export const workspacesApi = {
+  mine: () => api.get<WorkspaceSummaryItem[]>('/workspaces'),
+  create: (payload: { name: string; slug?: string }) => api.post<WorkspaceSummaryItem>('/workspaces', payload),
+  members: (id: string) => api.get<WorkspaceMemberItem[]>(`/workspaces/${id}/members`),
+  upsertMember: (id: string, payload: { userId: string; roleCodes: string[] }) =>
+    api.put<WorkspaceMemberItem>(`/workspaces/${id}/members`, payload),
+  removeMember: (id: string, userId: string) => api.delete<{ userId: string }>(`/workspaces/${id}/members/${userId}`),
+};
+
 /** 审计日志：谁在什么时候改了什么 */
 export const auditApi = {
   list: (query: { action?: string; actionPrefix?: string; actor?: string; keyword?: string; from?: string; to?: string; page?: number; pageSize?: number } = {}) =>
@@ -223,6 +244,18 @@ export const mediaApi = {
     return apiUpload<MediaAssetItem>('/media', form);
   },
   remove: (id: string) => api.delete<{ id: string }>(`/media/${id}`),
+};
+
+/** 文案模板库：常用写法沉淀与一键套用 */
+export const templatesApi = {
+  list: (query: { keyword?: string; platform?: string; category?: string; page?: number; pageSize?: number } = {}) =>
+    api.get<Paged<ContentTemplateItem>>('/content-templates', { ...query }),
+  categories: () => api.get<Array<{ category: string; count: number }>>('/content-templates/categories'),
+  create: (payload: Partial<ContentTemplateItem>) => api.post<ContentTemplateItem>('/content-templates', payload),
+  update: (id: string, payload: Partial<ContentTemplateItem>) => api.put<ContentTemplateItem>(`/content-templates/${id}`, payload),
+  remove: (id: string) => api.delete<{ id: string }>(`/content-templates/${id}`),
+  /** 套用模板：累加引用次数并返回内容 */
+  use: (id: string) => api.post<ContentTemplateItem>(`/content-templates/${id}/use`, {}),
 };
 
 export const knowledgeApi = {

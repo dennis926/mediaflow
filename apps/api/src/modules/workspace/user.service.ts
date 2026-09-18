@@ -22,6 +22,7 @@ import {
 } from './dto/user.dto';
 import { Role, RoleCode } from './entities/role.entity';
 import { User, UserStatus } from './entities/user.entity';
+import { WorkspaceMember } from './entities/workspace-member.entity';
 
 export interface UserView {
   id: string;
@@ -83,6 +84,7 @@ export class UserService {
   constructor(
     @InjectRepository(User) private readonly users: Repository<User>,
     @InjectRepository(Role) private readonly roles: Repository<Role>,
+    @InjectRepository(WorkspaceMember) private readonly members: Repository<WorkspaceMember>,
     private readonly audit: AuditService,
     private readonly workspaceContext: WorkspaceContextService,
   ) {}
@@ -158,7 +160,9 @@ export class UserService {
         lastLoginAt: null,
       }),
     );
-    await this.assignRoles(saved.id, dto.roleCodes?.length ? dto.roleCodes : ['editor'], scope.tenantId);
+    const createRoles: RoleCode[] = dto.roleCodes?.length ? (dto.roleCodes as RoleCode[]) : ['editor'];
+    await this.assignRoles(saved.id, createRoles, scope.tenantId);
+    await this.ensureMembership(saved.id, scope.tenantId, scope.workspaceId, createRoles);
 
     await this.record('user.create', saved.id, actor, { email: saved.email, roleCodes: dto.roleCodes ?? ['editor'], tempPasswordIssued: tempPassword !== null });
     this.logger.log(`已创建用户：${saved.email}`);
@@ -187,6 +191,7 @@ export class UserService {
     );
     const roleCodes = dto.roleCodes?.length ? dto.roleCodes : (['editor'] as RoleCode[]);
     await this.assignRoles(saved.id, roleCodes, scope.tenantId);
+    await this.ensureMembership(saved.id, scope.tenantId, scope.workspaceId, roleCodes);
     await this.record('user.invite', saved.id, actor, { email: saved.email, roleCodes });
 
     this.logger.log(`已邀请用户：${saved.email}`);
@@ -320,6 +325,20 @@ export class UserService {
         code: 'owner',
       })
       .getCount();
+  }
+
+  /** 新建/邀请用户时把他加入当前工作区，否则切换工作区列表是空的。 */
+  private async ensureMembership(userId: string, tenantId: string, workspaceId: string, roleCodes: RoleCode[]): Promise<void> {
+    try {
+      const existing = await this.members.findOne({ where: { userId, workspaceId } });
+      if (existing) {
+        await this.members.update({ id: existing.id }, { roleCodes });
+        return;
+      }
+      await this.members.save(this.members.create({ tenantId, workspaceId, userId, roleCodes, invitedBy: null }));
+    } catch (error) {
+      this.logger.warn(`写入工作区成员失败（不影响用户创建）：${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   private async assignRoles(userId: string, roleCodes: RoleCode[], tenantId: string, replace = false): Promise<void> {

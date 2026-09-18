@@ -4,6 +4,7 @@ import { PublishTaskStatus } from '@mediaflow/shared';
 import { AuditService } from '../audit/audit.service';
 import { PublishTask } from '../modules/publish/entities/publish-task.entity';
 import { CHANNEL_REGISTRY } from './channel-registry.provider';
+import { runInWorkspaceScope } from '../common/workspace-context.store';
 import { runtime } from '../modules/settings/runtime-config';
 import { PublishQueueService } from './publish.queue';
 import { PublishService } from './publish.service';
@@ -73,7 +74,7 @@ export class PublishWorker implements OnModuleInit, OnModuleDestroy {
         const entries = await this.queue.read(this.consumerName, runtime().publish.readCount, runtime().publish.readBlockMs);
         for (const entry of entries) {
           try {
-            await this.handle(entry.taskId);
+            await this.withTaskScope(entry.taskId);
           } finally {
             await this.queue.ack(entry.id);
           }
@@ -91,7 +92,7 @@ export class PublishWorker implements OnModuleInit, OnModuleDestroy {
       const stale = await this.queue.claimStale(this.consumerName);
       for (const entry of stale) {
         if (entry.id === '0-0') continue;
-        await this.handle(entry.taskId);
+        await this.withTaskScope(entry.taskId);
         await this.queue.ack(entry.id);
       }
       if (stale.length > 0) this.logger.log(`已接管 ${stale.length} 个中断的发布任务`);
@@ -111,6 +112,19 @@ export class PublishWorker implements OnModuleInit, OnModuleDestroy {
     } catch (error) {
       this.logger.warn(`扫描待发布任务失败：${error instanceof Error ? error.message : String(error)}`);
     }
+  }
+
+  /**
+   * 后台任务没有请求上下文：先读出任务所属工作区，再在该作用域里处理，
+   * 否则多工作区场景会把任务写进默认工作区（历史缺陷）。
+   */
+  private async withTaskScope(taskId: string): Promise<void> {
+    const scope = await this.publishService.scopeOf(taskId);
+    if (!scope) {
+      this.logger.warn(`任务 ${taskId} 不存在或已被删除，跳过`);
+      return;
+    }
+    await runInWorkspaceScope(scope, () => this.handle(taskId));
   }
 
   private async handle(taskId: string): Promise<void> {

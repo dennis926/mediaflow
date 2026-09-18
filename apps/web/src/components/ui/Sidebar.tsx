@@ -22,9 +22,11 @@ export interface SidebarProps {
   siteTagline?: string;
   /** Logo 图片地址，留空用站点名首字 */
   siteLogoUrl?: string;
+  /** 品牌下方的附加区域（例如工作区切换器） */
+  brandExtra?: ReactNode;
 }
 
-export function Sidebar({ items, activeHref, footer, onNavigate, siteName = 'MediaFlow', siteTagline = '', siteLogoUrl = '' }: SidebarProps) {
+export function Sidebar({ items, activeHref, footer, onNavigate, siteName = 'MediaFlow', siteTagline = '', siteLogoUrl = '', brandExtra }: SidebarProps) {
   return (
     <nav className={styles.sidebar} aria-label="主导航">
       <div className={styles.brand}>
@@ -39,6 +41,8 @@ export function Sidebar({ items, activeHref, footer, onNavigate, siteName = 'Med
           {siteTagline ? <span className={styles.brandTag}>{siteTagline}</span> : null}
         </span>
       </div>
+
+      {brandExtra}
 
       <div className={styles.nav}>
         <span className={styles.navSection}>运营</span>

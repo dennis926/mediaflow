@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Headers, Ip, Post } from '@nestjs/common';
-import { IsString, Length } from 'class-validator';
+import { IsString, IsUUID, Length } from 'class-validator';
 import { ChangePasswordDto } from '../workspace/dto/user.dto';
 import { UserService } from '../workspace/user.service';
 import { AuthService } from './auth.service';
@@ -7,6 +7,11 @@ import { AuthUser, LoginResult } from './auth.types';
 import { CurrentUser } from './current-user.decorator';
 import { LoginDto } from './dto/login.dto';
 import { Public } from './public.decorator';
+
+class SwitchWorkspaceDto {
+  @IsUUID('4')
+  workspaceId!: string;
+}
 
 class RefreshDto {
   @IsString()
@@ -25,6 +30,15 @@ export class AuthController {
   @Post('login')
   login(@Body() dto: LoginDto, @Ip() ip: string, @Headers('user-agent') userAgent?: string): Promise<LoginResult> {
     return this.authService.login(dto.email, dto.password, { ip, userAgent: userAgent ?? null });
+  }
+
+  /** 切换工作区：重新签发令牌，前端刷新即可（不需要重新登录） */
+  @Post('switch-workspace')
+  switchWorkspace(
+    @Body() dto: SwitchWorkspaceDto,
+    @CurrentUser() user: AuthUser,
+  ): Promise<{ accessToken: string; refreshToken: string; expiresIn: string; user: AuthUser }> {
+    return this.authService.switchWorkspace(user.id, dto.workspaceId);
   }
 
   /** 用刷新令牌续期：免登录时长见配置 AUTH_REFRESH_EXPIRES（默认 7 天）。 */

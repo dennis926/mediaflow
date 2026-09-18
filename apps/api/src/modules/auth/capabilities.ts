@@ -15,7 +15,8 @@ export type Capability =
   | 'knowledge.write'
   | 'platform.bind'
   | 'analytics.sync'
-  | 'audit.read';
+  | 'audit.read'
+  | 'workspace.manage';
 
 export const CAPABILITIES: Capability[] = [
   'settings.write',
@@ -28,6 +29,7 @@ export const CAPABILITIES: Capability[] = [
   'platform.bind',
   'analytics.sync',
   'audit.read',
+  'workspace.manage',
 ];
 
 export const CAPABILITY_LABELS: Record<Capability, string> = {
@@ -41,6 +43,7 @@ export const CAPABILITY_LABELS: Record<Capability, string> = {
   'platform.bind': '绑定/解绑平台账号',
   'analytics.sync': '同步平台数据',
   'audit.read': '查看审计日志',
+  'workspace.manage': '管理工作区与成员',
 };
 
 /** 默认矩阵：与改造前的 @Roles 行为完全一致，改配置后即可按公司需要调整。 */
@@ -55,6 +58,7 @@ export const DEFAULT_PERMISSION_MATRIX: Record<Capability, RoleCode[]> = {
   'platform.bind': ['owner', 'admin'],
   'analytics.sync': ['owner', 'admin'],
   'audit.read': ['owner', 'admin'],
+  'workspace.manage': ['owner', 'admin'],
 };
 
 export const DEFAULT_ROLE_LABELS: Record<string, string> = {

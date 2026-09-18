@@ -48,6 +48,19 @@ export class PublishController {
     return this.publishService.retry(id, toActor(user));
   }
 
+  /** 队列运维视图：队列状态 + 卡住任务 + 死信 */
+  @Get('queue/health')
+  queueHealth() {
+    return this.publishService.queueHealth();
+  }
+
+  /** 强制重排（无视锁定状态，用于卡住的任务） */
+  @Capability('publish.execute')
+  @Post('tasks/:id/requeue')
+  requeue(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user?: AuthUser): Promise<PublishTask> {
+    return this.publishService.requeue(id, toActor(user));
+  }
+
   /** 批量取消/重试（逐条返回结果） */
   @Capability('publish.execute')
   @Post('tasks/batch')

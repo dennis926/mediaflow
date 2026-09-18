@@ -16,6 +16,7 @@ import { Tag } from '../../../../components/ui/Tag';
 import { useSiteConfig } from '../../../../lib/knowledge';
 import { ApiError } from '../../../../lib/api/client';
 import { publishApi } from '../../../../lib/api/endpoints';
+import { QueueOpsPanel } from './QueueOpsPanel';
 import type { PublishTask } from '../../../../lib/api/types';
 import { TASK_STATUS_LABELS, TASK_STATUS_TONES, formatDateTime } from '../../../../lib/format';
 import { PublishIcon, RefreshIcon } from '../../../../lib/icons';
@@ -30,6 +31,9 @@ const TABS: Array<{ key: string; label: string; status?: PublishTaskStatus }> = 
   { key: 'failed', label: '失败', status: PublishTaskStatus.Failed },
   { key: 'canceled', label: '已取消', status: PublishTaskStatus.Canceled },
 ];
+
+/** 独立的运维视图：不按状态筛选，看队列整体健康度 */
+const OPS_TAB = 'ops';
 
 const CANCELABLE: string[] = [
   PublishTaskStatus.Pending,
@@ -222,6 +226,16 @@ export default function PublishQueuePage() {
 
       <Card flush>
         <div className={styles.tabs}>
+          <button
+            type="button"
+            className={`${styles.tab} ${active === OPS_TAB ? styles.tabActive : ''}`}
+            onClick={() => {
+              setActive(OPS_TAB);
+              setPage(1);
+            }}
+          >
+            队列运维
+          </button>
           {TABS.map((item) => (
             <button
               key={item.key}
@@ -237,8 +251,13 @@ export default function PublishQueuePage() {
           ))}
         </div>
 
-        <div style={{ padding: 'var(--mf-space-4) 0 0' }}>
-          {tasks.isLoading ? (
+        {active === OPS_TAB ? (
+          <div style={{ padding: 'var(--mf-space-4) var(--mf-space-5)' }}>
+            <QueueOpsPanel />
+          </div>
+        ) : (
+          <div style={{ padding: 'var(--mf-space-4) 0 0' }}>
+            {tasks.isLoading ? (
             <div style={{ padding: 'var(--mf-space-5)' }}>
               <SkeletonRows rows={5} />
             </div>
@@ -261,9 +280,10 @@ export default function PublishQueuePage() {
               }
             />
           )}
-        </div>
+          </div>
+        )}
 
-        <Pagination page={page} pageSize={site.pageSize} total={tasks.data?.meta.total ?? 0} onChange={setPage} />
+        {active === OPS_TAB ? null : <Pagination page={page} pageSize={site.pageSize} total={tasks.data?.meta.total ?? 0} onChange={setPage} />}
       </Card>
 
       <Dialog

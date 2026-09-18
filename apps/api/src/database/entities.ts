@@ -20,6 +20,8 @@ export * from '../modules/analytics/entities/analytics.entity';
 export * from '../modules/analytics/entities/track-event.entity';
 export * from '../modules/media/entities/media-asset.entity';
 export * from '../modules/content/entities/content-revision.entity';
+export * from '../modules/content/entities/content-template.entity';
+export * from '../modules/workspace/entities/workspace-member.entity';
 export * from '../modules/audit/entities/audit-log.entity';
 export * from '../modules/content/entities/brand-knowledge.entity';
 export * from '../modules/content/entities/content-review.entity';

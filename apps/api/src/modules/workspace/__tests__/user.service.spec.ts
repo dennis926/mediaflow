@@ -5,6 +5,7 @@ import { AuditService } from '../../../audit/audit.service';
 import { WorkspaceContextService } from '../../../common/workspace-context.service';
 import { Role } from '../entities/role.entity';
 import { User } from '../entities/user.entity';
+import { WorkspaceMember } from '../entities/workspace-member.entity';
 import { UserService } from '../user.service';
 
 const WORKSPACE_ID = '22222222-2222-2222-2222-222222222222';
@@ -26,6 +27,13 @@ function repo<T extends ObjectLiteral>(overrides: Partial<Record<string, unknown
 function actor(id = 'actor-1') {
   return { id, name: '操作人' };
 }
+
+const members = {
+  findOne: vi.fn(async () => null),
+  update: vi.fn(async () => ({ affected: 1 })),
+  save: vi.fn(async (value: unknown) => value),
+  create: vi.fn((value: unknown) => value),
+} as unknown as Repository<WorkspaceMember>;
 
 function buildService(options: { ownerCount?: number; user?: Partial<User> | null } = {}) {
   const users = repo<User>();
@@ -57,7 +65,7 @@ function buildService(options: { ownerCount?: number; user?: Partial<User> | nul
     current: vi.fn(async () => ({ tenantId: TENANT_ID, workspaceId: WORKSPACE_ID })),
   } as unknown as WorkspaceContextService;
 
-  return { service: new UserService(users, roles, audit, workspaceContext), users, audit, queryBuilder };
+  return { service: new UserService(users, roles, members, audit, workspaceContext), users, audit, queryBuilder };
 }
 
 describe('UserService 安全边界', () => {

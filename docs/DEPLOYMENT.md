@@ -247,3 +247,20 @@ E2E_ADMIN_EMAIL=you@example.com E2E_ADMIN_PASSWORD=... pnpm --filter @mediaflow/
 
 **端到端测试**：`pnpm test:e2e` 会读取 `.env.e2e`（包含 `E2E_ADMIN_EMAIL`/`E2E_ADMIN_PASSWORD`，不进仓库）后跑完整的
 登录 → 建内容 → AI 适配 → 建发布任务 → 查队列 → 通知 流程；缺少凭据文件时会明确报错而不是静默跳过。
+
+
+## 为什么生产不用 Docker（与仓库里的 docker-compose.yml 的关系）
+
+- `docker-compose.yml` **只用于本地开发**：起 PostgreSQL、Redis、MinIO 三个基础设施容器，方便在本机跑起来。
+- 生产环境（当前服务器）**不使用 Docker**：应用以 systemd 单元运行，Nginx 负责 TLS 与反代，理由：
+  1. 这台机器上数据库/Redis 是系统服务，已在跑，重复起容器会争端口和资源；
+  2. 排障更直接（`journalctl -u mediaflow-api`、`systemctl status`），不需要额外理解容器网络；
+  3. 备份/监控脚本直接读进程与文件，不用绕进容器。
+- 如果你希望**用 Docker 交付**给别人：把 `apps/api`、`apps/web` 各自加一个 Dockerfile，compose 里补齐 `api`/`web` 服务
+  并把 `DB_HOST`/`REDIS_HOST` 指向 compose 服务名即可；AGENTS.md 里列的命令（`pnpm dev`、`pnpm migrate`）在容器内同样适用。
+
+
+## 日志轮转
+
+已配置 `/etc/logrotate.d/mediaflow`：`/var/log/mediaflow*.log` 每天轮转、保留 14 天、压缩存储（`copytruncate` 不影响正在写入的进程）。
+新增服务时如果日志名符合 `mediaflow*.log` 会自动纳入；如需调整保留天数改这一个文件即可。

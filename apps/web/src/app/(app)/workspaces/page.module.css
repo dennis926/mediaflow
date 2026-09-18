@@ -1,0 +1,38 @@
+.sectionHead {
+  display: flex;
+  align-items: baseline;
+  gap: var(--mf-space-2);
+  flex-wrap: wrap;
+  padding: var(--mf-space-4) var(--mf-space-5) 0;
+}
+
+.toolbar {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--mf-space-3);
+  flex-wrap: wrap;
+  padding: 0 var(--mf-space-5) var(--mf-space-2);
+}
+
+.titleCell {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mf-space-1);
+}
+
+.titleStrong {
+  display: flex;
+  align-items: center;
+  gap: var(--mf-space-2);
+  font-weight: var(--mf-font-weight-medium);
+  color: var(--mf-color-text-primary);
+}
+
+.meta {
+  display: flex;
+  gap: var(--mf-space-2);
+  align-items: center;
+  flex-wrap: wrap;
+  font-size: var(--mf-font-size-xs);
+  color: var(--mf-color-text-tertiary);
+}

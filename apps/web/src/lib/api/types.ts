@@ -227,6 +227,69 @@ export interface SiteConfigView {
   aiDisclosureSuffix: string;
 }
 
+export interface WorkspaceSummaryItem {
+  id: string;
+  name: string;
+  slug: string;
+  status: string;
+  roleCodes: string[];
+  isCurrent: boolean;
+}
+
+export interface WorkspaceMemberItem {
+  userId: string;
+  displayName: string;
+  email: string;
+  roleCodes: string[];
+  joinedAt: string;
+}
+
+export interface ContentTemplateItem {
+  id: string;
+  name: string;
+  description: string | null;
+  platform: string | null;
+  category: string | null;
+  title: string;
+  body: string;
+  tags: string[];
+  isActive: boolean;
+  usageCount: number;
+  lastUsedAt: string | null;
+  createdByName: string | null;
+  updatedAt: string;
+}
+
+export interface QueueHealth {
+  stream: string;
+  group: string;
+  length: number;
+  pending: number;
+  consumers: number;
+  workerEnabled: boolean;
+  stuckMinutes: number;
+  stuckTasks: Array<{
+    id: string;
+    title: string | null;
+    platform: string;
+    status: string;
+    attempts: number;
+    maxAttempts: number;
+    lockedBy: string | null;
+    lockedAt: string | null;
+    lockedMinutes: number;
+  }>;
+  deadLetters: Array<{
+    id: string;
+    title: string | null;
+    platform: string;
+    attempts: number;
+    maxAttempts: number;
+    errorMessage: string | null;
+    finishedAt: string | null;
+  }>;
+}
+
 export interface ContentRevisionItem {
   id: string;
   contentId: string;

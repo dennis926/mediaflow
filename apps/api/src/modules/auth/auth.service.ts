@@ -9,6 +9,7 @@ import { REDIS_CLIENT } from '../../redis/redis.constants';
 import { RoleCode } from '../workspace/entities/role.entity';
 import { User } from '../workspace/entities/user.entity';
 import { runtime } from '../settings/runtime-config';
+import { WorkspaceService } from '../workspace/workspace.service';
 import { AuthUser, LoginResult, RefreshTokenPayload } from './auth.types';
 
 @Injectable()
@@ -20,6 +21,7 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly audit: AuditService,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
+    private readonly workspaces: WorkspaceService,
   ) {}
 
   private static readonly MAX_FAILURES = 5;
@@ -149,6 +151,46 @@ export class AuthService {
 
     this.logger.log(`登录成功：${user.email}`);
     return { accessToken, refreshToken, expiresIn, user: authUser };
+  }
+
+  /**
+   * 切换工作区：校验成员身份后重新签发令牌（工作区与角色都写进令牌）。
+   * 前端拿到新令牌后刷新页面即可，不需要重新登录。
+   */
+  async switchWorkspace(
+    userId: string,
+    workspaceId: string,
+  ): Promise<{ accessToken: string; refreshToken: string; expiresIn: string; user: AuthUser }> {
+    const user = await this.users.findOne({ where: { id: userId } });
+    if (!user) throw new UnauthorizedException('账号不存在');
+    if (user.status !== 'active') throw new UnauthorizedException('账号已被禁用，请联系管理员');
+
+    const membership = await this.workspaces.membership(userId, workspaceId);
+    const roles = (membership.roleCodes.length > 0 ? membership.roleCodes : await this.roleCodesOf(userId)) as RoleCode[];
+
+    const authUser: AuthUser = {
+      id: user.id,
+      email: user.email,
+      displayName: user.displayName,
+      tenantId: membership.workspace.tenantId,
+      workspaceId: membership.workspace.id,
+      roles,
+      isSuperAdmin: user.isSuperAdmin,
+      mustChangePassword: user.mustChangePassword,
+    };
+    const tokens = await this.issueTokens(authUser);
+
+    await this.audit.record({
+      action: 'auth.switch_workspace',
+      resourceType: 'workspace',
+      resourceId: workspaceId,
+      tenantId: membership.workspace.tenantId,
+      workspaceId,
+      actorId: user.id,
+      actorName: user.displayName,
+      payload: { workspaceName: membership.workspace.name, roles },
+    });
+    return { ...tokens, user: authUser };
   }
 
   async profile(userId: string): Promise<AuthUser> {
