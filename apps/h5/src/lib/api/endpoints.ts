@@ -19,6 +19,8 @@ export const authApi = {
   me: () => api.get<MobileAuthUser>('/auth/me'),
   changePassword: (currentPassword: string, newPassword: string) =>
     api.post<{ success: true }>('/auth/change-password', { currentPassword, newPassword }),
+  /** 登出：把刷新令牌加黑名单（服务端幂等） */
+  logout: (refreshToken?: string) => api.post<{ ok: true }>('/auth/logout', { refreshToken }),
 };
 
 export interface TaskQuery {

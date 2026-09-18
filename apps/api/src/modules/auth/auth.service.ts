@@ -1,6 +1,7 @@
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
 import * as bcrypt from 'bcrypt';
+import { randomUUID } from 'node:crypto';
 import { Repository } from 'typeorm';
 import { Inject, Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import Redis from 'ioredis';
@@ -66,19 +67,65 @@ export class AuthService {
         roles: user.roles,
         isSuperAdmin: user.isSuperAdmin,
       },
-      { expiresIn: accessExpires as unknown as number },
+      // jti 让访问令牌也可被追踪（黑名单目前只用于刷新令牌）
+      { expiresIn: accessExpires as unknown as number, jwtid: randomUUID() },
     );
     const refreshToken = await this.jwtService.signAsync(
       { sub: user.id, type: 'refresh' } satisfies RefreshTokenPayload,
-      { expiresIn: refreshExpires as unknown as number },
+      { expiresIn: refreshExpires as unknown as number, jwtid: randomUUID() },
     );
     return { accessToken, refreshToken, expiresIn: accessExpires };
+  }
+
+  /** 刷新令牌黑名单 key（登出、轮换后的旧令牌都会进来）。 */
+  private refreshBlockKey(jti: string): string {
+    return `auth:refresh:block:${jti}`;
+  }
+
+  /** 把某个刷新令牌加入黑名单，TTL = 该令牌剩余有效期（过期即自动清理）。 */
+  private async blockRefreshToken(payload: RefreshTokenPayload): Promise<void> {
+    if (!payload.jti) return;
+    const ttl = payload.exp ? Math.max(1, payload.exp - Math.floor(Date.now() / 1000)) : 7 * 24 * 3600;
+    await this.redis.set(this.refreshBlockKey(payload.jti), '1', 'EX', ttl).catch(() => undefined);
   }
 
   /**
    * 用刷新令牌换新令牌：用户在这段时间内打开系统不必重新登录。
    * 每次都重新读库，账号被禁用/角色被改会立即生效，避免旧令牌无限续命。
+   *
+   * 任务 6 起：**一次性使用** —— 每次刷新都会作废旧刷新令牌（加入黑名单），
+   * 旧令牌被再次使用会返回 401（检测令牌泄露/重放的常见手段）。
    */
+  async logout(refreshToken?: string, meta: { ip?: string | null; userAgent?: string | null } = {}): Promise<{ ok: true }> {
+    if (refreshToken) {
+      try {
+        // 允许已过期的令牌也走一遍（幂等）：能解出 jti 就加入黑名单
+        const payload = await this.jwtService.verifyAsync<RefreshTokenPayload>(refreshToken, { ignoreExpiration: true });
+        if (payload.type === 'refresh' && payload.sub) {
+          await this.blockRefreshToken(payload);
+          // 审计要带真实作用域；用户已被删除时退化为占位（不能为空）
+          const owner = await this.users.findOne({ where: { id: payload.sub } });
+          await this.audit.record({
+            action: 'auth.logout',
+            resourceType: 'user',
+            resourceId: payload.sub,
+            tenantId: owner?.tenantId ?? '00000000-0000-4000-8000-000000000000',
+            workspaceId: owner?.workspaceId ?? '00000000-0000-4000-8000-000000000000',
+            actorId: payload.sub,
+            actorName: null,
+            ip: meta.ip ?? null,
+            userAgent: meta.userAgent ?? null,
+            payload: { jti: payload.jti ?? null, reason: '用户主动登出' },
+          });
+        }
+      } catch {
+        // 令牌非法/被篡改：无需黑名单，直接返回成功（登出必须幂等）
+      }
+    }
+    return { ok: true };
+  }
+
+  
   async refresh(refreshToken: string): Promise<{ accessToken: string; refreshToken: string; expiresIn: string }> {
     let payload: RefreshTokenPayload;
     try {
@@ -87,6 +134,12 @@ export class AuthService {
       throw new UnauthorizedException('登录状态已过期，请重新登录');
     }
     if (payload.type !== 'refresh') throw new UnauthorizedException('令牌类型不正确，请重新登录');
+
+    // 已经被登出/轮换过的刷新令牌不能再换新令牌（一次性使用）
+    if (payload.jti) {
+      const blocked = await this.redis.get(this.refreshBlockKey(payload.jti)).catch(() => null);
+      if (blocked) throw new UnauthorizedException('登录状态已失效（该令牌已登出或被轮换），请重新登录');
+    }
 
     const user = await this.users.findOne({ where: { id: payload.sub } });
     if (!user) throw new UnauthorizedException('账号不存在，请重新登录');
@@ -105,6 +158,8 @@ export class AuthService {
     };
     // 刷新时按数据库现状重算（含角色），并让旧缓存作废
     await this.sessions.invalidate(user.id);
+    // 轮换：旧刷新令牌立即作废
+    await this.blockRefreshToken(payload);
     return this.issueTokens(authUser);
   }
 

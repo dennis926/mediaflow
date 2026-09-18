@@ -71,9 +71,17 @@ export function ProfilePage() {
   };
 
   const handleLogout = () => {
-    setToken(null);
-    queryClient.clear();
-    navigate('/login', { replace: true });
+    // 通知服务端作废刷新令牌（失败不阻塞本地登出）
+    const refreshToken = window.localStorage.getItem('mediaflow.refreshToken') ?? undefined;
+    void authApi
+      .logout(refreshToken)
+      .catch(() => undefined)
+      .finally(() => {
+        setToken(null);
+        window.localStorage.removeItem('mediaflow.refreshToken');
+        queryClient.clear();
+        navigate('/login', { replace: true });
+      });
   };
 
   const user = profile.data;

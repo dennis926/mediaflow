@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Headers, Ip, Post } from '@nestjs/common';
-import { IsString, Length, Matches } from 'class-validator';
+import { IsOptional, IsString, Length, Matches } from 'class-validator';
 import { UUID_SHAPE } from '../../common/validators/id-shape';
 import { ChangePasswordDto } from '../workspace/dto/user.dto';
 import { UserService } from '../workspace/user.service';
@@ -17,6 +17,14 @@ class SwitchWorkspaceDto {
    */
   @Matches(UUID_SHAPE, { message: 'workspaceId 必须是合法的工作区 ID' })
   workspaceId!: string;
+}
+
+class LogoutDto {
+  /** 可选：带上刷新令牌即可把它加入黑名单，避免登出后仍能被拿去换新令牌 */
+  @IsOptional()
+  @IsString()
+  @Length(10, 2000)
+  refreshToken?: string;
 }
 
 class RefreshDto {
@@ -45,6 +53,20 @@ export class AuthController {
     @CurrentUser() user: AuthUser,
   ): Promise<{ accessToken: string; refreshToken: string; expiresIn: string; user: AuthUser }> {
     return this.authService.switchWorkspace(user.id, dto.workspaceId);
+  }
+
+  /**
+   * 登出：把刷新令牌加入黑名单（幂等，无需有效访问令牌）。
+   * 前端在清除本地令牌前调用一次即可；即使调用失败也不影响本地登出。
+   */
+  @Public()
+  @Post('logout')
+  logout(
+    @Body() dto: LogoutDto,
+    @Ip() ip?: string,
+    @Headers('user-agent') userAgent?: string,
+  ): Promise<{ ok: true }> {
+    return this.authService.logout(dto?.refreshToken, { ip: ip ?? null, userAgent: userAgent ?? null });
   }
 
   /** 用刷新令牌续期：免登录时长见配置 AUTH_REFRESH_EXPIRES（默认 7 天）。 */

@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState, type ReactNode } from 'react';
 import { authApi } from '../../lib/api/endpoints';
-import { getToken, setToken } from '../../lib/api/client';
+import { getRefreshToken, getToken, setToken } from '../../lib/api/client';
 import { trackEvent } from '../../lib/track';
 import { useSiteConfig } from '../../lib/knowledge';
 import { WorkspaceSwitcher } from './WorkspaceSwitcher';
@@ -99,8 +99,15 @@ export function AppShell({ children }: { children: ReactNode }) {
   });
 
   const signOut = (): void => {
-    setToken(null, null);
-    router.replace('/login');
+    // 先把刷新令牌交给服务端加黑名单（幂等、失败不阻塞）；再做本地清除
+    const refreshToken = getRefreshToken() ?? undefined;
+    void authApi
+      .logout(refreshToken)
+      .catch(() => undefined)
+      .finally(() => {
+        setToken(null, null);
+        router.replace('/login');
+      });
   };
 
   if (!ready) return null;

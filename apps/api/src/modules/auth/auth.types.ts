@@ -24,4 +24,9 @@ export interface LoginResult {
 export interface RefreshTokenPayload {
   sub: string;
   type: 'refresh';
+  /** 令牌唯一 id：登出与轮换时用它把旧令牌加入黑名单 */
+  jti?: string;
+  /** 过期时间（秒，JWT 标准声明），黑名单 TTL 用它算剩余有效期 */
+  exp?: number;
+  iat?: number;
 }

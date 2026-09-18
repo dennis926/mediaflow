@@ -89,6 +89,8 @@ export const authApi = {
     api.post<{ accessToken: string; refreshToken: string; expiresIn: string; user: AuthUser }>('/auth/switch-workspace', { workspaceId }),
   changePassword: (currentPassword: string, newPassword: string) =>
     api.post<{ success: true }>('/auth/change-password', { currentPassword, newPassword }),
+  /** 登出：服务端把刷新令牌加入黑名单（幂等）；失败也不影响本地清除登录态 */
+  logout: (refreshToken?: string) => api.post<{ ok: true }>('/auth/logout', { refreshToken }),
 };
 
 export interface ContentQuery {
