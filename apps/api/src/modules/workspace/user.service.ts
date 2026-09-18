@@ -23,6 +23,7 @@ import {
 import { Role, RoleCode } from './entities/role.entity';
 import { User, UserStatus } from './entities/user.entity';
 import { WorkspaceMember } from './entities/workspace-member.entity';
+import { AuthSessionService } from '../auth/auth-session.service';
 
 export interface UserView {
   id: string;
@@ -87,6 +88,7 @@ export class UserService {
     @InjectRepository(WorkspaceMember) private readonly members: Repository<WorkspaceMember>,
     private readonly audit: AuditService,
     private readonly workspaceContext: WorkspaceContextService,
+    private readonly sessions: AuthSessionService,
   ) {}
 
   async list(query: QueryUserDto): Promise<UserPage> {
@@ -225,6 +227,7 @@ export class UserService {
       await manager.softDelete(User, { id: user.id });
     });
     await this.record('user.delete', user.id, actor, { email: user.email });
+    await this.sessions.invalidate(user.id);
     this.logger.log(`已删除用户：${user.email}`);
     return { id: user.id, deletedAt: new Date() };
   }
@@ -248,7 +251,19 @@ export class UserService {
     }
 
     await this.assignRoles(user.id, unique, scope.tenantId, true);
-    await this.record('user.update_roles', user.id, actor, { roleCodes: unique, previous: user.roles?.map((role) => role.code) ?? [] });
+    /**
+     * 角色存在两处：user_roles（全局）与 workspace_members.role_codes（按工作区）。
+     * 只改前者会让两份数据不一致 —— 切换工作区/鉴权读到的是后者，表现为"降权不生效"。
+     * 这里同时同步成员表，保证两份一致。
+     */
+    await this.members.update({ userId: user.id }, { roleCodes: unique });
+    await this.record('user.update_roles', user.id, actor, {
+      roleCodes: unique,
+      previous: user.roles?.map((role) => role.code) ?? [],
+      membershipsSynced: true,
+    });
+    // 降权/升权后旧令牌里的角色立即作废
+    await this.sessions.invalidate(user.id);
     return this.get(user.id);
   }
 
@@ -272,6 +287,8 @@ export class UserService {
     }
     await this.users.update({ id: user.id }, { status: dto.status });
     await this.record(dto.status === 'active' ? 'user.enable' : 'user.disable', user.id, actor, { status: dto.status });
+    // 停用/启用必须让未过期的令牌立即生效（否则可继续操作到令牌过期）
+    await this.sessions.invalidate(user.id);
     return this.get(user.id);
   }
 

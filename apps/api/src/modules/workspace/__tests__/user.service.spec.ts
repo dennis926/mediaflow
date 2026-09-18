@@ -41,6 +41,8 @@ function buildService(options: { ownerCount?: number; user?: Partial<User> | nul
     find: vi.fn(async () => [
       { id: 'role-owner', code: 'owner' },
       { id: 'role-editor', code: 'editor' },
+      { id: 'role-viewer', code: 'viewer' },
+      { id: 'role-admin', code: 'admin' },
     ] as Role[]),
   });
   const queryBuilder = {
@@ -57,6 +59,17 @@ function buildService(options: { ownerCount?: number; user?: Partial<User> | nul
     getRawMany: vi.fn(async () => []),
     getCount: vi.fn(async () => options.ownerCount ?? 2),
   };
+  // remove() 走事务：给仓储一个 manager.transaction 替身
+  const managerStub = {
+    delete: vi.fn(async () => ({ affected: 1 })),
+    query: vi.fn(async () => undefined),
+    softDelete: vi.fn(async () => ({ affected: 1 })),
+    update: vi.fn(async () => ({ affected: 1 })),
+    save: vi.fn(async (value: unknown) => value),
+  };
+  (users as unknown as { manager: unknown }).manager = {
+    transaction: vi.fn(async (run: (m: unknown) => Promise<unknown>) => run(managerStub)),
+  };
   (users.createQueryBuilder as unknown as ReturnType<typeof vi.fn>).mockReturnValue(queryBuilder);
   (users.findOne as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(options.user ?? null);
 
@@ -65,7 +78,11 @@ function buildService(options: { ownerCount?: number; user?: Partial<User> | nul
     current: vi.fn(async () => ({ tenantId: TENANT_ID, workspaceId: WORKSPACE_ID })),
   } as unknown as WorkspaceContextService;
 
-  return { service: new UserService(users, roles, members, audit, workspaceContext), users, audit, queryBuilder };
+  const sessions = { invalidate: vi.fn(async () => 1) };
+  return {
+    service: new UserService(users, roles, members, audit, workspaceContext, sessions as never),
+    users, audit, queryBuilder, sessions, members,
+  };
 }
 
 describe('UserService 安全边界', () => {
@@ -155,5 +172,49 @@ describe('UserService 安全边界', () => {
     await expect(
       service.changeOwnPassword('u4', { currentPassword: 'WrongPass1', newPassword: 'NewPass123' }),
     ).rejects.toBeInstanceOf(BadRequestException);
+  });
+});
+
+describe('权限变更必须让旧令牌立即失效（任务 2 覆盖测试）', () => {
+  const actor = { id: 'actor-1', name: 'Ops' };
+
+  it('停用用户后调用 invalidate', async () => {
+    const target = { id: 'u-9', email: 'x@y.z', status: 'active', roles: [] } as unknown as User;
+    const { service, sessions } = buildService({ user: target });
+    await service.updateStatus('u-9', { status: 'disabled' } as never, actor);
+    expect(sessions.invalidate).toHaveBeenCalledWith('u-9');
+  });
+
+  it('启用用户后调用 invalidate', async () => {
+    const target = { id: 'u-9', email: 'x@y.z', status: 'disabled', roles: [] } as unknown as User;
+    const { service, sessions } = buildService({ user: target });
+    await service.updateStatus('u-9', { status: 'active' } as never, actor);
+    expect(sessions.invalidate).toHaveBeenCalledWith('u-9');
+  });
+
+  it('修改角色后调用 invalidate', async () => {
+    const target = { id: 'u-9', email: 'x@y.z', status: 'active', roles: [{ code: 'admin' }] } as unknown as User;
+    const { service, sessions } = buildService({ user: target });
+    await service.updateRoles('u-9', ['viewer'] as never, actor);
+    expect(sessions.invalidate).toHaveBeenCalledWith('u-9');
+  });
+
+  it('修改角色时同步更新工作区成员表（避免两处角色不一致）', async () => {
+    const target = { id: 'u-9', email: 'x@y.z', status: 'active', roles: [{ code: 'admin' }] } as unknown as User;
+    const { service, members } = buildService({ user: target });
+
+    await service.updateRoles('u-9', ['viewer'] as never, actor);
+
+    expect((members.update as unknown as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith(
+      { userId: 'u-9' },
+      { roleCodes: ['viewer'] },
+    );
+  });
+
+  it('删除用户后调用 invalidate', async () => {
+    const target = { id: 'u-9', email: 'x@y.z', status: 'active', roles: [{ code: 'editor' }] } as unknown as User;
+    const { service, sessions } = buildService({ user: target, ownerCount: 2 });
+    await service.remove('u-9', actor);
+    expect(sessions.invalidate).toHaveBeenCalledWith('u-9');
   });
 });

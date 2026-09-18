@@ -6,6 +6,7 @@ import { WorkspaceContextService } from '../../common/workspace-context.service'
 import { RoleCode } from './entities/role.entity';
 import { WorkspaceMember } from './entities/workspace-member.entity';
 import { User } from './entities/user.entity';
+import { AuthSessionService } from '../auth/auth-session.service';
 import { Workspace, WorkspaceStatus } from './entities/workspace.entity';
 
 export interface WorkspaceSummary {
@@ -41,6 +42,7 @@ export class WorkspaceService {
     @InjectRepository(User) private readonly users: Repository<User>,
     private readonly workspaceContext: WorkspaceContextService,
     private readonly audit: AuditService,
+    private readonly sessions: AuthSessionService,
   ) {}
 
   /** 当前用户能看到/切换的工作区列表。 */
@@ -189,6 +191,8 @@ export class WorkspaceService {
       actorName: actor.name ?? null,
       payload: { roleCodes: input.roleCodes },
     });
+    // 成员角色变更立即生效（否则旧令牌按旧角色放行）
+    await this.sessions.invalidate(input.userId);
     const list = await this.members_(workspaceId);
     return list.find((item) => item.userId === input.userId) as WorkspaceMemberView;
   }
@@ -205,6 +209,8 @@ export class WorkspaceService {
     }
 
     await this.members.delete({ id: member.id });
+    // 移出成员后，其未过期令牌必须立即失去该工作区的访问权
+    await this.sessions.invalidate(userId);
     await this.audit.record({
       action: 'workspace.member_remove',
       resourceType: 'workspace_member',

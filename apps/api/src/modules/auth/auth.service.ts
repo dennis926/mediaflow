@@ -10,6 +10,7 @@ import { RoleCode } from '../workspace/entities/role.entity';
 import { User } from '../workspace/entities/user.entity';
 import { runtime } from '../settings/runtime-config';
 import { WorkspaceService } from '../workspace/workspace.service';
+import { AuthSessionService } from './auth-session.service';
 import { AuthUser, LoginResult, RefreshTokenPayload } from './auth.types';
 
 @Injectable()
@@ -22,6 +23,7 @@ export class AuthService {
     private readonly audit: AuditService,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
     private readonly workspaces: WorkspaceService,
+    private readonly sessions: AuthSessionService,
   ) {}
 
   private static readonly MAX_FAILURES = 5;
@@ -101,6 +103,8 @@ export class AuthService {
       isSuperAdmin: user.isSuperAdmin,
       mustChangePassword: user.mustChangePassword,
     };
+    // 刷新时按数据库现状重算（含角色），并让旧缓存作废
+    await this.sessions.invalidate(user.id);
     return this.issueTokens(authUser);
   }
 
@@ -150,6 +154,8 @@ export class AuthService {
     });
 
     this.logger.log(`登录成功：${user.email}`);
+    // 登录时重建：避免旧缓存里的停用/角色信息影响刚签发的令牌
+    await this.sessions.invalidate(user.id);
     return { accessToken, refreshToken, expiresIn, user: authUser };
   }
 
@@ -190,6 +196,7 @@ export class AuthService {
       actorName: user.displayName,
       payload: { workspaceName: membership.workspace.name, roles },
     });
+    await this.sessions.invalidate(user.id);
     return { ...tokens, user: authUser };
   }
 

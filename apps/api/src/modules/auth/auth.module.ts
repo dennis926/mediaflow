@@ -4,14 +4,16 @@ import { JwtModule } from '@nestjs/jwt';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Role } from '../workspace/entities/role.entity';
 import { User } from '../workspace/entities/user.entity';
+import { WorkspaceMember } from '../workspace/entities/workspace-member.entity';
 import { WorkspaceModule } from '../workspace/workspace.module';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
+import { AuthSessionService } from './auth-session.service';
 
 @Global()
 @Module({
   imports: [
-    TypeOrmModule.forFeature([User, Role]),
+    TypeOrmModule.forFeature([User, Role, WorkspaceMember]),
     WorkspaceModule,
     JwtModule.registerAsync({
       inject: [ConfigService],
@@ -22,7 +24,7 @@ import { AuthService } from './auth.service';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService],
-  exports: [AuthService, JwtModule],
+  providers: [AuthService, AuthSessionService],
+  exports: [AuthService, AuthSessionService, JwtModule],
 })
 export class AuthModule {}
