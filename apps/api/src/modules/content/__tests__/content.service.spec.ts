@@ -29,7 +29,7 @@ interface ContentServiceHarness {
   contents: Repository<Content>;
   variants: Repository<ContentVariant>;
   ai: AiService;
-  manager: { softDelete: ReturnType<typeof vi.fn> };
+  manager: { softDelete: ReturnType<typeof vi.fn>; createQueryBuilder: ReturnType<typeof vi.fn> };
   knowledge: { findRelevant: ReturnType<typeof vi.fn>; markUsed: ReturnType<typeof vi.fn> };
 }
 
@@ -59,7 +59,11 @@ function buildService(options: { existingVariants?: Partial<ContentVariant>[] } 
     current: vi.fn(async () => ({ tenantId: TENANT_ID, workspaceId: WORKSPACE_ID })),
   } as unknown as WorkspaceContextService;
 
-  const manager = { softDelete: vi.fn(async () => ({ affected: 1 })) };
+  const cascadeQuery = { update: vi.fn().mockReturnThis(), set: vi.fn().mockReturnThis(), where: vi.fn().mockReturnThis(), execute: vi.fn(async () => ({ affected: 2 })) };
+  const manager = {
+    softDelete: vi.fn(async () => ({ affected: 1 })),
+    createQueryBuilder: vi.fn(() => cascadeQuery),
+  };
   const knowledge = {
     findRelevant: vi.fn(async () => []),
     buildPromptSection: vi.fn(() => ''),
@@ -133,6 +137,8 @@ describe('ContentService disclosure', () => {
     // 内容与其平台版本在同一个事务中软删
     expect(manager.softDelete).toHaveBeenCalledWith(expect.anything(), { id: 'c1' });
     expect(manager.softDelete).toHaveBeenCalledWith(expect.anything(), { contentId: 'c1' });
+    // 同一事务里还要把未完成的发布任务取消掉（否则队列里会留下"幽灵任务"）
+    expect(manager.createQueryBuilder).toHaveBeenCalledTimes(2);
   });
 });
 

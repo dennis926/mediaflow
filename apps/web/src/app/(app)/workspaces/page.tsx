@@ -8,6 +8,7 @@ import { Button } from '../../../components/ui/Button';
 import { Card } from '../../../components/ui/Card';
 import { DataTable, type Column } from '../../../components/ui/DataTable';
 import { EmptyState } from '../../../components/ui/EmptyState';
+import { QueryError } from '../../../components/ui/QueryError';
 import { Input, Select } from '../../../components/ui/Field';
 import { SkeletonRows } from '../../../components/ui/Skeleton';
 import { Tag } from '../../../components/ui/Tag';
@@ -174,7 +175,9 @@ export default function WorkspacesPage() {
           <span className={styles.titleStrong}>我参与的工作区</span>
           <span className={styles.meta}>共 {mine.data?.length ?? 0} 个</span>
         </div>
-        {mine.isLoading ? (
+        {mine.isError ? (
+          <QueryError error={mine.error} action="加载工作区" onRetry={() => void mine.refetch()} />
+        ) : mine.isLoading ? (
           <div style={{ padding: 'var(--mf-space-5)' }}>
             <SkeletonRows rows={2} />
           </div>

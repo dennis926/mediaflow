@@ -16,6 +16,10 @@ export interface AiCompletionResult {
   model: string;
   tokensInput: number;
   tokensOutput: number;
+  /** 命中提示词缓存的输入 token（大模型官网按"缓存命中"单独计价） */
+  tokensCached?: number;
+  /** 输出里用于推理（思考）的 token，deepseek-flash 这类推理模型会有 */
+  tokensReasoning?: number;
 }
 
 export interface AiProvider {

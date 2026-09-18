@@ -8,6 +8,7 @@ import { Card } from '../../../components/ui/Card';
 import { DataTable, type Column } from '../../../components/ui/DataTable';
 import { Dialog } from '../../../components/ui/Dialog';
 import { EmptyState } from '../../../components/ui/EmptyState';
+import { QueryError } from '../../../components/ui/QueryError';
 import { Input, Select, Textarea } from '../../../components/ui/Field';
 import { Pagination } from '../../../components/ui/Pagination';
 import { SkeletonRows } from '../../../components/ui/Skeleton';
@@ -423,7 +424,9 @@ export default function KnowledgePage() {
         </div>
 
         <div style={{ padding: 'var(--mf-space-4) 0 0' }}>
-          {list.isLoading ? (
+          {list.isError ? (
+          <QueryError error={list.error} action="加载品牌资料" onRetry={() => void list.refetch()} />
+        ) : list.isLoading ? (
             <div style={{ padding: 'var(--mf-space-5)' }}>
               <SkeletonRows rows={5} />
             </div>

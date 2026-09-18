@@ -1,6 +1,6 @@
 import { ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { AiFlagType, ContentStatus, PlatformCode, appendAiDisclosure } from '@mediaflow/shared';
+import { AiFlagType, ContentStatus, PlatformCode, PublishTaskStatus, appendAiDisclosure } from '@mediaflow/shared';
 import { runtime } from '../settings/runtime-config';
 import { DataSource, EntityManager, Repository } from 'typeorm';
 import { AuditService } from '../../audit/audit.service';
@@ -11,6 +11,8 @@ import { AiAdaptDto } from '../ai/dto/ai.dto';
 import { ContentRevision } from './entities/content-revision.entity';
 import { ContentVariant } from './entities/content-variant.entity';
 import { Content } from './entities/content.entity';
+import { ContentReview } from './entities/content-review.entity';
+import { PublishTask } from '../publish/entities/publish-task.entity';
 import type { KnowledgeMatch } from './knowledge.service';
 import { AiFlagCheckDto, CreateContentDto, QueryContentDto, UpdateContentDto } from './dto/content.dto';
 
@@ -277,6 +279,19 @@ export class ContentService {
       { id },
       { status: archived ? ContentStatus.Archived : ContentStatus.Draft },
     );
+
+    // 归档=不再参与发布：把还没发出去的任务一并取消，避免队列里留着不会再执行的任务
+    if (archived) {
+      await this.dataSource
+        .createQueryBuilder()
+        .update(PublishTask)
+        .set({ status: PublishTaskStatus.Canceled, finishedAt: new Date(), errorMessage: '内容已归档，任务自动取消' })
+        .where('content_id = :contentId AND status IN (:...statuses)', {
+          contentId: id,
+          statuses: [PublishTaskStatus.Pending, PublishTaskStatus.Scheduled],
+        })
+        .execute();
+    }
     await this.audit.record({
       action: archived ? 'content.archive' : 'content.unarchive',
       resourceType: 'content',
@@ -293,14 +308,43 @@ export class ContentService {
 
   async remove(id: string, actor: ContentActor): Promise<{ id: string; deletedAt: Date }> {
     const content = await this.get(id);
-    // 级联软删平台版本，避免内容删了但版本还留在库里造成统计漂移。
+    const deletedAt = new Date();
+
+    /**
+     * 级联清理，避免"幽灵数据"：
+     * - 平台版本一并软删（否则统计与列表会漂移）；
+     * - **未完成**的发布任务自动取消（内容都没了，任务队列里不该还留着待发布）；
+     * - 待审核记录关闭，审核列表不再出现已删内容。
+     * 已发布的任务保留（历史事实），仅标记来源内容已删除。
+     */
     await this.dataSource.transaction(async (manager: EntityManager) => {
       await manager.softDelete(Content, { id: content.id });
       await manager.softDelete(ContentVariant, { contentId: content.id });
+      await manager
+        .createQueryBuilder()
+        .update(PublishTask)
+        .set({
+          status: PublishTaskStatus.Canceled,
+          finishedAt: deletedAt,
+          errorMessage: '内容已被删除，任务自动取消',
+          lockedBy: null,
+          lockedAt: null,
+        })
+        .where('content_id = :contentId AND status IN (:...statuses)', {
+          contentId: content.id,
+          statuses: [PublishTaskStatus.Pending, PublishTaskStatus.Scheduled, PublishTaskStatus.ManualRequired, PublishTaskStatus.Failed],
+        })
+        .execute();
+      await manager
+        .createQueryBuilder()
+        .update(ContentReview)
+        .set({ status: 'changes_requested', note: '内容已被删除，审核自动关闭', decidedAt: deletedAt })
+        .where('content_id = :contentId AND status = :status', { contentId: content.id, status: 'pending' })
+        .execute();
     });
-    await this.record(content, 'content.delete', actor, {});
-    const deletedAt = new Date();
-    this.logger.log(`已软删除内容：${content.title}`);
+
+    await this.record(content, 'content.delete', actor, { cascadedTasks: true });
+    this.logger.log(`已软删除内容（含级联取消未完成任务）：${content.title}`);
     return { id: content.id, deletedAt };
   }
 

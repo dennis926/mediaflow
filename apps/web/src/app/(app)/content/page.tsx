@@ -10,6 +10,7 @@ import { Card } from '../../../components/ui/Card';
 import { DataTable, type Column } from '../../../components/ui/DataTable';
 import { Dialog } from '../../../components/ui/Dialog';
 import { EmptyState } from '../../../components/ui/EmptyState';
+import { QueryError } from '../../../components/ui/QueryError';
 import { Input, Select } from '../../../components/ui/Field';
 import { Pagination } from '../../../components/ui/Pagination';
 import { SkeletonRows } from '../../../components/ui/Skeleton';
@@ -317,7 +318,9 @@ export default function ContentListPage() {
         </div>
 
         <div style={{ padding: 'var(--mf-space-4) 0 0' }}>
-          {contents.isLoading ? (
+          {contents.isError ? (
+          <QueryError error={contents.error} action="加载内容列表" onRetry={() => void contents.refetch()} />
+        ) : contents.isLoading ? (
             <div style={{ padding: 'var(--mf-space-5)' }}>
               <SkeletonRows rows={5} />
             </div>

@@ -10,6 +10,7 @@ import { Card } from '../../../../components/ui/Card';
 import { DataTable, type Column } from '../../../../components/ui/DataTable';
 import { Dialog } from '../../../../components/ui/Dialog';
 import { EmptyState } from '../../../../components/ui/EmptyState';
+import { QueryError } from '../../../../components/ui/QueryError';
 import { Pagination } from '../../../../components/ui/Pagination';
 import { SkeletonRows } from '../../../../components/ui/Skeleton';
 import { Tag } from '../../../../components/ui/Tag';
@@ -257,7 +258,9 @@ export default function PublishQueuePage() {
           </div>
         ) : (
           <div style={{ padding: 'var(--mf-space-4) 0 0' }}>
-            {tasks.isLoading ? (
+            {tasks.isError ? (
+              <QueryError error={tasks.error} action="加载发布任务" onRetry={() => void tasks.refetch()} />
+            ) : tasks.isLoading ? (
             <div style={{ padding: 'var(--mf-space-5)' }}>
               <SkeletonRows rows={5} />
             </div>

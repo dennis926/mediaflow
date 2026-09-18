@@ -217,6 +217,18 @@ E2E_ADMIN_EMAIL=you@example.com E2E_ADMIN_PASSWORD=... pnpm --filter @mediaflow/
 6. **角色与权限**：权限矩阵、角色显示名、登录有效期与免登录时长 —— 「设置 → 角色与权限」。
 7. **平台密钥**：微信/抖音/小红书 AppID 与 Secret —— 「设置 → 平台密钥」。
 
+### 初始化命令（新环境按顺序执行）
+
+```bash
+pnpm install && pnpm build:packages
+pnpm migrate                                        # 建表/升表
+pnpm seed                                           # 工作区、角色、平台、管理员
+pnpm --filter @mediaflow/api run seed:knowledge     # 示例品牌资料（数据文件驱动）
+pnpm --filter @mediaflow/api run seed:templates     # 示例文案模板（数据文件驱动）
+pnpm --filter @mediaflow/api run build
+# 生产由 systemd 承载：systemctl restart mediaflow-api mediaflow-web
+```
+
 ### 初始化数据
 - 示例品牌资料放在 `apps/api/src/database/seeds/sample-knowledge.json`，**可以直接替换成自己的资料**；
 - 或者设 `SEED_SAMPLE_CONTENT=false` 跳过示例数据（推荐交付时这么做）；
@@ -264,3 +276,10 @@ E2E_ADMIN_EMAIL=you@example.com E2E_ADMIN_PASSWORD=... pnpm --filter @mediaflow/
 
 已配置 `/etc/logrotate.d/mediaflow`：`/var/log/mediaflow*.log` 每天轮转、保留 14 天、压缩存储（`copytruncate` 不影响正在写入的进程）。
 新增服务时如果日志名符合 `mediaflow*.log` 会自动纳入；如需调整保留天数改这一个文件即可。
+
+
+## 安全响应头
+
+Nginx 已在站点配置里统一加上：`Strict-Transport-Security`、`X-Content-Type-Options: nosniff`、
+`X-Frame-Options: SAMEORIGIN`、`Referrer-Policy`、`Permissions-Policy`。
+API 自身的跨域是**白名单制**（`WEB_URL` / `H5_URL` / `CORS_ORIGINS` + `chrome-extension://`），不是 `*`。

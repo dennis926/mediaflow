@@ -58,3 +58,29 @@
   flex-wrap: wrap;
   padding: var(--mf-space-3) var(--mf-space-4);
 }
+
+.strong {
+  font-weight: var(--mf-font-weight-medium);
+  color: var(--mf-color-text-primary);
+}
+
+.totalRow {
+  display: flex;
+  align-items: baseline;
+  gap: var(--mf-space-3);
+  flex-wrap: wrap;
+  padding: var(--mf-space-4) var(--mf-space-4);
+  border-top: 1px solid var(--mf-color-border-subtle);
+}
+
+.totalLabel {
+  font-size: var(--mf-font-size-sm);
+  color: var(--mf-color-text-secondary);
+}
+
+.totalValue {
+  font-size: var(--mf-font-size-xl);
+  font-weight: var(--mf-font-weight-semibold);
+  color: var(--mf-color-text-primary);
+  font-variant-numeric: tabular-nums;
+}

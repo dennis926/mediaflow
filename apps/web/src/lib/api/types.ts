@@ -20,6 +20,10 @@ export interface AiGeneration {
   tokensInput: number;
   tokensOutput: number;
   latencyMs: number;
+  /** 命中缓存的输入 token */
+  tokensCached?: number;
+  /** 输出中的推理（思考）token */
+  tokensReasoning?: number;
   /** 估算花费（元），单价未配置时恒为 0 */
   cost: string;
   createdAt: string;
@@ -316,10 +320,34 @@ export interface AuditLogItem {
 }
 
 export interface AiUsageSummary {
-  summary: { calls: number; failed: number; tokensInput: number; tokensOutput: number; cost: string; avgLatencyMs: number; priceConfigured: boolean };
-  byDay: Array<{ date: string; calls: number; tokens: number; cost: string }>;
-  byTask: Array<{ taskType: string; calls: number; tokens: number; cost: string }>;
-  byModel: Array<{ model: string; calls: number; tokens: number; cost: string }>;
+  summary: {
+    calls: number;
+    failed: number;
+    tokensInput: number;
+    tokensOutput: number;
+    /** 命中提示词缓存的输入 token */
+    tokensCached: number;
+    /** 输出中的推理（思考）token */
+    tokensReasoning: number;
+    cacheHitRate: number;
+    cost: string;
+    costRecorded: string;
+    avgLatencyMs: number;
+    avgCostPerCall: string;
+    priceConfigured: boolean;
+  };
+  /** 当前生效的三段单价（元/百万 token） */
+  pricing: { inputPerMTok: number; cachedInputPerMTok: number; outputPerMTok: number };
+  /** 单价 × 用量 = 金额 的明细 */
+  costBreakdown: {
+    inputMissed: { tokens: number; unitPrice: number; amount: string };
+    inputCached: { tokens: number; unitPrice: number; amount: string };
+    output: { tokens: number; unitPrice: number; amount: string };
+    total: string;
+  };
+  byDay: Array<{ date: string; calls: number; tokens: number; cached: number; cost: string }>;
+  byTask: Array<{ taskType: string; calls: number; tokens: number; cached: number; cost: string }>;
+  byModel: Array<{ model: string; calls: number; tokens: number; cached: number; cost: string }>;
 }
 
 export interface MediaAssetItem {

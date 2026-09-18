@@ -7,6 +7,7 @@ import { Button } from '../../../components/ui/Button';
 import { Card } from '../../../components/ui/Card';
 import { DataTable, type Column } from '../../../components/ui/DataTable';
 import { EmptyState } from '../../../components/ui/EmptyState';
+import { QueryError } from '../../../components/ui/QueryError';
 import { Input, Select } from '../../../components/ui/Field';
 import { SkeletonRows } from '../../../components/ui/Skeleton';
 import { Tag } from '../../../components/ui/Tag';
@@ -138,7 +139,9 @@ export default function AuditPage() {
       </Card>
 
       <Card flush>
-        {logs.isLoading ? (
+        {logs.isError ? (
+          <QueryError error={logs.error} action="加载审计日志" onRetry={() => void logs.refetch()} />
+        ) : logs.isLoading ? (
           <div style={{ padding: 'var(--mf-space-5)' }}>
             <SkeletonRows rows={5} />
           </div>

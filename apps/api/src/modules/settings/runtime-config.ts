@@ -50,6 +50,8 @@ export interface AiRuntimeConfig {
   maxTokens: number;
   /** 计价（元/百万 token），用于统计花费；填 0 表示不统计 */
   priceInputPerMTok: number;
+  /** 缓存命中的输入单价（大模型官网按此单独计价，通常远低于未命中价） */
+  priceCachedInputPerMTok: number;
   priceOutputPerMTok: number;
   /** 每分钟最多生成次数，0 = 不限 */
   rateLimitPerMinute: number;
@@ -57,12 +59,46 @@ export interface AiRuntimeConfig {
   dailyTokenQuota: number;
 }
 
-/** 按 token 用量与配置单价估算花费（元），保留 6 位小数。 */
-export function estimateCost(tokensInput: number, tokensOutput: number): string {
-  const { priceInputPerMTok, priceOutputPerMTok } = snapshot.ai;
-  if (priceInputPerMTok === 0 && priceOutputPerMTok === 0) return '0';
-  const cost = (tokensInput / 1_000_000) * priceInputPerMTok + (tokensOutput / 1_000_000) * priceOutputPerMTok;
+/**
+ * 按 token 用量与配置单价估算花费（元），保留 6 位小数。
+ *
+ * 与主流大模型官网一致的三段计价：
+ *   输入（未命中缓存）× 未命中价 + 输入（命中缓存）× 缓存价 + 输出 × 输出价
+ * 未单独配置缓存价时退化用未命中价（等价于旧的两段算法）。
+ */
+export function estimateCost(tokensInput: number, tokensOutput: number, tokensCached = 0): string {
+  const { priceInputPerMTok, priceCachedInputPerMTok, priceOutputPerMTok } = snapshot.ai;
+  if (priceInputPerMTok === 0 && priceOutputPerMTok === 0 && priceCachedInputPerMTok === 0) return '0';
+
+  const cached = Math.max(0, Math.min(tokensCached, tokensInput));
+  const missedInput = Math.max(0, tokensInput - cached);
+  const cachedPrice = priceCachedInputPerMTok > 0 ? priceCachedInputPerMTok : priceInputPerMTok;
+
+  const cost =
+    (missedInput / 1_000_000) * priceInputPerMTok +
+    (cached / 1_000_000) * cachedPrice +
+    (tokensOutput / 1_000_000) * priceOutputPerMTok;
   return cost.toFixed(6);
+}
+
+/** 计费明细（官网那种"单价 × 用量 = 金额"的展示需要分段金额）。 */
+export function costBreakdown(input: { tokensInput: number; tokensOutput: number; tokensCached: number }): {
+  inputMissed: { tokens: number; unitPrice: number; amount: string };
+  inputCached: { tokens: number; unitPrice: number; amount: string };
+  output: { tokens: number; unitPrice: number; amount: string };
+  total: string;
+} {
+  const { priceInputPerMTok, priceCachedInputPerMTok, priceOutputPerMTok } = snapshot.ai;
+  const cached = Math.max(0, Math.min(input.tokensCached, input.tokensInput));
+  const missed = Math.max(0, input.tokensInput - cached);
+  const cachedPrice = priceCachedInputPerMTok > 0 ? priceCachedInputPerMTok : priceInputPerMTok;
+  const amount = (tokens: number, price: number): string => ((tokens / 1_000_000) * price).toFixed(6);
+  return {
+    inputMissed: { tokens: missed, unitPrice: priceInputPerMTok, amount: amount(missed, priceInputPerMTok) },
+    inputCached: { tokens: cached, unitPrice: cachedPrice, amount: amount(cached, cachedPrice) },
+    output: { tokens: input.tokensOutput, unitPrice: priceOutputPerMTok, amount: amount(input.tokensOutput, priceOutputPerMTok) },
+    total: estimateCost(input.tokensInput, input.tokensOutput, input.tokensCached),
+  };
 }
 
 export type ComplianceCategory = 'medical_claim' | 'absolute_term' | 'guarantee' | 'endorsement';
@@ -185,6 +221,7 @@ export const DEFAULT_AI_RUNTIME: AiRuntimeConfig = {
   temperature: 0.7,
   maxTokens: 4096,
   priceInputPerMTok: 0,
+  priceCachedInputPerMTok: 0,
   priceOutputPerMTok: 0,
   rateLimitPerMinute: 0,
   dailyTokenQuota: 0,
@@ -428,6 +465,7 @@ export function applyRuntimeConfig(flat: Record<string, string | undefined>, onE
     temperature: float(flat.AI_TEMPERATURE, DEFAULT_AI_RUNTIME.temperature, 0, 2),
     maxTokens: num(flat.AI_MAX_TOKENS, DEFAULT_AI_RUNTIME.maxTokens, 256, 32_000),
     priceInputPerMTok: float(flat.AI_PRICE_INPUT_PER_MTOK, DEFAULT_AI_RUNTIME.priceInputPerMTok, 0, 10_000),
+    priceCachedInputPerMTok: float(flat.AI_PRICE_CACHED_INPUT_PER_MTOK, DEFAULT_AI_RUNTIME.priceCachedInputPerMTok, 0, 10_000),
     priceOutputPerMTok: float(flat.AI_PRICE_OUTPUT_PER_MTOK, DEFAULT_AI_RUNTIME.priceOutputPerMTok, 0, 10_000),
     rateLimitPerMinute: num(flat.AI_RATE_LIMIT_PER_MINUTE, DEFAULT_AI_RUNTIME.rateLimitPerMinute, 0, 10_000),
     dailyTokenQuota: num(flat.AI_DAILY_TOKEN_QUOTA, DEFAULT_AI_RUNTIME.dailyTokenQuota, 0, 1_000_000_000),

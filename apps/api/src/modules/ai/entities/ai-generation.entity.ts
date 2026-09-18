@@ -34,6 +34,14 @@ export class AiGeneration extends BaseEntity {
   @Column({ type: 'int', default: 0 })
   tokensOutput!: number;
 
+  /** 命中缓存的输入 token（计费时单独按缓存价） */
+  @Column({ type: 'int', default: 0 })
+  tokensCached!: number;
+
+  /** 输出中的推理（思考）token，便于判断推理模型的额度消耗 */
+  @Column({ type: 'int', default: 0 })
+  tokensReasoning!: number;
+
   @Column({ type: 'int', default: 0 })
   latencyMs!: number;
 

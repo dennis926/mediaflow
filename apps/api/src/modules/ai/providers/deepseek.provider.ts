@@ -2,7 +2,15 @@ import { AiCompletionRequest, AiCompletionResult, AiProvider } from '../ai.types
 
 interface ChatCompletionResponse {
   choices?: Array<{ message?: { content?: string; reasoning_content?: string }; finish_reason?: string }>;
-  usage?: { prompt_tokens?: number; completion_tokens?: number };
+  usage?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    /** DeepSeek 按"缓存命中/未命中"分段计价，这两项决定实际花费 */
+    prompt_cache_hit_tokens?: number;
+    prompt_cache_miss_tokens?: number;
+    prompt_tokens_details?: { cached_tokens?: number };
+    completion_tokens_details?: { reasoning_tokens?: number };
+  };
   error?: { message?: string };
   model?: string;
 }
@@ -82,6 +90,8 @@ export class DeepSeekProvider implements AiProvider {
         model: payload.model ?? this.model,
         tokensInput: payload.usage?.prompt_tokens ?? 0,
         tokensOutput: payload.usage?.completion_tokens ?? 0,
+        tokensCached: payload.usage?.prompt_cache_hit_tokens ?? payload.usage?.prompt_tokens_details?.cached_tokens ?? 0,
+        tokensReasoning: payload.usage?.completion_tokens_details?.reasoning_tokens ?? 0,
       };
     } finally {
       clearTimeout(timer);

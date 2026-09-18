@@ -8,6 +8,7 @@ import { Card } from '../../../components/ui/Card';
 import { DataTable, type Column } from '../../../components/ui/DataTable';
 import { Dialog } from '../../../components/ui/Dialog';
 import { EmptyState } from '../../../components/ui/EmptyState';
+import { QueryError } from '../../../components/ui/QueryError';
 import { Input, Select } from '../../../components/ui/Field';
 import { Pagination } from '../../../components/ui/Pagination';
 import { SkeletonRows } from '../../../components/ui/Skeleton';
@@ -285,7 +286,9 @@ export default function UsersPage() {
         </div>
 
         <div style={{ padding: 'var(--mf-space-4) 0 0' }}>
-          {users.isLoading ? (
+          {users.isError ? (
+          <QueryError error={users.error} action="加载用户" onRetry={() => void users.refetch()} />
+        ) : users.isLoading ? (
             <div style={{ padding: 'var(--mf-space-5)' }}>
               <SkeletonRows rows={5} />
             </div>

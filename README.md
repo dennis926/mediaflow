@@ -12,6 +12,31 @@ pnpm dev                # 并行启动 api(4000) / web(3000) / h5(3101) / plugin
 
 单独启动：`pnpm dev:api`、`pnpm dev:web`、`pnpm dev:h5`。
 
+### 本地从零跑起来（完整步骤）
+
+```bash
+# 1) 基础设施：PostgreSQL 16 + Redis（也可用仓库里的 docker-compose.yml 起容器，仅用于本地开发）
+docker compose up -d postgres redis minio
+
+# 2) 环境变量：复制模板后按需修改（数据库、Redis、JWT_SECRET 等）
+cp .env.example .env
+
+# 3) 依赖与共享包
+pnpm install && pnpm build:packages
+
+# 4) 建表 + 初始数据（默认工作区、5 个角色、1 个管理员、示例资料/模板）
+pnpm migrate
+pnpm seed                 # 交付给别人时设 SEED_SAMPLE_CONTENT=false 可跳过示例内容
+pnpm --filter @mediaflow/api run seed:knowledge
+pnpm --filter @mediaflow/api run seed:templates
+
+# 5) 启动
+pnpm dev
+```
+
+> 生产环境不使用 Docker：由 systemd（`mediaflow-api` / `mediaflow-web`）+ Nginx 承载，
+> 完整步骤、备份、监控与"交付给别人要改哪些配置"见 `docs/DEPLOYMENT.md`。
+
 ## 目录
 
 | 路径 | 说明 |

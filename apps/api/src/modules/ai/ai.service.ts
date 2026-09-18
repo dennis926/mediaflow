@@ -15,7 +15,7 @@ import {
 } from './ai.types';
 import { checkCompliance, scoreViolations } from './compliance.rules';
 import { AiProviderFactory } from './ai-provider.factory';
-import { estimateCost, runtime } from '../settings/runtime-config';
+import { costBreakdown, estimateCost, runtime } from '../settings/runtime-config';
 
 export interface AiInvocationMeta {
   contentId?: string | null;
@@ -244,10 +244,26 @@ export class AiService {
    * 花费依赖配置的 token 单价（设置 → AI 服务），未配置时为 0。
    */
   async usage(days = 14): Promise<{
-    summary: { calls: number; failed: number; tokensInput: number; tokensOutput: number; cost: string; avgLatencyMs: number; priceConfigured: boolean };
-    byDay: Array<{ date: string; calls: number; tokens: number; cost: string }>;
-    byTask: Array<{ taskType: string; calls: number; tokens: number; cost: string }>;
-    byModel: Array<{ model: string; calls: number; tokens: number; cost: string }>;
+    summary: {
+      calls: number;
+      failed: number;
+      tokensInput: number;
+      tokensOutput: number;
+      tokensCached: number;
+      tokensReasoning: number;
+      cacheHitRate: number;
+      cost: string;
+      /** 调用当时记录的金额合计（与 cost 可能因调价而不同） */
+      costRecorded: string;
+      avgLatencyMs: number;
+      avgCostPerCall: string;
+      priceConfigured: boolean;
+    };
+    pricing: { inputPerMTok: number; cachedInputPerMTok: number; outputPerMTok: number };
+    costBreakdown: ReturnType<typeof costBreakdown>;
+    byDay: Array<{ date: string; calls: number; tokens: number; cached: number; cost: string }>;
+    byTask: Array<{ taskType: string; calls: number; tokens: number; cached: number; cost: string }>;
+    byModel: Array<{ model: string; calls: number; tokens: number; cached: number; cost: string }>;
   }> {
     const scope = await this.workspaceContext.current();
     const since = new Date(Date.now() - Math.min(Math.max(days, 1), 180) * 86_400_000);
@@ -257,27 +273,41 @@ export class AiService {
       take: 20_000,
     });
 
-    const costOf = (value: string | null | undefined): number => Number(value ?? 0) || 0;
+    /**
+     * 展示口径统一：一律用**当前单价 × 该次实际 token** 计算（estimateCost）。
+     * 若直接用数据库里存的 cost，会出现"卡片合计"与"计费明细"两个数字对不上——
+     * 因为历史调用是在旧单价（甚至未配置单价=0）时记录的。存库的金额只作为当时的快照保留。
+     */
+    const costOf = (row: { tokensInput?: number | null; tokensOutput?: number | null; tokensCached?: number | null }): number =>
+      Number(estimateCost(row.tokensInput ?? 0, row.tokensOutput ?? 0, row.tokensCached ?? 0)) || 0;
+    const recordedOf = (value: string | null | undefined): number => Number(value ?? 0) || 0;
     const dayKey = (date: Date): string => {
       // 按北京时间归档，避免"昨天/今天"错位
       const shifted = new Date(date.getTime() + 8 * 3600_000);
       return shifted.toISOString().slice(0, 10);
     };
 
-    const dayMap = new Map<string, { calls: number; tokens: number; cost: number }>();
-    const taskMap = new Map<string, { calls: number; tokens: number; cost: number }>();
-    const modelMap = new Map<string, { calls: number; tokens: number; cost: number }>();
+    const dayMap = new Map<string, { calls: number; tokens: number; cached: number; cost: number }>();
+    const taskMap = new Map<string, { calls: number; tokens: number; cached: number; cost: number }>();
+    const modelMap = new Map<string, { calls: number; tokens: number; cached: number; cost: number }>();
     let tokensInput = 0;
     let tokensOutput = 0;
+    let tokensCached = 0;
+    let tokensReasoning = 0;
     let cost = 0;
+    let costRecorded = 0;
     let failed = 0;
     let latencyTotal = 0;
 
     for (const row of rows) {
+      const cached = row.tokensCached ?? 0;
       const tokens = (row.tokensInput ?? 0) + (row.tokensOutput ?? 0);
-      const entryCost = costOf(row.cost);
+      const entryCost = costOf(row);
+      costRecorded += recordedOf(row.cost);
       tokensInput += row.tokensInput ?? 0;
       tokensOutput += row.tokensOutput ?? 0;
+      tokensCached += cached;
+      tokensReasoning += row.tokensReasoning ?? 0;
       cost += entryCost;
       latencyTotal += row.latencyMs ?? 0;
       if (row.status === 'failed') failed += 1;
@@ -286,9 +316,9 @@ export class AiService {
         [dayMap, dayKey(new Date(row.createdAt))],
         [taskMap, row.taskType],
         [modelMap, row.model ?? 'unknown'],
-      ] as Array<[Map<string, { calls: number; tokens: number; cost: number }>, string]>) {
-        const current = map.get(key) ?? { calls: 0, tokens: 0, cost: 0 };
-        map.set(key, { calls: current.calls + 1, tokens: current.tokens + tokens, cost: current.cost + entryCost });
+      ] as Array<[Map<string, { calls: number; tokens: number; cached: number; cost: number }>, string]>) {
+        const current = map.get(key) ?? { calls: 0, tokens: 0, cached: 0, cost: 0 };
+        map.set(key, { calls: current.calls + 1, tokens: current.tokens + tokens, cached: current.cached + cached, cost: current.cost + entryCost });
       }
     }
 
@@ -301,17 +331,30 @@ export class AiService {
         failed,
         tokensInput,
         tokensOutput,
+        tokensCached,
+        tokensReasoning,
+        cacheHitRate: tokensInput > 0 ? Number(((tokensCached / tokensInput) * 100).toFixed(1)) : 0,
         cost: cost.toFixed(6),
+        // 调用当时记录的金额合计（价格未变时与 cost 一致；调价后会不同，用于提示差异）
+        costRecorded: costRecorded.toFixed(6),
         avgLatencyMs: rows.length > 0 ? Math.round(latencyTotal / rows.length) : 0,
+        avgCostPerCall: rows.length > 0 ? (cost / rows.length).toFixed(6) : '0',
         priceConfigured,
       },
-      byDay: sortedDays.map(([date, value]) => ({ date, calls: value.calls, tokens: value.tokens, cost: value.cost.toFixed(6) })),
+      pricing: {
+        inputPerMTok: runtime().ai.priceInputPerMTok,
+        cachedInputPerMTok:
+          runtime().ai.priceCachedInputPerMTok > 0 ? runtime().ai.priceCachedInputPerMTok : runtime().ai.priceInputPerMTok,
+        outputPerMTok: runtime().ai.priceOutputPerMTok,
+      },
+      costBreakdown: costBreakdown({ tokensInput, tokensOutput, tokensCached }),
+      byDay: sortedDays.map(([date, value]) => ({ date, calls: value.calls, tokens: value.tokens, cached: value.cached, cost: value.cost.toFixed(6) })),
       byTask: [...taskMap.entries()]
         .sort((left, right) => right[1].calls - left[1].calls)
-        .map(([taskType, value]) => ({ taskType, calls: value.calls, tokens: value.tokens, cost: value.cost.toFixed(6) })),
+        .map(([taskType, value]) => ({ taskType, calls: value.calls, tokens: value.tokens, cached: value.cached, cost: value.cost.toFixed(6) })),
       byModel: [...modelMap.entries()]
         .sort((left, right) => right[1].calls - left[1].calls)
-        .map(([model, value]) => ({ model, calls: value.calls, tokens: value.tokens, cost: value.cost.toFixed(6) })),
+        .map(([model, value]) => ({ model, calls: value.calls, tokens: value.tokens, cached: value.cached, cost: value.cost.toFixed(6) })),
     };
   }
 
@@ -370,8 +413,10 @@ export class AiService {
           inputRefs: params.meta.inputRefs ?? {},
           tokensInput: completion.tokensInput,
           tokensOutput: completion.tokensOutput,
+          tokensCached: completion.tokensCached ?? 0,
+          tokensReasoning: completion.tokensReasoning ?? 0,
           latencyMs: Date.now() - startedAt,
-          cost: estimateCost(completion.tokensInput, completion.tokensOutput),
+          cost: estimateCost(completion.tokensInput, completion.tokensOutput, completion.tokensCached ?? 0),
           errorMessage: null,
           requestedBy: params.meta.requestedBy ?? null,
           contentId: params.meta.contentId ?? null,

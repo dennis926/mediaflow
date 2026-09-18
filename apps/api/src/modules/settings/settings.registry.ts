@@ -386,6 +386,15 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
     placeholder: '2',
   },
   {
+    key: 'AI_PRICE_CACHED_INPUT_PER_MTOK',
+    group: 'ai',
+    label: '输入价格·缓存命中（元/百万 token）',
+    description: '大模型对命中提示词缓存的输入单独计价（通常是未命中价的 1/4）；留空则按未命中价计算',
+    secret: false,
+    envKey: 'AI_PRICE_CACHED_INPUT_PER_MTOK',
+    placeholder: '0.5',
+  },
+  {
     key: 'AI_PRICE_OUTPUT_PER_MTOK',
     group: 'ai',
     label: '输出价格（元/百万 token）',
