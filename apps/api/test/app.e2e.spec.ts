@@ -56,6 +56,13 @@ describe.skipIf(!credentialsReady)('MediaFlow 端到端流程', () => {
     try {
       const dataSource = app?.get(DataSource);
       if (dataSource) {
+        // 端到端测试跑的是真实库：连带把自己造的内容/变体/任务清掉，别把测试数据留在业务列表里
+        await dataSource.query(
+          "DELETE FROM content_variants WHERE content_id IN (SELECT id FROM contents WHERE title LIKE '端到端测试内容%')",
+        );
+        await dataSource.query("DELETE FROM publish_tasks WHERE content_id IN (SELECT id FROM contents WHERE title LIKE '端到端测试内容%')");
+        await dataSource.query("DELETE FROM content_reviews WHERE content_id IN (SELECT id FROM contents WHERE title LIKE '端到端测试内容%')");
+        await dataSource.query("DELETE FROM contents WHERE title LIKE '端到端测试内容%'");
         await dataSource.query("DELETE FROM ai_generations WHERE provider = 'mock' AND created_at >= $1", [testStartedAt]);
       }
     } catch {

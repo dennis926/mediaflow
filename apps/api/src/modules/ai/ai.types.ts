@@ -22,6 +22,8 @@ export interface AiCompletionResult {
   tokensReasoning?: number;
   /** 缓存写入 token（Anthropic 等额外计费） */
   tokensCacheWrite?: number;
+  /** 结束原因：length 表示被 max_tokens 截断（JSON 会缺尾巴，需要给出可读的提示） */
+  finishReason?: string;
 }
 
 export interface AiProvider {

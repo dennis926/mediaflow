@@ -12,7 +12,7 @@ export class MockAiProvider implements AiProvider {
 
   async complete(request: AiCompletionRequest): Promise<AiCompletionResult> {
     const text = this.build(request);
-    return { text, model: this.model, tokensInput: request.user.length, tokensOutput: text.length, tokensCached: 0, tokensReasoning: 0 };
+    return { text, model: this.model, tokensInput: request.user.length, tokensOutput: text.length, tokensCached: 0, tokensReasoning: 0, finishReason: 'stop' };
   }
 
   private build(request: AiCompletionRequest): string {

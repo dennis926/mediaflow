@@ -39,6 +39,13 @@ export function ModelPriceDialog({ open, row, onClose, onSaved, onError }: Model
     onError: (error: unknown) => onError(error instanceof ApiError ? error.message : '保存失败'),
   });
 
+  /** 删除覆盖价，回到官方价（这样以后官方调价能自动跟随）。 */
+  const reset = useMutation({
+    mutationFn: () => aiApi.clearModelPrice(row!.provider, row!.model),
+    onSuccess: () => onSaved(`已恢复「${row?.model}」的官方价`),
+    onError: (error: unknown) => onError(error instanceof ApiError ? error.message : '恢复失败'),
+  });
+
   /** 一键按"官方价 × 汇率"填回（汇率取当前计费规则里的值）。 */
   const fillFromOfficial = async (): Promise<void> => {
     if (!row) return;
@@ -102,6 +109,9 @@ export function ModelPriceDialog({ open, row, onClose, onSaved, onError }: Model
           <div className={styles.reviewToolbar}>
             <Button variant="secondary" size="sm" onClick={() => void fillFromOfficial()}>
               按官方价 × 汇率 填充
+            </Button>
+            <Button variant="secondary" size="sm" loading={reset.isPending} disabled={row.source !== 'override'} onClick={() => reset.mutate()}>
+              恢复官方价
             </Button>
           </div>
         </div>

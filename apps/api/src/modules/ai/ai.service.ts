@@ -14,6 +14,10 @@ import {
   KnowledgePolishInput,
 } from './ai.types';
 import { checkCompliance, scoreViolations } from './compliance.rules';
+import { salvageJson } from './json-salvage';
+
+/** 重试时追加的硬约束：模型第二次通常会老实给纯 JSON。 */
+const STRICT_JSON_HINT = '\n\n【重要】只输出一个 JSON 对象，不要代码块（```）、不要解释文字、不要前后缀，第一个字符必须是 {，最后一个字符必须是 }。';
 import { AiProviderFactory } from './ai-provider.factory';
 import { estimateCost as estimateLegacyCost, runtime } from '../settings/runtime-config';
 import { ModelPricingService } from './model-pricing.service';
@@ -113,7 +117,7 @@ export class AiService {
           ...(input.knowledge?.ids.length ? { knowledgeIds: input.knowledge.ids } : {}),
         },
       },
-      parse: (completion) => this.parseVariants(completion.text, input.platforms),
+      parse: (completion) => this.parseVariants(completion.text, input.platforms, completion.finishReason),
     });
 
     return { variants: invocation.result, generationId: invocation.generationId, model: invocation.model };
@@ -151,7 +155,7 @@ export class AiService {
         .filter(Boolean)
         .join('\n'),
       meta,
-      parse: (completion) => this.parseKnowledgeDraft(completion.text),
+      parse: (completion) => this.parseKnowledgeDraft(completion.text, completion.finishReason),
     });
 
     return { draft: invocation.result, generationId: invocation.generationId, model: invocation.model };
@@ -175,7 +179,7 @@ export class AiService {
         .filter(Boolean)
         .join('\n'),
       meta,
-      parse: (completion) => this.parsePolished(completion.text),
+      parse: (completion) => this.parsePolished(completion.text, completion.finishReason),
     });
     return { content: invocation.result, generationId: invocation.generationId };
   }
@@ -200,7 +204,7 @@ export class AiService {
         .filter(Boolean)
         .join('\n'),
       meta,
-      parse: (completion) => this.parseTitles(completion.text),
+      parse: (completion) => this.parseTitles(completion.text, completion.finishReason),
     });
     return { titles: invocation.result, generationId: invocation.generationId };
   }
@@ -230,7 +234,7 @@ export class AiService {
           .filter(Boolean)
           .join('\n'),
         meta,
-        parse: (completion) => this.parseReview(completion.text),
+        parse: (completion) => this.parseReview(completion.text, completion.finishReason),
       });
       report.aiReview = invocation.result;
     } catch (error) {
@@ -507,15 +511,29 @@ export class AiService {
     await this.assertWithinQuota(scope.workspaceId);
 
     const provider = await this.aiProviders.get();
-    try {
-      const completion = await provider.complete({
+    const jsonBudget = params.json ? Math.max(runtime().ai.jsonMaxTokens, runtime().ai.maxTokens) : runtime().ai.maxTokens;
+    /** 解析失败时再试一次：多数是模型把 JSON 包进代码块或被截断，重试一次基本能救回来。 */
+    const complete = async (strict: boolean) =>
+      provider.complete({
         task: params.task,
-        system: params.system,
+        system: strict ? `${params.system}${STRICT_JSON_HINT}` : params.system,
         user: params.user,
         json: params.json,
-        temperature: runtime().ai.temperature,
-        maxTokens: runtime().ai.maxTokens,
+        temperature: strict ? 0 : runtime().ai.temperature,
+        maxTokens: strict && params.json ? Math.min(jsonBudget * 2, 32_000) : jsonBudget,
       });
+    try {
+      let completion = await complete(false);
+      let parsed: T;
+      try {
+        parsed = params.parse(completion);
+      } catch (parseError) {
+        if (!params.json) throw parseError;
+        const reason = parseError instanceof Error ? parseError.message : String(parseError);
+        this.logger.warn(`AI 返回不符合要求，正在重试一次：${reason}`);
+        completion = await complete(true);
+        parsed = params.parse(completion);
+      }
 
       /**
        * 按"模型自己的价目"计价（供应商 × 模型），而不是全站一个价：
@@ -530,7 +548,6 @@ export class AiService {
       const priced = await this.pricing
         .costOf(provider.name, completion.model ?? provider.model, modelTokens)
         .catch(() => null);
-      const parsed = params.parse(completion);
       const generation = await this.generations.save(
         this.generations.create({
           tenantId: scope.tenantId,
@@ -624,28 +641,41 @@ export class AiService {
     }
   }
 
-  private parseVariants(text: string, requested: PlatformCode[]): AdaptedVariantPayload[] {
-    const parsed = this.parseJson(text);
+  private parseVariants(text: string, requested: PlatformCode[], finishReason?: string): AdaptedVariantPayload[] {
+    const parsed = this.parseJson(text, finishReason);
     const list = Array.isArray(parsed.variants) ? parsed.variants : [];
     const variants: AdaptedVariantPayload[] = [];
     for (const item of list) {
       if (typeof item !== 'object' || item === null) continue;
       const record = item as Record<string, unknown>;
       const platform = String(record.platform ?? '');
+      const title = String(record.title ?? '').trim();
+      const body = String(record.body ?? '').trim();
       if (!requested.includes(platform as PlatformCode)) continue;
+      /**
+       * 标题或正文缺失的版本不算数：模型被截断时抢救出来的往往是"半条记录"，
+       * 直接当成功会生成空正文的版本，比报错更糟。
+       */
+      if (!title || !body) continue;
       variants.push({
         platform,
-        title: String(record.title ?? '').trim(),
-        body: String(record.body ?? '').trim(),
+        title,
+        body,
         tags: Array.isArray(record.tags) ? record.tags.map((tag) => String(tag)) : [],
       });
     }
-    if (variants.length === 0) throw new Error('AI 未返回可用的平台版本');
+    if (variants.length === 0) {
+      throw new Error(
+        finishReason === 'length'
+          ? 'AI 输出被最大长度截断，平台版本不完整：请在系统设置里调大「JSON 任务最大输出长度」后重试'
+          : 'AI 未返回可用的平台版本（标题或正文缺失）',
+      );
+    }
     return variants;
   }
 
-  private parseKnowledgeDraft(text: string): KnowledgeDraft {
-    const parsed = this.parseJson(text);
+  private parseKnowledgeDraft(text: string, finishReason?: string): KnowledgeDraft {
+    const parsed = this.parseJson(text, finishReason);
     const content = String(parsed.content ?? '').trim();
     if (content.length < 20) throw new Error('AI 生成的条目内容过短，请补充要点后重试');
     return {
@@ -658,42 +688,42 @@ export class AiService {
     };
   }
 
-  private parsePolished(text: string): string {
-    const parsed = this.parseJson(text);
+  private parsePolished(text: string, finishReason?: string): string {
+    const parsed = this.parseJson(text, finishReason);
     const content = String(parsed.content ?? '').trim();
     if (content.length < 20) throw new Error('AI 未返回可用的润色结果');
     return content;
   }
 
-  private parseTitles(text: string): string[] {
-    const parsed = this.parseJson(text);
+  private parseTitles(text: string, finishReason?: string): string[] {
+    const parsed = this.parseJson(text, finishReason);
     const titles = Array.isArray(parsed.titles) ? parsed.titles.map((title) => String(title).trim()).filter(Boolean) : [];
     if (titles.length === 0) throw new Error('AI 未返回标题建议');
     return titles.slice(0, 3);
   }
 
-  private parseReview(text: string): string {
-    const parsed = this.parseJson(text);
+  private parseReview(text: string, finishReason?: string): string {
+    const parsed = this.parseJson(text, finishReason);
     return typeof parsed.review === 'string' ? parsed.review : text.slice(0, 500);
   }
 
-  /** Models sometimes wrap JSON in prose or code fences; salvage the object before failing. */
-  private parseJson(text: string): Record<string, unknown> {
-    const candidates = [text.trim()];
-    const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
-    if (fenced) candidates.push(fenced[1].trim());
-    const first = text.indexOf('{');
-    const last = text.lastIndexOf('}');
-    if (first !== -1 && last > first) candidates.push(text.slice(first, last + 1));
-
-    for (const candidate of candidates) {
-      try {
-        const parsed = JSON.parse(candidate) as unknown;
-        if (typeof parsed === 'object' && parsed !== null) return parsed as Record<string, unknown>;
-      } catch {
-        // try the next candidate
+  /**
+   * 大模型返回的 JSON 经常"差不多合法"（代码块、解释文字、尾逗号、全角标点、被截断），
+   * 这里统一走抢救器；实在救不回来才报错，并把原因说清楚（截断要提示调大输出长度）。
+   */
+  private parseJson(text: string, finishReason?: string): Record<string, unknown> {
+    const salvaged = salvageJson(text);
+    if (salvaged) {
+      if (salvaged.repairs.length > 0) {
+        this.logger.warn(`AI 返回的 JSON 需要修复（${salvaged.repairs.join(', ')}），已自动处理`);
       }
+      const { value } = salvaged;
+      if (typeof value === 'object' && value !== null && !Array.isArray(value)) return value as Record<string, unknown>;
     }
-    throw new Error('AI 返回的内容不是合法 JSON');
+    if (finishReason === 'length') {
+      throw new Error('AI 输出被最大长度截断，JSON 不完整：请在系统设置里调大「AI 最大输出长度」后重试');
+    }
+    const preview = text.replace(/\s+/g, ' ').slice(0, 120);
+    throw new Error(`AI 返回的内容不是合法 JSON（已尝试自动修复）：${preview}`);
   }
 }

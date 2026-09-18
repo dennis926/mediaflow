@@ -46,8 +46,10 @@ export interface AiRuntimeConfig {
   /** 每个平台的风格指引，key = 平台代码 */
   platformGuidance: Record<string, string>;
   temperature: number;
-  /** JSON 任务的默认最大输出 token（推理模型要给足） */
+  /** 普通任务的最大输出 token */
   maxTokens: number;
+  /** JSON 任务的最大输出 token（推理模型的思考也占额度，给少了 JSON 会缺尾巴） */
+  jsonMaxTokens: number;
   /** 计价（元/百万 token），用于统计花费；填 0 表示不统计 */
   priceInputPerMTok: number;
   /** 缓存命中的输入单价（大模型官网按此单独计价，通常远低于未命中价） */
@@ -220,6 +222,7 @@ export const DEFAULT_AI_RUNTIME: AiRuntimeConfig = {
   },
   temperature: 0.7,
   maxTokens: 4096,
+  jsonMaxTokens: 8192,
   priceInputPerMTok: 0,
   priceCachedInputPerMTok: 0,
   priceOutputPerMTok: 0,
@@ -464,6 +467,7 @@ export function applyRuntimeConfig(flat: Record<string, string | undefined>, onE
     platformGuidance: parseJson<Record<string, string>>(flat.AI_PLATFORM_GUIDANCE, DEFAULT_AI_RUNTIME.platformGuidance, onError),
     temperature: float(flat.AI_TEMPERATURE, DEFAULT_AI_RUNTIME.temperature, 0, 2),
     maxTokens: num(flat.AI_MAX_TOKENS, DEFAULT_AI_RUNTIME.maxTokens, 256, 32_000),
+    jsonMaxTokens: num(flat.AI_JSON_MAX_TOKENS, DEFAULT_AI_RUNTIME.jsonMaxTokens, 512, 32_000),
     priceInputPerMTok: float(flat.AI_PRICE_INPUT_PER_MTOK, DEFAULT_AI_RUNTIME.priceInputPerMTok, 0, 10_000),
     priceCachedInputPerMTok: float(flat.AI_PRICE_CACHED_INPUT_PER_MTOK, DEFAULT_AI_RUNTIME.priceCachedInputPerMTok, 0, 10_000),
     priceOutputPerMTok: float(flat.AI_PRICE_OUTPUT_PER_MTOK, DEFAULT_AI_RUNTIME.priceOutputPerMTok, 0, 10_000),

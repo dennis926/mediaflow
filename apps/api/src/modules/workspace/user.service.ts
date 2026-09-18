@@ -215,7 +215,15 @@ export class UserService {
     await this.assertNotSelf(user, actor, '不能删除自己');
     await this.assertOwnerSurvives(user, '不能删除最后一个管理员');
 
-    await this.users.softDelete({ id: user.id });
+    /**
+     * 软删除用户要一并清掉成员关系与角色绑定：
+     * 否则成员列表和角色统计里会留下"（已删除用户）"幽灵成员（实测踩过）。
+     */
+    await this.users.manager.transaction(async (manager) => {
+      await manager.delete(WorkspaceMember, { userId: user.id });
+      await manager.query('DELETE FROM user_roles WHERE users_id = $1', [user.id]);
+      await manager.softDelete(User, { id: user.id });
+    });
     await this.record('user.delete', user.id, actor, { email: user.email });
     this.logger.log(`已删除用户：${user.email}`);
     return { id: user.id, deletedAt: new Date() };

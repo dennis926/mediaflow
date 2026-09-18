@@ -139,12 +139,15 @@ export class ModelPricingService {
     let price: ModelPriceCny;
     let source: ModelPricingView['source'];
     if (hasOverride && override) {
-      price = {
-        input: round4(Number(override.input ?? converted.input) || 0),
-        output: round4(Number(override.output ?? converted.output) || 0),
-        cacheWrite: round4(Number(override.cacheWrite ?? converted.cacheWrite) || 0),
-        cacheRead: round4(Number(override.cacheRead ?? converted.cacheRead) || 0),
+      /**
+       * 只覆盖用户显式填写的段：没填的段回落到官方折算价。
+       * 之前用 `?? converted` + `|| 0`，只改输入价会把输出价悄悄变成 0（成本统计少算）。
+       */
+      const pick = (key: keyof ModelPriceCny): number => {
+        const raw = override[key];
+        return typeof raw === 'number' && Number.isFinite(raw) ? round4(raw) : converted[key];
       };
+      price = { input: pick('input'), output: pick('output'), cacheWrite: pick('cacheWrite'), cacheRead: pick('cacheRead') };
       source = 'override';
     } else if (hasUsableCatalog) {
       price = converted;
@@ -267,6 +270,16 @@ export class ModelPricingService {
     };
     await this.settings.updateMany([{ key: 'AI_MODEL_PRICES', value: JSON.stringify(next) }], { id: null, name: '系统' });
     this.logger.log(`已覆盖模型价格：${key}`);
+  }
+
+  /** 删除某个模型的覆盖价，恢复官方价。 */
+  async clearOverride(key: string): Promise<void> {
+    const current = await this.overrides();
+    if (!(key in current)) return;
+    const next = { ...current };
+    delete next[key];
+    await this.settings.updateMany([{ key: 'AI_MODEL_PRICES', value: JSON.stringify(next) }], { id: null, name: '系统' });
+    this.logger.log(`已恢复官方价：${key}`);
   }
 
   /** 预置目录（供设置界面展示全部可选模型）。 */

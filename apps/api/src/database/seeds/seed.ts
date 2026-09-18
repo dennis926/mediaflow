@@ -8,7 +8,7 @@ import { PlatformCapabilities } from '../../modules/platform/entities/platform.e
 import { Role, RoleCode } from '../../modules/workspace/entities/role.entity';
 import { User } from '../../modules/workspace/entities/user.entity';
 import { Workspace } from '../../modules/workspace/entities/workspace.entity';
-import { DEFAULT_ADMIN_EMAIL, DEFAULT_ADMIN_ID, DEFAULT_TENANT_ID, DEFAULT_WORKSPACE_ID, ROLE_IDS } from './defaults';
+import { DEFAULT_ADMIN_EMAIL, DEFAULT_ADMIN_ID, ROLE_IDS, resolveDefaultScope, DefaultScope } from './defaults';
 
 const logger = new Logger('Seed');
 
@@ -81,18 +81,19 @@ function generatePassword(length = 14): string {
   return password;
 }
 
-async function seedWorkspace(dataSource: DataSource): Promise<void> {
+async function seedWorkspace(dataSource: DataSource, scope: DefaultScope): Promise<void> {
   const repository = dataSource.getRepository(Workspace);
-  const existing = await repository.findOne({ where: { id: DEFAULT_WORKSPACE_ID } });
+  // 按 slug 判重：老安装的工作区 ID 与新常量不同，按 ID 查会重复插入。
+  const existing = await repository.findOne({ where: { slug: 'default' } });
   if (existing) {
     logger.log(`工作区已存在，跳过：${existing.name}`);
     return;
   }
   await repository.insert({
-    id: DEFAULT_WORKSPACE_ID,
-    tenantId: DEFAULT_TENANT_ID,
+    id: scope.workspaceId,
+    tenantId: scope.tenantId,
     // The root workspace is its own scope.
-    workspaceId: DEFAULT_WORKSPACE_ID,
+    workspaceId: scope.workspaceId,
     name: '默认工作区',
     slug: 'default',
     status: 'active',
@@ -101,18 +102,18 @@ async function seedWorkspace(dataSource: DataSource): Promise<void> {
   logger.log('已创建默认工作区：默认工作区 (slug=default)');
 }
 
-async function seedRoles(dataSource: DataSource): Promise<void> {
+async function seedRoles(dataSource: DataSource, scope: DefaultScope): Promise<void> {
   const repository = dataSource.getRepository(Role);
   for (const role of ROLES) {
-    const existing = await repository.findOne({ where: { tenantId: DEFAULT_TENANT_ID, code: role.code } });
+    const existing = await repository.findOne({ where: { tenantId: scope.tenantId, code: role.code } });
     if (existing) {
       logger.log(`角色已存在，跳过：${role.name}`);
       continue;
     }
     await repository.insert({
       id: ROLE_IDS[role.code],
-      tenantId: DEFAULT_TENANT_ID,
-      workspaceId: DEFAULT_WORKSPACE_ID,
+      tenantId: scope.tenantId,
+      workspaceId: scope.workspaceId,
       code: role.code as RoleCode,
       name: role.name,
       description: role.description,
@@ -123,7 +124,7 @@ async function seedRoles(dataSource: DataSource): Promise<void> {
   }
 }
 
-async function seedPlatforms(dataSource: DataSource): Promise<void> {
+async function seedPlatforms(dataSource: DataSource, scope: DefaultScope): Promise<void> {
   const repository = dataSource.getRepository(Platform);
   const codes = Object.values(PlatformCode);
   for (const [index, code] of codes.entries()) {
@@ -133,9 +134,9 @@ async function seedPlatforms(dataSource: DataSource): Promise<void> {
       continue;
     }
     await repository.insert({
-      id: `55555555-5555-5555-5555-5555555555${String(index + 1).padStart(2, '0')}`,
-      tenantId: DEFAULT_TENANT_ID,
-      workspaceId: DEFAULT_WORKSPACE_ID,
+      id: `55555555-5555-4555-8555-5555555555${String(index + 1).padStart(2, '0')}`,
+      tenantId: scope.tenantId,
+      workspaceId: scope.workspaceId,
       code,
       name: PLATFORM_LABELS[code],
       publishMode: PUBLISH_MODES[code],
@@ -147,9 +148,12 @@ async function seedPlatforms(dataSource: DataSource): Promise<void> {
   }
 }
 
-async function seedAdmin(dataSource: DataSource): Promise<string | null> {
+async function seedAdmin(dataSource: DataSource, scope: DefaultScope): Promise<string | null> {
   const userRepository = dataSource.getRepository(User);
-  const existing = await userRepository.findOne({ where: { id: DEFAULT_ADMIN_ID } });
+  // 按邮箱判重：老安装的管理员 ID 与常量不同。
+  const existing =
+    (await userRepository.findOne({ where: { email: DEFAULT_ADMIN_EMAIL } })) ??
+    (await userRepository.findOne({ where: { id: DEFAULT_ADMIN_ID } }));
   if (existing) {
     logger.log(`管理员已存在，密码保持不变：${existing.email}`);
     return null;
@@ -159,8 +163,8 @@ async function seedAdmin(dataSource: DataSource): Promise<string | null> {
   const passwordHash = await bcrypt.hash(password, 10);
   await userRepository.insert({
     id: DEFAULT_ADMIN_ID,
-    tenantId: DEFAULT_TENANT_ID,
-    workspaceId: DEFAULT_WORKSPACE_ID,
+    tenantId: scope.tenantId,
+    workspaceId: scope.workspaceId,
     email: DEFAULT_ADMIN_EMAIL,
     phone: null,
     displayName: '系统管理员',
@@ -171,7 +175,7 @@ async function seedAdmin(dataSource: DataSource): Promise<string | null> {
     lastLoginAt: null,
   });
 
-  const role = await dataSource.getRepository(Role).findOne({ where: { code: 'owner', tenantId: DEFAULT_TENANT_ID } });
+  const role = await dataSource.getRepository(Role).findOne({ where: { code: 'owner', tenantId: scope.tenantId } });
   if (role) {
     await dataSource.query('INSERT INTO user_roles (users_id, roles_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [
       DEFAULT_ADMIN_ID,
@@ -185,10 +189,11 @@ async function seedAdmin(dataSource: DataSource): Promise<string | null> {
 
 export async function runSeed(dataSource: DataSource): Promise<void> {
   logger.log(`开始写入种子数据（AI 标识默认值：${AiFlagType.None}）`);
-  await seedWorkspace(dataSource);
-  await seedRoles(dataSource);
-  await seedPlatforms(dataSource);
-  const password = await seedAdmin(dataSource);
+  await seedWorkspace(dataSource, await resolveDefaultScope(dataSource));
+  const scope = await resolveDefaultScope(dataSource);
+  await seedRoles(dataSource, scope);
+  await seedPlatforms(dataSource, scope);
+  const password = await seedAdmin(dataSource, scope);
 
   process.stdout.write('\n================ 初始登录信息 ================\n');
   process.stdout.write(`用户名：${DEFAULT_ADMIN_EMAIL}\n`);

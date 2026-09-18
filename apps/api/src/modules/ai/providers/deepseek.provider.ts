@@ -99,6 +99,7 @@ export class DeepSeekProvider implements AiProvider {
         tokensCached: payload.usage?.prompt_cache_hit_tokens ?? payload.usage?.prompt_tokens_details?.cached_tokens ?? 0,
         tokensCacheWrite: payload.usage?.cache_creation_input_tokens ?? payload.usage?.prompt_tokens_details?.cache_write_tokens ?? 0,
         tokensReasoning: payload.usage?.completion_tokens_details?.reasoning_tokens ?? 0,
+        finishReason: choice?.finish_reason ?? undefined,
       };
     } finally {
       clearTimeout(timer);

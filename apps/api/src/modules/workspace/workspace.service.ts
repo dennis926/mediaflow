@@ -139,16 +139,22 @@ export class WorkspaceService {
         users.set(user.id, user);
       }
     }
-    return rows.map((row) => {
-      const user = users.get(row.userId);
-      return {
-        userId: row.userId,
-        displayName: user?.displayName ?? '（已删除用户）',
-        email: user?.email ?? '',
-        roleCodes: row.roleCodes ?? [],
-        joinedAt: row.createdAt.toISOString(),
-      };
-    });
+    /**
+     * 用户被软删除后成员关系行会残留，TypeORM 查不到该用户，列表里就出现"（已删除用户）"幽灵成员。
+     * 这里只返回仍然存在的用户；删除用户时会一并清掉成员关系（见 UserService.remove）。
+     */
+    return rows
+      .filter((row) => users.has(row.userId))
+      .map((row) => {
+        const user = users.get(row.userId)!;
+        return {
+          userId: row.userId,
+          displayName: user.displayName,
+          email: user.email,
+          roleCodes: row.roleCodes ?? [],
+          joinedAt: row.createdAt.toISOString(),
+        };
+      });
   }
 
   /** 添加或调整成员角色（同一工作区内幂等）。 */

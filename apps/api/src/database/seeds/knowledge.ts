@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DataSource } from 'typeorm';
 import { BrandKnowledge } from '../../modules/content/entities/brand-knowledge.entity';
-import { DEFAULT_TENANT_ID, DEFAULT_WORKSPACE_ID } from './defaults';
+import { resolveDefaultScope } from './defaults';
 
 const logger = new Logger('SeedKnowledge');
 
@@ -50,14 +50,16 @@ export async function seedKnowledge(dataSource: DataSource): Promise<number> {
   if (entries.length === 0) return 0;
 
   const repository = dataSource.getRepository(BrandKnowledge);
+  // 默认作用域按 slug 解析，兼容历史安装（工作区 ID 可能是更早的固定值）。
+  const scope = await resolveDefaultScope(dataSource);
   let created = 0;
 
   for (const entry of entries) {
-    const existing = await repository.findOne({ where: { workspaceId: DEFAULT_WORKSPACE_ID, title: entry.title } });
+    const existing = await repository.findOne({ where: { workspaceId: scope.workspaceId, title: entry.title } });
     if (existing) continue;
     await repository.insert({
-      tenantId: DEFAULT_TENANT_ID,
-      workspaceId: DEFAULT_WORKSPACE_ID,
+      tenantId: scope.tenantId,
+      workspaceId: scope.workspaceId,
       brand: entry.brand,
       category: entry.category,
       title: entry.title,

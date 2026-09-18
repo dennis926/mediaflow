@@ -179,6 +179,8 @@ export const aiApi = {
   /** 覆盖单个模型的实付价（元/百万 token） */
   setModelPrice: (payload: { provider: string; model: string; price: ModelPriceCnyView }) =>
     api.put<{ ok: true }>('/ai/model-price', payload),
+  /** 删除覆盖价，恢复「官方美元价 × 汇率」 */
+  clearModelPrice: (provider: string, model: string) => api.delete<{ ok: true }>('/ai/model-price', { provider, model }),
   pricingRules: () => api.get<{ usdToCny: number; description: string }>('/ai/pricing-rules'),
   generations: (query: { page?: number; pageSize?: number; taskType?: string }) =>
     api.get<Paged<AiGeneration>>('/ai/generations', { ...query }),

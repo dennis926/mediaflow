@@ -1,5 +1,6 @@
 import { Body, Controller, Get, Headers, Ip, Post } from '@nestjs/common';
-import { IsString, IsUUID, Length } from 'class-validator';
+import { IsString, Length, Matches } from 'class-validator';
+import { UUID_SHAPE } from '../../common/validators/id-shape';
 import { ChangePasswordDto } from '../workspace/dto/user.dto';
 import { UserService } from '../workspace/user.service';
 import { AuthService } from './auth.service';
@@ -9,7 +10,12 @@ import { LoginDto } from './dto/login.dto';
 import { Public } from './public.decorator';
 
 class SwitchWorkspaceDto {
-  @IsUUID('4')
+  /**
+   * 历史安装的默认工作区 ID 是种子里的固定值（variant 位不合法），
+   * 严格的 @IsUUID('4') 会把它判为非法 —— 这里放宽为"UUID 形状"，
+   * 新装环境用的是标准 v4（见 database/seeds/defaults.ts），两边都放行。
+   */
+  @Matches(UUID_SHAPE, { message: 'workspaceId 必须是合法的工作区 ID' })
   workspaceId!: string;
 }
 

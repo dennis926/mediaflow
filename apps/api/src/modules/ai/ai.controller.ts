@@ -81,13 +81,32 @@ export class AiController {
     const provider = String(body.provider ?? '');
     const model = String(body.model ?? '');
     if (!provider || !model) throw new BadRequestException('缺少 provider 或 model');
-    const price = body.price ?? {};
+    const price = body.price;
+    /**
+     * 以前这里对缺字段是"补齐为 0"，结果一次手滑的请求就把某个模型全部价格写成 0，
+     * 计费会静默少算。现在缺价格或全 0 一律拒绝。
+     */
+    if (!price || typeof price !== 'object') throw new BadRequestException('缺少 price（输入/输出等单价，元/百万 token）');
+    const values = [price.input, price.output, price.cacheWrite, price.cacheRead]
+      .map((value) => Number(value ?? 0))
+      .map((value) => (Number.isFinite(value) && value >= 0 ? value : NaN));
+    if (values.some((value) => Number.isNaN(value))) throw new BadRequestException('价格必须是 ≥ 0 的数字');
+    if (values.every((value) => value === 0)) throw new BadRequestException('价格不能全为 0；如需恢复官方价请用「恢复官方价」');
     await this.pricingService.setOverride(`${provider}/${model}`, {
-      input: Number(price.input ?? 0),
-      output: Number(price.output ?? 0),
-      cacheWrite: Number(price.cacheWrite ?? 0),
-      cacheRead: Number(price.cacheRead ?? 0),
+      input: values[0],
+      output: values[1],
+      cacheWrite: values[2],
+      cacheRead: values[3],
     });
+    return { ok: true };
+  }
+
+  /** 删除覆盖价，恢复官方美元价 × 汇率。 */
+  @Capability('settings.write')
+  @Delete('model-price')
+  async clearModelPrice(@Query('provider') provider = '', @Query('model') model = ''): Promise<{ ok: true }> {
+    if (!provider || !model) throw new BadRequestException('缺少 provider 或 model');
+    await this.pricingService.clearOverride(`${provider}/${model}`);
     return { ok: true };
   }
 

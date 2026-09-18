@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import AppDataSource from '../data-source';
 import { ContentTemplate } from '../../modules/content/entities/content-template.entity';
-import { DEFAULT_TENANT_ID, DEFAULT_WORKSPACE_ID } from './defaults';
+import { resolveDefaultScope } from './defaults';
 
 const logger = new Logger('SeedTemplates');
 
@@ -40,14 +40,16 @@ export async function seedTemplates(dataSource = AppDataSource): Promise<number>
 
   if (!(await dataSource.isInitialized)) await dataSource.initialize();
   const repository = dataSource.getRepository(ContentTemplate);
+  // 默认作用域按 slug 解析，兼容历史安装。
+  const scope = await resolveDefaultScope(dataSource);
   let created = 0;
   for (const entry of entries) {
     if (!entry?.name || !entry?.title || !entry?.body) continue;
-    const existing = await repository.findOne({ where: { workspaceId: DEFAULT_WORKSPACE_ID, name: entry.name } });
+    const existing = await repository.findOne({ where: { workspaceId: scope.workspaceId, name: entry.name } });
     if (existing) continue;
     await repository.insert({
-      tenantId: DEFAULT_TENANT_ID,
-      workspaceId: DEFAULT_WORKSPACE_ID,
+      tenantId: scope.tenantId,
+      workspaceId: scope.workspaceId,
       name: entry.name,
       description: entry.description ?? null,
       category: entry.category ?? null,

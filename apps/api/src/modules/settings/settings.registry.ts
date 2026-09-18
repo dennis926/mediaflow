@@ -377,6 +377,15 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
     placeholder: '4096',
   },
   {
+    key: 'AI_JSON_MAX_TOKENS',
+    group: 'ai',
+    label: 'JSON 任务最大输出长度（token）',
+    description: '生成结构化结果（多平台改写、资料草稿）用；推理模型的思考也占这个额度，给少了 JSON 会被截断',
+    secret: false,
+    envKey: 'AI_JSON_MAX_TOKENS',
+    placeholder: '8192',
+  },
+  {
     key: 'AI_USD_CNY_RATE',
     group: 'ai',
     label: '美元兑人民币汇率',
