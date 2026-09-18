@@ -116,9 +116,16 @@ export function resolvePluginBranding(): PluginBranding {
 
 const branding = resolvePluginBranding();
 
+/**
+ * 内容脚本注入的域名：既要能"填充内容"，也要能抓创作者中心的数据。
+ * 抖音 creator.douyin.com 与公众号 mp.weixin.qq.com 的解析器已实现（见 content/metrics/parsers.ts），
+ * 之前漏了这两个域名，导致这两个平台的数据回收实际跑不起来。
+ */
 export const PLATFORM_HOSTS = [
   'https://creator.xiaohongshu.com/*',
   'https://channels.weixin.qq.com/*',
+  'https://creator.douyin.com/*',
+  'https://mp.weixin.qq.com/*',
   'https://zhuanlan.zhihu.com/*',
   'https://mp.toutiao.com/*',
   'https://baijiahao.baidu.com/*',

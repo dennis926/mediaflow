@@ -1,7 +1,8 @@
 import { BadGatewayException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { PlatformCode, PublishTaskStatus } from '@mediaflow/shared';
-import { Between, Repository } from 'typeorm';
+import {
+  IsNull, Between, Repository } from 'typeorm';
 import { ChannelAdapterRegistry } from '@mediaflow/channel-adapters';
 import { WorkspaceContextService } from '../../common/workspace-context.service';
 import { CHANNEL_REGISTRY } from '../../publish/channel-registry.provider';
@@ -232,26 +233,24 @@ export class AnalyticsService {
       try {
         const credentials = await this.publishService.resolveCredentials(task.platform, task.socialAccountId);
         const snapshot = await this.registry.get(task.platform).fetchAnalytics(task.platformPostId, credentials);
-        await this.analytics.save(
-          this.analytics.create({
-            tenantId: scope.tenantId,
-            workspaceId: scope.workspaceId,
-            contentId: task.contentId,
-            contentVariantId: task.contentVariantId,
-            publishTaskId: task.id,
-            platform: task.platform,
-            socialAccountId: task.socialAccountId,
-            platformPostId: task.platformPostId,
-            capturedAt: new Date(snapshot.capturedAt),
-            views: snapshot.metrics.views,
-            likes: snapshot.metrics.likes,
-            comments: snapshot.metrics.comments,
-            shares: snapshot.metrics.shares,
-            favorites: snapshot.metrics.favorites,
-            followers: snapshot.metrics.followers ?? 0,
-            extra: {},
-          }),
-        );
+        await this.upsertSnapshot({
+          tenantId: scope.tenantId,
+          workspaceId: scope.workspaceId,
+          contentId: task.contentId,
+          contentVariantId: task.contentVariantId,
+          publishTaskId: task.id,
+          platform: task.platform,
+          socialAccountId: task.socialAccountId,
+          platformPostId: task.platformPostId,
+          capturedAt: new Date(snapshot.capturedAt),
+          views: snapshot.metrics.views,
+          likes: snapshot.metrics.likes,
+          comments: snapshot.metrics.comments,
+          shares: snapshot.metrics.shares,
+          favorites: snapshot.metrics.favorites,
+          followers: snapshot.metrics.followers ?? 0,
+          extra: {},
+        });
         synced += 1;
         results.push({ taskId: task.id, platform: task.platform, ok: true, message: '已同步' });
       } catch (error) {
@@ -270,6 +269,72 @@ export class AnalyticsService {
     return { synced, failed: results.length - synced, results };
   }
 
+  /**
+   * 写入一份指标快照：**同一平台 + 同一作品（postId）只保留最新一条**。
+   *
+   * 背景：浏览器插件每轮回收抓到的都是"累计总量"，而排行/总览是把快照求和展示的。
+   * 早期实现每次上报都插新行，结果同一作品被反复上报时数字会无限膨胀（实测 23180 → 46360）。
+   * 没有 postId 时按"账号级快照"去重（同一账号同一平台一条）。
+   */
+  private async upsertSnapshot(input: {
+    tenantId: string;
+    workspaceId: string;
+    platform: PlatformCode;
+    socialAccountId: string | null;
+    platformPostId: string | null;
+    contentId?: string | null;
+    contentVariantId?: string | null;
+    publishTaskId?: string | null;
+    capturedAt: Date;
+    views: number;
+    likes: number;
+    comments: number;
+    shares: number;
+    favorites: number;
+    followers?: number;
+    extra?: Record<string, unknown>;
+  }): Promise<{ id: string; created: boolean }> {
+    const existing = await this.analytics.findOne({
+      where: {
+        workspaceId: input.workspaceId,
+        platform: input.platform,
+        socialAccountId: input.socialAccountId ?? IsNull(),
+        platformPostId: input.platformPostId ?? IsNull(),
+      },
+    });
+
+    const values = {
+      contentId: input.contentId ?? existing?.contentId ?? null,
+      contentVariantId: input.contentVariantId ?? existing?.contentVariantId ?? null,
+      publishTaskId: input.publishTaskId ?? existing?.publishTaskId ?? null,
+      capturedAt: input.capturedAt,
+      views: input.views,
+      likes: input.likes,
+      comments: input.comments,
+      shares: input.shares,
+      favorites: input.favorites,
+      followers: input.followers ?? 0,
+      extra: { ...(existing?.extra ?? {}), ...(input.extra ?? {}) },
+    };
+
+    if (existing) {
+      await this.analytics.update({ id: existing.id }, values as never);
+      return { id: existing.id, created: false };
+    }
+
+    const saved = await this.analytics.save(
+      this.analytics.create({
+        tenantId: input.tenantId,
+        workspaceId: input.workspaceId,
+        platform: input.platform,
+        socialAccountId: input.socialAccountId,
+        platformPostId: input.platformPostId,
+        ...values,
+      }),
+    );
+    return { id: saved.id, created: true };
+  }
+
   /** Stores metrics reported by the browser extension (scraped from platform pages). */
   async savePluginMetrics(input: {
     platform: PlatformCode;
@@ -283,26 +348,21 @@ export class AnalyticsService {
     favorites?: number;
   }): Promise<{ id: string }> {
     const scope = await this.workspaceContext.current();
-    const saved = await this.analytics.save(
-      this.analytics.create({
-        tenantId: scope.tenantId,
-        workspaceId: scope.workspaceId,
-        contentId: input.contentId ?? null,
-        contentVariantId: null,
-        publishTaskId: null,
-        platform: input.platform,
-        socialAccountId: input.socialAccountId ?? null,
-        platformPostId: input.postId ?? null,
-        capturedAt: new Date(),
-        views: input.views ?? 0,
-        likes: input.likes ?? 0,
-        comments: input.comments ?? 0,
-        shares: input.shares ?? 0,
-        favorites: input.favorites ?? 0,
-        followers: 0,
-        extra: { source: 'browser-extension' },
-      }),
-    );
+    const saved = await this.upsertSnapshot({
+      tenantId: scope.tenantId,
+      workspaceId: scope.workspaceId,
+      platform: input.platform,
+      socialAccountId: input.socialAccountId ?? null,
+      platformPostId: input.postId ?? null,
+      contentId: input.contentId ?? null,
+      capturedAt: new Date(),
+      views: input.views ?? 0,
+      likes: input.likes ?? 0,
+      comments: input.comments ?? 0,
+      shares: input.shares ?? 0,
+      favorites: input.favorites ?? 0,
+      extra: { source: 'browser-extension' },
+    });
     return { id: saved.id };
   }
 
