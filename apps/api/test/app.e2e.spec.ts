@@ -3,6 +3,7 @@ import { Test } from '@nestjs/testing';
 import cookieParser from 'cookie-parser';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { DataSource } from 'typeorm';
 import { AppModule } from '../src/app.module';
 import { AllExceptionsFilter } from '../src/common/filters/all-exceptions.filter';
 import { ResponseInterceptor } from '../src/common/interceptors/response.interceptor';
@@ -19,6 +20,8 @@ import { ResponseInterceptor } from '../src/common/interceptors/response.interce
 const ADMIN_EMAIL = process.env.E2E_ADMIN_EMAIL ?? '';
 const ADMIN_PASSWORD = process.env.E2E_ADMIN_PASSWORD ?? '';
 const credentialsReady = Boolean(ADMIN_EMAIL && ADMIN_PASSWORD);
+
+const testStartedAt = new Date();
 
 describe.skipIf(!credentialsReady)('MediaFlow 端到端流程', () => {
   let app: INestApplication;
@@ -46,6 +49,18 @@ describe.skipIf(!credentialsReady)('MediaFlow 端到端流程', () => {
   }, 60_000);
 
   afterAll(async () => {
+    /**
+     * 端到端测试跑的是真实数据库：把这次测试产生的 AI 用量记录清掉，
+     * 否则会出现在「AI 用量」里，污染真实的成本统计（离线 mock 调用）。
+     */
+    try {
+      const dataSource = app?.get(DataSource);
+      if (dataSource) {
+        await dataSource.query("DELETE FROM ai_generations WHERE provider = 'mock' AND created_at >= $1", [testStartedAt]);
+      }
+    } catch {
+      // 清理失败不影响测试结论
+    }
     await app?.close();
   });
 
