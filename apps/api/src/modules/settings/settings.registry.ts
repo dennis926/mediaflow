@@ -1,4 +1,14 @@
-export type SettingGroup = 'site' | 'permissions' | 'media' | 'ai' | 'compliance' | 'knowledge' | 'publish' | 'notify' | 'platform';
+export type SettingGroup =
+  | 'site'
+  | 'permissions'
+  | 'media'
+  | 'ai'
+  | 'compliance'
+  | 'knowledge'
+  | 'publish'
+  | 'notify'
+  | 'platform'
+  | 'monitor';
 
 export interface SettingDefinition {
   key: string;
@@ -775,7 +785,119 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
     envKey: 'PUBLISH_RETRY_INTERVAL_MS',
     placeholder: '300000',
   },
+  {
+    key: 'MONITOR_ENABLED',
+    group: 'monitor',
+    label: '开启运行监控',
+    description: '定时巡检队列堆积、卡住任务、发布失败率、登录失败激增、上传磁盘用量与 AI 配额，命中阈值即告警',
+    secret: false,
+    envKey: 'MONITOR_ENABLED',
+    options: [
+      { value: 'true', label: '开启' },
+      { value: 'false', label: '关闭' },
+    ],
+  },
+  {
+    key: 'MONITOR_INTERVAL_SECONDS',
+    group: 'monitor',
+    label: '巡检间隔（秒）',
+    description: '默认 300（5 分钟）；实际执行由每分钟的定时器按该间隔触发',
+    secret: false,
+    envKey: 'MONITOR_INTERVAL_SECONDS',
+    placeholder: '300',
+  },
+  {
+    key: 'MONITOR_QUEUE_LENGTH_THRESHOLD',
+    group: 'monitor',
+    label: '队列长度告警阈值（条）',
+    description: '发布队列积压超过该条数即告警，默认 100',
+    secret: false,
+    envKey: 'MONITOR_QUEUE_LENGTH_THRESHOLD',
+    placeholder: '100',
+  },
+  {
+    key: 'MONITOR_PENDING_AGE_SECONDS',
+    group: 'monitor',
+    label: '未确认消息超时（秒）',
+    description: '存在超过该时长仍未被确认（未 ack）的消息即告警，默认 300（5 分钟）',
+    secret: false,
+    envKey: 'MONITOR_PENDING_AGE_SECONDS',
+    placeholder: '300',
+  },
+  {
+    key: 'MONITOR_FAILURE_RATE_PERCENT',
+    group: 'monitor',
+    label: '发布失败率告警阈值（%）',
+    description: '近 1 小时发布任务的失败占比超过该值即告警，默认 10',
+    secret: false,
+    envKey: 'MONITOR_FAILURE_RATE_PERCENT',
+    placeholder: '10',
+  },
+  {
+    key: 'MONITOR_FAILURE_MIN_SAMPLE',
+    group: 'monitor',
+    label: '失败率最小样本量（条）',
+    description: '近 1 小时任务数少于该值时不做失败率告警，避免样本太少误报，默认 5',
+    secret: false,
+    envKey: 'MONITOR_FAILURE_MIN_SAMPLE',
+    placeholder: '5',
+  },
+  {
+    key: 'MONITOR_LOGIN_FAIL_THRESHOLD',
+    group: 'monitor',
+    label: '登录失败次数告警阈值（次）',
+    description: '窗口期内登录失败次数超过该值即告警，默认 20',
+    secret: false,
+    envKey: 'MONITOR_LOGIN_FAIL_THRESHOLD',
+    placeholder: '20',
+  },
+  {
+    key: 'MONITOR_LOGIN_FAIL_WINDOW_MINUTES',
+    group: 'monitor',
+    label: '登录失败统计窗口（分钟）',
+    description: '登录失败计数的滚动窗口长度，默认 5',
+    secret: false,
+    envKey: 'MONITOR_LOGIN_FAIL_WINDOW_MINUTES',
+    placeholder: '5',
+  },
+  {
+    key: 'MONITOR_DISK_USED_PERCENT',
+    group: 'monitor',
+    label: '上传磁盘使用率告警阈值（%）',
+    description: '素材存储所在磁盘使用率超过该值即告警，默认 80',
+    secret: false,
+    envKey: 'MONITOR_DISK_USED_PERCENT',
+    placeholder: '80',
+  },
+  {
+    key: 'MONITOR_AI_QUOTA_PERCENT',
+    group: 'monitor',
+    label: 'AI 日配额告警阈值（%）',
+    description: '当日 token 消耗达到 AI 日配额的该比例即告警，默认 80；未配置配额时跳过',
+    secret: false,
+    envKey: 'MONITOR_AI_QUOTA_PERCENT',
+    placeholder: '80',
+  },
+  {
+    key: 'MONITOR_ALERT_COOLDOWN_MINUTES',
+    group: 'monitor',
+    label: '同类告警冷却（分钟）',
+    description: '同一种告警在该时长内只发一次，避免刷屏，默认 30',
+    secret: false,
+    envKey: 'MONITOR_ALERT_COOLDOWN_MINUTES',
+    placeholder: '30',
+  },
+  {
+    key: 'MONITOR_OPS_BASE_URL',
+    group: 'monitor',
+    label: '排查链接前缀',
+    description: '告警文案里的排查链接前缀，默认 https://auto.liangyijianye.cn',
+    secret: false,
+    envKey: 'MONITOR_OPS_BASE_URL',
+    placeholder: 'https://auto.liangyijianye.cn',
+  },
 ];
+
 
 export const SETTING_BY_KEY = new Map(SETTING_DEFINITIONS.map((definition) => [definition.key, definition]));
 
@@ -789,4 +911,5 @@ export const SETTING_GROUP_LABELS: Record<SettingGroup, string> = {
   knowledge: '知识库',
   publish: '发布队列',
   platform: '平台密钥',
+  monitor: '运行监控',
 };

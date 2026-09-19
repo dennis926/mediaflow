@@ -7,6 +7,8 @@ import { Inject, Injectable, Logger, UnauthorizedException } from '@nestjs/commo
 import Redis from 'ioredis';
 import { AuditService } from '../../audit/audit.service';
 import { REDIS_CLIENT } from '../../redis/redis.constants';
+import { WorkspaceContextService } from '../../common/workspace-context.service';
+import { DEFAULT_TENANT_ID, DEFAULT_WORKSPACE_ID } from '../../database/seeds/defaults';
 import { RoleCode } from '../workspace/entities/role.entity';
 import { User } from '../workspace/entities/user.entity';
 import { runtime } from '../settings/runtime-config';
@@ -25,6 +27,7 @@ export class AuthService {
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
     private readonly workspaces: WorkspaceService,
     private readonly sessions: AuthSessionService,
+    private readonly workspaceContext: WorkspaceContextService,
   ) {}
 
   private static readonly MAX_FAILURES = 5;
@@ -32,6 +35,17 @@ export class AuthService {
 
   private failureKey(email: string): string {
     return `auth:fail:${email.toLowerCase()}`;
+  }
+
+  /**
+   * 全局登录失败窗口计数（跨账号），供运行监控判断「是否有人在爆破」。
+   * 窗口长度可配置（默认 5 分钟），用固定 TTL 近似滚动窗口——足够发现激增，成本却只是一个 INCR。
+   */
+  private static readonly FAILURE_WINDOW_KEY = 'auth:fail:window';
+
+  private async recordFailureWindow(): Promise<void> {
+    const windowSeconds = Math.max(60, runtime().monitor.loginFailWindowMinutes * 60);
+    await this.redis.multi().incr(AuthService.FAILURE_WINDOW_KEY).expire(AuthService.FAILURE_WINDOW_KEY, windowSeconds).exec().catch(() => undefined);
   }
 
   /** 连续失败锁定，避免密码被暴力破解（此前无任何限流）。 */
@@ -174,7 +188,29 @@ export class AuthService {
     // Same error for unknown account and wrong password: no account enumeration.
     if (!user || !(await bcrypt.compare(password, user.passwordHash))) {
       await this.recordFailure(email);
+      await this.recordFailureWindow();
       this.logger.warn(`登录失败：${email}`);
+      // 失败登录必须留痕：既是「是否有人在爆破」的唯一可靠来源，也是事后追溯的证据
+      // 邮箱不存在时也要能落审计：先取当前作用域，再退回默认工作区
+      const scope = await this.workspaceContext
+        .current()
+        .then((value) => value)
+        .catch(() => ({ tenantId: DEFAULT_TENANT_ID, workspaceId: DEFAULT_WORKSPACE_ID }));
+      await this.audit
+        .record({
+          action: 'auth.login_failed',
+          resourceType: 'user',
+          resourceId: user?.id ?? null,
+          tenantId: user?.tenantId ?? scope.tenantId,
+          workspaceId: user?.workspaceId ?? scope.workspaceId,
+          actorName: user?.displayName ?? null,
+          ip: meta.ip ?? null,
+          userAgent: meta.userAgent ?? null,
+          payload: { email },
+        })
+        .catch((error: unknown) => {
+          this.logger.warn(`记录登录失败审计出错：${error instanceof Error ? error.message : String(error)}`);
+        });
       throw new UnauthorizedException('邮箱或密码不正确');
     }
     await this.redis.del(this.failureKey(email)).catch(() => undefined);

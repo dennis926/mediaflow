@@ -116,6 +116,23 @@ export class PublishQueueService implements OnModuleDestroy {
     return { removed: matched.length, inspected: entries.length, matched };
   }
 
+  /**
+   * 最早一条未确认消息已经「无人认领」多久（毫秒）。监控用它判断消费者是不是卡死/掉线。
+   * 返回 null 表示当前没有未确认消息。
+   */
+  async oldestPendingIdleMs(): Promise<number | null> {
+    try {
+      const raw = await this.redis.call('XPENDING', streamName(), groupName(), '-', '+', '1');
+      if (!Array.isArray(raw) || raw.length === 0) return null;
+      const first = raw[0];
+      if (!Array.isArray(first) || first.length < 3) return null;
+      return Number(first[2]);
+    } catch (error) {
+      this.logger.warn(`读取未确认消息时长失败：${error instanceof Error ? error.message : String(error)}`);
+      return null;
+    }
+  }
+
   /** 取消费组里最早一条未 ack 的消息 ID（没有则为 null）。 */
   async pendingFloor(): Promise<string | null> {
     try {

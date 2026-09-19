@@ -179,6 +179,25 @@ export interface NotifyRuntimeConfig {
   accountExpiryWarnDays: number;
 }
 
+/**
+ * 运行监控阈值：全部可配置，且默认值保守（只报真问题）。
+ * 巡检任务在工作区作用域内运行，读的就是这份快照。
+ */
+export interface MonitorRuntimeConfig {
+  enabled: boolean;
+  intervalSeconds: number;
+  queueLengthThreshold: number;
+  pendingAgeSeconds: number;
+  failureRatePercent: number;
+  failureMinSample: number;
+  loginFailThreshold: number;
+  loginFailWindowMinutes: number;
+  diskUsedPercent: number;
+  aiQuotaPercent: number;
+  alertCooldownMinutes: number;
+  opsBaseUrl: string;
+}
+
 export interface RuntimeConfig {
   site: SiteConfig;
   notify: NotifyRuntimeConfig;
@@ -189,6 +208,7 @@ export interface RuntimeConfig {
   compliance: ComplianceRule[];
   publish: PublishRuntimeConfig;
   permissions: PermissionsRuntimeConfig;
+  monitor: MonitorRuntimeConfig;
 }
 
 export const DEFAULT_SITE: SiteConfig = {
@@ -341,8 +361,24 @@ export const DEFAULT_NOTIFY_RUNTIME: NotifyRuntimeConfig = {
   accountExpiryWarnDays: 7,
 };
 
+export const DEFAULT_MONITOR_RUNTIME: MonitorRuntimeConfig = {
+  enabled: true,
+  intervalSeconds: 300,
+  queueLengthThreshold: 100,
+  pendingAgeSeconds: 300,
+  failureRatePercent: 10,
+  failureMinSample: 5,
+  loginFailThreshold: 20,
+  loginFailWindowMinutes: 5,
+  diskUsedPercent: 80,
+  aiQuotaPercent: 80,
+  alertCooldownMinutes: 30,
+  opsBaseUrl: 'https://auto.liangyijianye.cn',
+};
+
 const snapshot: RuntimeConfig = {
   site: { ...DEFAULT_SITE },
+  monitor: { ...DEFAULT_MONITOR_RUNTIME },
   auth: { ...DEFAULT_AUTH_RUNTIME },
   media: { ...DEFAULT_MEDIA_RUNTIME },
   notify: { ...DEFAULT_NOTIFY_RUNTIME },
@@ -491,6 +527,21 @@ export function applyRuntimeConfig(flat: Record<string, string | undefined>, onE
     dailyTokenQuota: num(flat.AI_DAILY_TOKEN_QUOTA, DEFAULT_AI_RUNTIME.dailyTokenQuota, 0, 1_000_000_000),
   };
 
+  snapshot.monitor = {
+    enabled: bool(flat.MONITOR_ENABLED, DEFAULT_MONITOR_RUNTIME.enabled),
+    intervalSeconds: num(flat.MONITOR_INTERVAL_SECONDS, DEFAULT_MONITOR_RUNTIME.intervalSeconds, 60, 3600),
+    queueLengthThreshold: num(flat.MONITOR_QUEUE_LENGTH_THRESHOLD, DEFAULT_MONITOR_RUNTIME.queueLengthThreshold, 1, 1_000_000),
+    pendingAgeSeconds: num(flat.MONITOR_PENDING_AGE_SECONDS, DEFAULT_MONITOR_RUNTIME.pendingAgeSeconds, 0, 86_400),
+    failureRatePercent: num(flat.MONITOR_FAILURE_RATE_PERCENT, DEFAULT_MONITOR_RUNTIME.failureRatePercent, 0, 100),
+    failureMinSample: num(flat.MONITOR_FAILURE_MIN_SAMPLE, DEFAULT_MONITOR_RUNTIME.failureMinSample, 1, 10_000),
+    loginFailThreshold: num(flat.MONITOR_LOGIN_FAIL_THRESHOLD, DEFAULT_MONITOR_RUNTIME.loginFailThreshold, 1, 1_000_000),
+    loginFailWindowMinutes: num(flat.MONITOR_LOGIN_FAIL_WINDOW_MINUTES, DEFAULT_MONITOR_RUNTIME.loginFailWindowMinutes, 1, 1_440),
+    diskUsedPercent: num(flat.MONITOR_DISK_USED_PERCENT, DEFAULT_MONITOR_RUNTIME.diskUsedPercent, 1, 100),
+    aiQuotaPercent: num(flat.MONITOR_AI_QUOTA_PERCENT, DEFAULT_MONITOR_RUNTIME.aiQuotaPercent, 1, 100),
+    alertCooldownMinutes: num(flat.MONITOR_ALERT_COOLDOWN_MINUTES, DEFAULT_MONITOR_RUNTIME.alertCooldownMinutes, 1, 1_440),
+    opsBaseUrl: text(flat.MONITOR_OPS_BASE_URL, DEFAULT_MONITOR_RUNTIME.opsBaseUrl),
+  };
+
   const parsedRules = parseJson<ComplianceRule[]>(flat.COMPLIANCE_RULES, DEFAULT_COMPLIANCE_RULES, onError);
   snapshot.compliance =
     Array.isArray(parsedRules) && parsedRules.length > 0
@@ -551,6 +602,7 @@ export function applyRuntimeConfig(flat: Record<string, string | undefined>, onE
 export function defaultConfigSnapshot(): RuntimeConfig {
   return {
     site: { ...DEFAULT_SITE },
+    monitor: { ...DEFAULT_MONITOR_RUNTIME },
     auth: { ...DEFAULT_AUTH_RUNTIME },
     media: { ...DEFAULT_MEDIA_RUNTIME },
     notify: { ...DEFAULT_NOTIFY_RUNTIME },

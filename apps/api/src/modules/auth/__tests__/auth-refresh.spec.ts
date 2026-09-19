@@ -7,6 +7,7 @@ import { AuditService } from '../../../audit/audit.service';
 import { WorkspaceService } from '../../workspace/workspace.service';
 import { User } from '../../workspace/entities/user.entity';
 import { AuthSessionService } from '../auth-session.service';
+import { WorkspaceContextService } from '../../../common/workspace-context.service';
 import { AuthService } from '../auth.service';
 
 const USER_ID = '11111111-1111-4111-8111-111111111111';
@@ -45,7 +46,9 @@ function build(options: { blocked?: boolean; status?: string } = {}) {
   const audit = { record: auditRecord } as unknown as AuditService;
   const sessions = { invalidate: vi.fn(async () => 1) } as unknown as AuthSessionService;
   const workspaces = { membership: vi.fn() } as unknown as WorkspaceService;
-  const service = new AuthService(users, jwt, audit, redis as unknown as Redis, workspaces, sessions);
+  // 失败登录审计会读工作区作用域，这里给一个桩
+  const workspaceContext = { current: async () => ({ tenantId: 't1', workspaceId: 'w1' }) } as unknown as WorkspaceContextService;
+  const service = new AuthService(users, jwt, audit, redis as unknown as Redis, workspaces, sessions, workspaceContext);
   return { service, jwt, redis, auditRecord, users };
 }
 
