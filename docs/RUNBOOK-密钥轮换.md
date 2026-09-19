@@ -108,3 +108,35 @@ systemctl start mediaflow-api                                        # 7 启动
 curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:4000/api/health                                            # 8 健康应为 200
 cd apps/api && node scripts/verify-settings-key.cjs                  # 9 解密验证（回滚后旧密钥应能解密全部行）
 ```
+
+### 第 2 次轮换：2026-09-19（JWT_SECRET，因执行日志泄露）
+
+| 项 | 值 |
+| --- | --- |
+| 原因 | 第 1 次轮换时，辅助命令 `grep '^JWT_SECRET=' .env` 的**输出被回显**到执行日志与对话中，泄露事实不可撤回 |
+| 执行人 | 运维脚本（人工监督），用户批准（任务 8b） |
+| 旧指纹 | `9d87f6490bc0`（48 字符） |
+| 新指纹 | `7c6f756673e3`（48 字符，`openssl rand -base64 36` → 恰好 48 字符） |
+| 影响 | 全部 access/refresh 令牌立即失效，2 个用户需重新登录；**不影响**密文解密、账号绑定、内容数据 |
+| 停机 | 仅重启 API 约 4 秒 |
+| 验证 | 旧 access → 401；旧 refresh → 401；新登录成功；新令牌读 AI 配置与 AI 测试正常；密文 2/2 仍可解密 |
+| 审计 | `settings.jwt_secret.rotated`（含新旧指纹，不含密钥值） |
+| 通知 | 站内通知「请重新登录」（type `system.security_notice`） |
+| 备份 | `.env.bak-jwt-202609190825` |
+
+**关键结论：`JWT_SECRET` 与设置加密已解耦。** 第 1 次轮换后 `SETTINGS_ENCRYPTION_KEY` 独立承担密文加解密，
+因此本次轮换 JWT_SECRET **完全不影响** `AI_API_KEY` / `AI_PROVIDER_CONFIGS` 的解密。
+后续若要再次轮换 JWT_SECRET，可随时单独进行。
+
+**注意**：`openssl rand -base64 48` 产出 **64** 字符；若要求 48 字符（与历史格式一致），应使用
+`openssl rand -base64 36`（36 字节 → 48 字符，无填充）。
+
+## 禁止事项（重要）
+
+1. **任何 `grep` / `sed` / `awk` / `echo` 输出密钥类变量前，必须先做指纹化处理**——只输出 `sha256 前 12 位`，
+   绝不回显原值。2026-09-19 的 JWT_SECRET 泄露即由此产生（辅助函数直接打印了 grep 结果）。
+2. 不得在聊天、邮件、工单、文档中传递密钥明文。
+3. 不得把密钥写入代码、日志、审计 payload、工单截图。
+4. 不得先改 `.env` 后备份；不得跳过临时库演练。
+5. 不得用同一密钥同时承担登录签名与数据加密（本次教训：JWT_SECRET 既是签名密钥又是加密主密钥，
+   导致"签名密钥泄露"被迫连带评估数据安全）。
