@@ -1,11 +1,13 @@
-import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Post, Put } from '@nestjs/common';
+import { WorkspaceLifecycle } from '../auth/workspace-lifecycle.decorator';
+import { DeleteWorkspaceDto } from './dto/workspace-lifecycle.dto';
+import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Post, Put } from '@nestjs/common';
 import { ArrayMaxSize, ArrayMinSize, IsArray, IsIn, IsOptional, IsString, IsUUID, Length } from 'class-validator';
 import { Capability } from '../auth/capabilities';
 import { AuthUser } from '../auth/auth.types';
 import { toActor } from '../auth/actor.util';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { ROLE_CODES } from './entities/role.entity';
-import { WorkspaceMemberView, WorkspaceService, WorkspaceSummary } from './workspace.service';
+import { WorkspaceMemberView, WorkspaceService, WorkspaceStatusView, WorkspaceSummary } from './workspace.service';
 
 class CreateWorkspaceDto {
   @IsString()
@@ -48,6 +50,54 @@ export class WorkspaceController {
   @Post()
   create(@Body() dto: CreateWorkspaceDto, @CurrentUser() user?: AuthUser): Promise<WorkspaceSummary> {
     return this.workspacesService.create(dto, toActor(user));
+  }
+
+
+  /**
+   * 工作区生命周期（B0.4）。这些接口一律标注 @WorkspaceLifecycle()：
+   * 目标工作区可能正处于归档/软删态，若被状态闸门拦下，用户将永远无法恢复自己的工作区。
+   * 权限在服务层按**目标工作区**判定（requireWorkspaceRole）。
+   */
+  @Capability('workspace.archive')
+  @WorkspaceLifecycle()
+  @HttpCode(200)
+  @Post(':id/archive')
+  archive(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user?: AuthUser): Promise<WorkspaceStatusView> {
+    return this.workspacesService.archiveWorkspace(id, user?.id ?? '', toActor(user));
+  }
+
+  @Capability('workspace.archive')
+  @WorkspaceLifecycle()
+  @HttpCode(200)
+  @Post(':id/unarchive')
+  unarchive(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user?: AuthUser): Promise<WorkspaceStatusView> {
+    return this.workspacesService.unarchiveWorkspace(id, user?.id ?? '', toActor(user));
+  }
+
+  @Capability('workspace.delete')
+  @WorkspaceLifecycle()
+  @Delete(':id')
+  softDelete(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: DeleteWorkspaceDto,
+    @CurrentUser() user?: AuthUser,
+  ): Promise<WorkspaceStatusView> {
+    return this.workspacesService.softDeleteWorkspace(id, user?.id ?? '', dto.confirmName, toActor(user), dto.reason);
+  }
+
+  @Capability('workspace.restore')
+  @WorkspaceLifecycle()
+  @HttpCode(200)
+  @Post(':id/restore')
+  restore(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user?: AuthUser): Promise<WorkspaceStatusView> {
+    return this.workspacesService.restoreWorkspace(id, user?.id ?? '', toActor(user));
+  }
+
+  @Capability('workspace.manage')
+  @WorkspaceLifecycle()
+  @Get(':id/status')
+  status(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user?: AuthUser): Promise<WorkspaceStatusView> {
+    return this.workspacesService.workspaceStatus(id, user?.id ?? '');
   }
 
   @Capability('workspace.manage')

@@ -4,13 +4,15 @@ import { Role } from './entities/role.entity';
 import { User } from './entities/user.entity';
 import { Workspace } from './entities/workspace.entity';
 import { WorkspaceMember } from './entities/workspace-member.entity';
+import { WorkspaceExportJob } from './entities/workspace-export-job.entity';
+import { PublishTask } from '../publish/entities/publish-task.entity';
 import { UserController } from './user.controller';
 import { WorkspaceController } from './workspace.controller';
 import { WorkspaceService } from './workspace.service';
 import { UserService } from './user.service';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([User, Role, Workspace, WorkspaceMember])],
+  imports: [TypeOrmModule.forFeature([User, Role, Workspace, WorkspaceMember, WorkspaceExportJob, PublishTask])],
   controllers: [UserController, WorkspaceController],
   providers: [UserService, WorkspaceService],
   exports: [UserService, WorkspaceService],

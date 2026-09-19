@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, GoneException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { AuditService } from '../../audit/audit.service';
@@ -8,6 +8,9 @@ import { WorkspaceMember } from './entities/workspace-member.entity';
 import { User } from './entities/user.entity';
 import { AuthSessionService } from '../auth/auth-session.service';
 import { Workspace, WorkspaceStatus } from './entities/workspace.entity';
+import { WorkspaceExportJob } from './entities/workspace-export-job.entity';
+import { PublishTask } from '../publish/entities/publish-task.entity';
+import { runtime } from '../settings/runtime-config';
 
 export interface WorkspaceSummary {
   id: string;
@@ -16,6 +19,23 @@ export interface WorkspaceSummary {
   status: WorkspaceStatus;
   roleCodes: RoleCode[];
   isCurrent: boolean;
+}
+
+export interface WorkspaceStatusView {
+  id: string;
+  name: string;
+  slug: string;
+  status: WorkspaceStatus;
+  archivedAt: string | null;
+  deletedAt: string | null;
+  purgeAfter: string | null;
+  /** 距离永久清除还有几天（仅软删态有值），前端用来显示倒计时 */
+  daysUntilPurge: number | null;
+}
+
+export interface WorkspaceActor {
+  id?: string | null;
+  name?: string | null;
 }
 
 export interface WorkspaceMemberView {
@@ -40,6 +60,8 @@ export class WorkspaceService {
     @InjectRepository(Workspace) private readonly workspaces: Repository<Workspace>,
     @InjectRepository(WorkspaceMember) private readonly members: Repository<WorkspaceMember>,
     @InjectRepository(User) private readonly users: Repository<User>,
+    @InjectRepository(PublishTask) private readonly tasks: Repository<PublishTask>,
+    @InjectRepository(WorkspaceExportJob) private readonly exportJobs: Repository<WorkspaceExportJob>,
     private readonly workspaceContext: WorkspaceContextService,
     private readonly audit: AuditService,
     private readonly sessions: AuthSessionService,
@@ -71,6 +93,209 @@ export class WorkspaceService {
     return summaries.sort(
       (left, right) => Number(right.isCurrent) - Number(left.isCurrent) || left.name.localeCompare(right.name),
     );
+  }
+
+  /**
+   * 解析"这个用户现在应该进入哪个工作区"（B0.4 / M8）。
+   *
+   * `users.workspace_id` 改为可为空之后，用户归属完全由 `workspace_members` 表达，登录不能直接读它。
+   * 选择顺序：
+   *   1) 首选工作区（登录时传用户的默认工作区；刷新时传令牌里的工作区）——只要仍是成员、且工作区可用就用它，
+   *      这样"刷新令牌不会把用户从他正在用的工作区悄悄切走"；
+   *   2) 最早加入的 active 工作区；
+   *   3) 没有 active 的：返回"我是 owner 的已软删工作区"——否则删掉唯一工作区的人将永远无法登录去恢复；
+   *   4) 都没有 → null（调用方给出明确提示，而不是签发一个没有工作区的令牌）。
+   */
+  async resolveLoginWorkspace(
+    userId: string,
+    preferredWorkspaceId?: string | null,
+  ): Promise<{ workspace: Workspace; roleCodes: RoleCode[] } | null> {
+    const memberships = await this.members.find({ where: { userId }, order: { createdAt: 'ASC' } });
+    if (memberships.length === 0) return null;
+
+    const workspaces = await this.workspaces.find({ where: { id: In(memberships.map((row) => row.workspaceId)) } });
+    const byId = new Map(workspaces.map((workspace) => [workspace.id, workspace]));
+
+    const usable = (workspaceId: string, roleCodes: RoleCode[]): boolean => {
+      const workspace = byId.get(workspaceId);
+      if (!workspace) return false;
+      if (workspace.status === 'active' || workspace.status === 'archived') return true;
+      // 已软删：仅当调用者是 owner 时才允许进入（用于恢复），其余人视为不可用
+      return workspace.status === 'soft_deleted' && roleCodes.includes('owner');
+    };
+
+    const preferred = preferredWorkspaceId
+      ? memberships.find((row) => row.workspaceId === preferredWorkspaceId && usable(row.workspaceId, (row.roleCodes ?? []) as RoleCode[]))
+      : undefined;
+    const fallback = preferred ?? memberships.find((row) => usable(row.workspaceId, (row.roleCodes ?? []) as RoleCode[]));
+    if (!fallback) return null;
+
+    const workspace = byId.get(fallback.workspaceId);
+    if (!workspace) return null;
+    return { workspace, roleCodes: (fallback.roleCodes ?? []) as RoleCode[] };
+  }
+
+  /**
+   * 生命周期接口的权限判定（B0.4）：按**目标工作区**查成员关系，而不是"当前令牌所在工作区"。
+   *
+   * 为什么必须这样：
+   *   1) 否则 A 租户的 owner 可以删掉 B 租户的工作区（越权）；
+   *   2) 否则用户把当前工作区软删之后，每个请求都 404，**永远无法恢复自己的工作区**。
+   *
+   * 约定：工作区不存在、或调用者不是其成员 → 404（不泄露"这个工作区存在"）；
+   *       是成员但不是 owner → 403（权限不足，语义清晰）。
+   */
+  async requireWorkspaceRole(
+    workspaceId: string,
+    userId: string,
+    allowed: RoleCode[] = ['owner'],
+  ): Promise<{ workspace: Workspace; roleCodes: RoleCode[] }> {
+    const workspace = await this.workspaces.findOne({ where: { id: workspaceId } });
+    if (!workspace) throw new NotFoundException('工作区不存在');
+    const member = await this.members.findOne({ where: { userId, workspaceId } });
+    if (!member) throw new NotFoundException('工作区不存在');
+    const roleCodes = (member.roleCodes ?? []) as RoleCode[];
+    if (!roleCodes.some((role) => allowed.includes(role))) {
+      throw new ForbiddenException('只有该工作区的所有者可以执行此操作');
+    }
+    return { workspace, roleCodes };
+  }
+
+  /** 归档：只读态，可随时取消归档。 */
+  async archiveWorkspace(workspaceId: string, userId: string, actor: WorkspaceActor): Promise<WorkspaceStatusView> {
+    const { workspace } = await this.requireWorkspaceRole(workspaceId, userId);
+    if (workspace.status === 'archived') throw new ConflictException('该工作区已处于归档状态');
+    if (workspace.status === 'soft_deleted') throw new ConflictException('该工作区已被删除，请先恢复再归档');
+
+    await this.workspaces.update({ id: workspace.id }, { status: 'archived', archivedAt: new Date() });
+    await this.sessions.invalidateWorkspace(workspace.id);
+    await this.recordLifecycle('workspace.archive', workspace, actor, { previousStatus: workspace.status });
+    this.logger.log(`工作区已归档：${workspace.name}`);
+    return this.statusView(await this.workspaces.findOneOrFail({ where: { id: workspace.id } }));
+  }
+
+  /** 取消归档：回到可写状态。 */
+  async unarchiveWorkspace(workspaceId: string, userId: string, actor: WorkspaceActor): Promise<WorkspaceStatusView> {
+    const { workspace } = await this.requireWorkspaceRole(workspaceId, userId);
+    if (workspace.status !== 'archived') throw new ConflictException('该工作区当前不是归档状态');
+
+    await this.workspaces.update({ id: workspace.id }, { status: 'active', archivedAt: null });
+    await this.sessions.invalidateWorkspace(workspace.id);
+    await this.recordLifecycle('workspace.unarchive', workspace, actor, {});
+    this.logger.log(`工作区已取消归档：${workspace.name}`);
+    return this.statusView(await this.workspaces.findOneOrFail({ where: { id: workspace.id } }));
+  }
+
+  /**
+   * 软删：进入保留期（默认 30 天，可配置），期间可恢复；到期后由定时任务永久清除。
+   * 前置校验：无未完成发布任务、无进行中的导出。
+   */
+  async softDeleteWorkspace(
+    workspaceId: string,
+    userId: string,
+    confirmName: string,
+    actor: WorkspaceActor,
+    reason?: string,
+  ): Promise<WorkspaceStatusView> {
+    const { workspace } = await this.requireWorkspaceRole(workspaceId, userId);
+    if (workspace.status === 'soft_deleted') throw new ConflictException('该工作区已被删除');
+    if (confirmName.trim() !== workspace.name) {
+      throw new BadRequestException('工作区名称不匹配：请输入完整名称以确认删除');
+    }
+
+    const activeTasks = await this.tasks.count({
+      where: {
+        workspaceId: workspace.id,
+        status: In(['pending', 'scheduled', 'publishing'] as never[]),
+      },
+    });
+    if (activeTasks > 0) {
+      throw new ConflictException(`该工作区还有 ${activeTasks} 个未完成的发布任务，请先取消或等待完成`);
+    }
+    const runningExports = await this.exportJobs.count({
+      where: { workspaceId: workspace.id, status: In(['queued', 'running'] as never[]) },
+    });
+    if (runningExports > 0) throw new ConflictException('该工作区有正在进行的导出任务，请等待其完成');
+
+    const retentionDays = runtime().workspace.softDeleteRetentionDays;
+    const deletedAt = new Date();
+    const purgeAfter = new Date(deletedAt.getTime() + retentionDays * 24 * 60 * 60 * 1000);
+    await this.workspaces.update(
+      { id: workspace.id },
+      { status: 'soft_deleted', deletedAt, purgeAfter, archivedAt: null },
+    );
+    await this.sessions.invalidateWorkspace(workspace.id);
+    await this.recordLifecycle('workspace.soft_delete', workspace, actor, {
+      confirmName: confirmName.trim(),
+      retentionDays,
+      purgeAfter: purgeAfter.toISOString(),
+      reason: reason ?? null,
+    });
+    this.logger.warn(`工作区已软删（${retentionDays} 天内可恢复）：${workspace.name}`);
+    return this.statusView(await this.workspaces.findOneOrFail({ where: { id: workspace.id } }));
+  }
+
+  /** 恢复：仅在保留期内可恢复；过期返回 410（明确告知不可恢复，而不是含糊的 400）。 */
+  async restoreWorkspace(workspaceId: string, userId: string, actor: WorkspaceActor): Promise<WorkspaceStatusView> {
+    const { workspace } = await this.requireWorkspaceRole(workspaceId, userId);
+    if (workspace.status !== 'soft_deleted') throw new ConflictException('该工作区当前不需要恢复');
+
+    const deadline = workspace.purgeAfter ?? workspace.deletedAt;
+    if (deadline && Date.now() > deadline.getTime()) {
+      throw new GoneException('该工作区已超过保留期，数据不可恢复');
+    }
+
+    await this.workspaces.update({ id: workspace.id }, { status: 'active', deletedAt: null, purgeAfter: null });
+    await this.sessions.invalidateWorkspace(workspace.id);
+    await this.recordLifecycle('workspace.restore', workspace, actor, { deletedAt: workspace.deletedAt?.toISOString() ?? null });
+    this.logger.log(`工作区已恢复：${workspace.name}`);
+    return this.statusView(await this.workspaces.findOneOrFail({ where: { id: workspace.id } }));
+  }
+
+  /** 只读状态视图（前端据此显示倒计时与可执行操作）。 */
+  async workspaceStatus(workspaceId: string, userId: string): Promise<WorkspaceStatusView> {
+    await this.requireWorkspaceRole(workspaceId, userId, ['owner', 'admin', 'editor', 'reviewer', 'viewer']);
+    const workspace = await this.workspaces.findOneOrFail({ where: { id: workspaceId } });
+    return this.statusView(workspace);
+  }
+
+  private statusView(workspace: Workspace): WorkspaceStatusView {
+    const daysUntilPurge =
+      workspace.status === 'soft_deleted' && workspace.purgeAfter
+        ? Math.max(0, Math.ceil((workspace.purgeAfter.getTime() - Date.now()) / (24 * 60 * 60 * 1000)))
+        : null;
+    return {
+      id: workspace.id,
+      name: workspace.name,
+      slug: workspace.slug,
+      status: workspace.status,
+      archivedAt: workspace.archivedAt?.toISOString() ?? null,
+      deletedAt: workspace.deletedAt?.toISOString() ?? null,
+      purgeAfter: workspace.purgeAfter?.toISOString() ?? null,
+      daysUntilPurge,
+    };
+  }
+
+  private async recordLifecycle(
+    action: string,
+    workspace: Workspace,
+    actor: WorkspaceActor,
+    payload: Record<string, unknown>,
+  ): Promise<void> {
+    await this.audit
+      .record({
+        action,
+        resourceType: 'workspace',
+        resourceId: workspace.id,
+        tenantId: workspace.tenantId,
+        workspaceId: workspace.id,
+        actorId: actor.id ?? null,
+        actorName: actor.name ?? null,
+        payload: { workspaceName: workspace.name, ...payload },
+      })
+      .catch((error: unknown) => {
+        this.logger.warn(`工作区生命周期审计写入失败（${action}）：${error instanceof Error ? error.message : String(error)}`);
+      });
   }
 
   /** 校验用户是否属于某工作区，并返回其在该工作区的角色。 */

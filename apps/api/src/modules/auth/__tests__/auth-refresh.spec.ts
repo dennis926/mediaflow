@@ -12,7 +12,7 @@ import { AuthService } from '../auth.service';
 
 const USER_ID = '11111111-1111-4111-8111-111111111111';
 
-function build(options: { blocked?: boolean; status?: string } = {}) {
+function build(options: { blocked?: boolean; status?: string; workspaceId?: string; noWorkspace?: boolean } = {}) {
   const jwt = new JwtService({ secret: 'test-secret' });
   const users = {
     findOne: vi.fn(async () => ({
@@ -45,11 +45,17 @@ function build(options: { blocked?: boolean; status?: string } = {}) {
   const auditRecord = vi.fn(async (_input: unknown) => undefined);
   const audit = { record: auditRecord } as unknown as AuditService;
   const sessions = { invalidate: vi.fn(async () => 1) } as unknown as AuthSessionService;
-  const workspaces = { membership: vi.fn() } as unknown as WorkspaceService;
+  // B0.4/M8：登录/刷新进入哪个工作区由成员关系解析（users.workspace_id 可能为空）
+  const resolveLoginWorkspace = vi.fn(async () =>
+    options.noWorkspace
+      ? null
+      : { workspace: { id: options.workspaceId ?? 'w-1', tenantId: 't-1', status: 'active' }, roleCodes: ['owner'] },
+  );
+  const workspaces = { membership: vi.fn(), resolveLoginWorkspace } as unknown as WorkspaceService;
   // 失败登录审计会读工作区作用域，这里给一个桩
   const workspaceContext = { current: async () => ({ tenantId: 't1', workspaceId: 'w1' }) } as unknown as WorkspaceContextService;
   const service = new AuthService(users, jwt, audit, redis as unknown as Redis, workspaces, sessions, workspaceContext);
-  return { service, jwt, redis, auditRecord, users };
+  return { service, jwt, redis, auditRecord, users, resolveLoginWorkspace };
 }
 
 describe('刷新令牌轮换与登出（任务 6 / 审计 P2-5）', () => {
@@ -117,5 +123,25 @@ describe('刷新令牌轮换与登出（任务 6 / 审计 P2-5）', () => {
     const { service, jwt } = build();
     const access = jwt.sign({ sub: USER_ID, workspaceId: 'w', roles: ['owner'] });
     await expect(service.refresh(access)).rejects.toThrow(/令牌类型不正确/);
+  });
+});
+
+describe('刷新时的工作区归属（B0.4 / M8）', () => {
+  it('刷新保留令牌里的工作区（不再把用户切回默认工作区）', async () => {
+    const { service, jwt, resolveLoginWorkspace } = build({ workspaceId: 'w-current' });
+    const refresh = jwt.sign({ sub: USER_ID, type: 'refresh', workspaceId: 'w-current' }, { jwtid: 'jti-1', expiresIn: '7d' });
+
+    const tokens = await service.refresh(refresh);
+    const payload = jwt.decode(tokens.accessToken) as { workspaceId: string };
+
+    expect(payload.workspaceId).toBe('w-current');
+    expect(resolveLoginWorkspace).toHaveBeenCalledWith(USER_ID, 'w-current');
+  });
+
+  it('账号没有任何可用工作区时拒绝刷新（403，而不是签发一个没有工作区的令牌）', async () => {
+    const { service, jwt } = build({ noWorkspace: true });
+    const refresh = jwt.sign({ sub: USER_ID, type: 'refresh' }, { jwtid: 'jti-2', expiresIn: '7d' });
+
+    await expect(service.refresh(refresh)).rejects.toThrow(/没有可用的工作区/);
   });
 });

@@ -8,6 +8,17 @@ export type UserStatus = 'active' | 'disabled';
 @Entity('users')
 @Index(['tenantId', 'email'], { unique: true })
 export class User extends BaseEntity {
+  /**
+   * 默认工作区（B0.4/M8：**数据库层可为空**）。
+   *
+   * 工作区被永久清除时这里置空，用户本身必须保留（他可能还属于其他工作区，
+   * 账号不能因为删了一个工作区就消失）。类型沿用基类的 `string` 以符合多租户列约定，
+   * 但**运行时可能为 null** —— 因此任何"用户归属/能进哪个工作区"的判断都必须走
+   * `WorkspaceService.resolveLoginWorkspace()`（以 workspace_members 为准），不要读这个字段。
+   */
+  @Column({ type: 'uuid', nullable: true })
+  declare workspaceId: string;
+
   @Column({ type: 'varchar', length: 160 })
   email!: string;
 
@@ -44,7 +55,7 @@ export class User extends BaseEntity {
   @DeleteDateColumn({ type: 'timestamptz' })
   deletedAt!: Date | null;
 
-  @ManyToOne(() => Workspace, (workspace) => workspace.users, { onDelete: 'CASCADE' })
+  @ManyToOne(() => Workspace, (workspace) => workspace.users, { onDelete: 'SET NULL', nullable: true })
   workspace?: Workspace;
 
   @ManyToMany(() => Role)

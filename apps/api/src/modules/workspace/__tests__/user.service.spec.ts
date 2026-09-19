@@ -30,13 +30,20 @@ function actor(id = 'actor-1') {
 
 const members = {
   findOne: vi.fn(async () => null),
+  // B0.4/M8：countActiveOwners 改为以 workspace_members 为准（不再读 users.workspace_id）
+  find: vi.fn(async () => [
+    { userId: 'owner-1', roleCodes: ['owner'] },
+    { userId: 'owner-2', roleCodes: ['owner'] },
+    { userId: 'editor-1', roleCodes: ['editor'] },
+  ]),
   update: vi.fn(async () => ({ affected: 1 })),
   save: vi.fn(async (value: unknown) => value),
   create: vi.fn((value: unknown) => value),
 } as unknown as Repository<WorkspaceMember>;
 
 function buildService(options: { ownerCount?: number; user?: Partial<User> | null } = {}) {
-  const users = repo<User>();
+  // users.count 用于统计"仍启用"的 owner 数
+  const users = repo<User>({ count: vi.fn(async () => options.ownerCount ?? 2) });
   const roles = repo<Role>({
     find: vi.fn(async () => [
       { id: 'role-owner', code: 'owner' },

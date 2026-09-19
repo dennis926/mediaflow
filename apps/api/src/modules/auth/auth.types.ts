@@ -28,5 +28,12 @@ export interface RefreshTokenPayload {
   jti?: string;
   /** 过期时间（秒，JWT 标准声明），黑名单 TTL 用它算剩余有效期 */
   exp?: number;
+  /**
+   * 签发时的工作区（B0.4）：刷新时保持在同一工作区，而不是把用户切回"默认工作区"。
+   * 老令牌没有这个字段 → 刷新时按成员关系重新解析（向后兼容）。
+   */
+  workspaceId?: string;
+  /** 签发时的租户，用于登出审计（老令牌可能没有） */
+  tenantId?: string;
   iat?: number;
 }

@@ -3,7 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import * as bcrypt from 'bcrypt';
 import { randomUUID } from 'node:crypto';
 import { Repository } from 'typeorm';
-import { Inject, Injectable, Logger, UnauthorizedException } from '@nestjs/common';
+import { ForbiddenException, Inject, Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import Redis from 'ioredis';
 import { AuditService } from '../../audit/audit.service';
 import { REDIS_CLIENT } from '../../redis/redis.constants';
@@ -85,7 +85,8 @@ export class AuthService {
       { expiresIn: accessExpires as unknown as number, jwtid: randomUUID() },
     );
     const refreshToken = await this.jwtService.signAsync(
-      { sub: user.id, type: 'refresh' } satisfies RefreshTokenPayload,
+      // 带上 workspaceId：刷新时据此保持在同一个工作区，而不是被切回"默认工作区"
+      { sub: user.id, type: 'refresh', workspaceId: user.workspaceId } satisfies RefreshTokenPayload,
       { expiresIn: refreshExpires as unknown as number, jwtid: randomUUID() },
     );
     return { accessToken, refreshToken, expiresIn: accessExpires };
@@ -123,8 +124,9 @@ export class AuthService {
             action: 'auth.logout',
             resourceType: 'user',
             resourceId: payload.sub,
-            tenantId: owner?.tenantId ?? '00000000-0000-4000-8000-000000000000',
-            workspaceId: owner?.workspaceId ?? '00000000-0000-4000-8000-000000000000',
+            tenantId: owner?.tenantId ?? payload.tenantId ?? DEFAULT_TENANT_ID,
+            // 用令牌里的工作区：owner.workspaceId 在 M8 之后可能为空，且假 UUID 会写出一条指向不存在工作区的审计
+            workspaceId: payload.workspaceId ?? owner?.workspaceId ?? DEFAULT_WORKSPACE_ID,
             actorId: payload.sub,
             actorName: null,
             ip: meta.ip ?? null,
@@ -159,13 +161,16 @@ export class AuthService {
     if (!user) throw new UnauthorizedException('账号不存在，请重新登录');
     if (user.status !== 'active') throw new UnauthorizedException('账号已被禁用，请联系管理员');
 
-    const roles = await this.roleCodesOf(user.id);
+    // 保持令牌里的工作区（若仍可用），否则按成员关系重新解析；两者都没有则拒绝刷新
+    const resolution = await this.workspaces.resolveLoginWorkspace(user.id, payload.workspaceId ?? null);
+    if (!resolution) throw new ForbiddenException('该账号当前没有可用的工作区，请联系管理员');
+    const roles = resolution.roleCodes.length > 0 ? resolution.roleCodes : await this.roleCodesOf(user.id);
     const authUser: AuthUser = {
       id: user.id,
       email: user.email,
       displayName: user.displayName,
-      tenantId: user.tenantId,
-      workspaceId: user.workspaceId,
+      tenantId: resolution.workspace.tenantId,
+      workspaceId: resolution.workspace.id,
       roles,
       isSuperAdmin: user.isSuperAdmin,
       mustChangePassword: user.mustChangePassword,
@@ -217,13 +222,19 @@ export class AuthService {
     if (user.status !== 'active') throw new UnauthorizedException('账号已被禁用，请联系管理员');
 
     await this.users.update({ id: user.id }, { lastLoginAt: new Date() });
-    const roles = await this.roleCodesOf(user.id);
+    /**
+     * 登录进入哪个工作区由成员关系决定（M8 之后 users.workspace_id 可能为空）：
+     * 优先用户的默认工作区（若仍可用），否则第一个可用工作区；一个都没有则明确拒绝。
+     */
+    const resolution = await this.workspaces.resolveLoginWorkspace(user.id, user.workspaceId);
+    if (!resolution) throw new ForbiddenException('该账号未被加入任何可用工作区，请联系管理员');
+    const roles = resolution.roleCodes.length > 0 ? resolution.roleCodes : await this.roleCodesOf(user.id);
     const authUser: AuthUser = {
       id: user.id,
       email: user.email,
       displayName: user.displayName,
-      tenantId: user.tenantId,
-      workspaceId: user.workspaceId,
+      tenantId: resolution.workspace.tenantId,
+      workspaceId: resolution.workspace.id,
       roles,
       isSuperAdmin: user.isSuperAdmin,
       mustChangePassword: user.mustChangePassword,
@@ -235,8 +246,8 @@ export class AuthService {
       action: 'auth.login',
       resourceType: 'user',
       resourceId: user.id,
-      tenantId: user.tenantId,
-      workspaceId: user.workspaceId,
+      tenantId: authUser.tenantId,
+      workspaceId: authUser.workspaceId,
       actorId: user.id,
       actorName: user.displayName,
       ip: meta.ip ?? null,
@@ -294,12 +305,14 @@ export class AuthService {
   async profile(userId: string): Promise<AuthUser> {
     const user = await this.users.findOne({ where: { id: userId } });
     if (!user) throw new UnauthorizedException('账号不存在');
+    // 当前工作区取自请求作用域（令牌），不再依赖 users.workspace_id（M8 后可能为空）
+    const scope = await this.workspaceContext.current();
     return {
       id: user.id,
       email: user.email,
       displayName: user.displayName,
-      tenantId: user.tenantId,
-      workspaceId: user.workspaceId,
+      tenantId: scope.tenantId,
+      workspaceId: scope.workspaceId,
       roles: await this.roleCodesOf(user.id),
       isSuperAdmin: user.isSuperAdmin,
       mustChangePassword: user.mustChangePassword,

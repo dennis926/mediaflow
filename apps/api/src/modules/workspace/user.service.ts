@@ -9,7 +9,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import * as bcrypt from 'bcrypt';
 import { randomInt } from 'node:crypto';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { AuditService } from '../../audit/audit.service';
 import { WorkspaceContextService } from '../../common/workspace-context.service';
 import {
@@ -339,17 +339,20 @@ export class UserService {
     if (activeOwners <= 1) throw new ForbiddenException(message);
   }
 
+  /**
+   * 统计当前工作区里"仍是 owner 且账号启用"的人数（B0.4/M8）。
+   *
+   * 旧实现用 `user.workspaceId = :workspaceId` 过滤——那是"归属首个工作区"的遗留字段，
+   * 工作区被清除后它为 NULL，会让 owner 被漏数；改为以 workspace_members 为准。
+   */
   private async countActiveOwners(): Promise<number> {
     const scope = await this.workspaceContext.current();
-    return this.users
-      .createQueryBuilder('user')
-      .leftJoin('user.roles', 'role')
-      .where('user.workspaceId = :workspaceId AND user.status = :status AND role.code = :code', {
-        workspaceId: scope.workspaceId,
-        status: 'active',
-        code: 'owner',
-      })
-      .getCount();
+    const members = await this.members.find({ where: { workspaceId: scope.workspaceId } });
+    const ownerIds = members
+      .filter((member) => (member.roleCodes ?? []).includes('owner'))
+      .map((member) => member.userId);
+    if (ownerIds.length === 0) return 0;
+    return this.users.count({ where: { id: In(ownerIds), status: 'active' } });
   }
 
   /** 新建/邀请用户时把他加入当前工作区，否则切换工作区列表是空的。 */

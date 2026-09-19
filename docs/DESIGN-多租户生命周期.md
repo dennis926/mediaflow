@@ -486,3 +486,38 @@ purge 是唯一不可逆的操作，**必须先在演练工作区上跑通**，�
 | 缓存失效 | `AuthSessionService.invalidateWorkspace(workspaceId)`（SCAN `auth:user:*:{workspaceId}`）+ 快照新增 `workspaceStatus` |
 | 状态闸门 | 守卫：软删 → 404、归档 → 写 403 / 读放行；`@WorkspaceLifecycle()` 标记的接口豁免（否则无法恢复自己的工作区）；**修正了守卫 catch 吞掉 403 的缺陷** |
 | 测试 | 单元 257 通过（新增 11：能力点矩阵、保留期配置、快照状态、按工作区失效、守卫 5 例）；3 个迁移实测「应用 → 逐个回滚 → 重放」 |
+
+### 12.5 M8 依赖清单（补充 1 的扫描结果，2026-09-19）
+
+扫描范围：`apps/api/src`、`packages/shared/src`、`apps/web/src`、`apps/h5/src`。
+共发现 **8 处**读取 `users.workspace_id` 的代码（含实体与迁移）——**未超过 10 处阈值**，故按计划改造，逐处处置如下：
+
+| # | 位置 | 用途 | 置空后的风险 | 处置 |
+| --- | --- | --- | --- | --- |
+| 1 | `auth.service.ts` login | 决定登录后进入哪个工作区 | **用户完全无法登录**（令牌 workspaceId 为空 → 守卫 401） | 改为 `WorkspaceService.resolveLoginWorkspace(userId, 默认工作区)`：优先仍可用的默认工作区 → 最早的 active → 我是 owner 的软删工作区 → 都没有则 403 |
+| 2 | `auth.service.ts` refresh | 刷新时重建令牌 | 同上；且**原有隐患**：刷新会把用户从他正在用的工作区切回"默认工作区" | 刷新令牌新增 `workspaceId` 声明，刷新时优先沿用（校验成员与状态），失效则回落解析；顺带修掉了工作区漂移 |
+| 3 | `auth.service.ts` login 审计 | 审计行的 workspace_id | 审计指向空值 | 改用解析出的工作区 |
+| 4 | `auth.service.ts` logout 审计 | `?? '00000000-0000-4000-8000-…'` 假 UUID 兜底 | 写出指向不存在工作区的审计 | 改用令牌里的 `workspaceId`，再退默认工作区 |
+| 5 | `auth.service.ts` login_failed 审计 | 失败登录留痕 | 无（已有作用域兜底） | 保持不变 |
+| 6 | `auth.service.ts` profile | 返回当前用户信息 | 前端拿到空工作区 | 改取请求作用域（令牌）里的工作区 |
+| 7 | `user.service.ts` `countActiveOwners()` | 判断"能否删除最后一个 owner" | **统计漏人**：家里工作区被删的 owner 不再被计入 → 可能误判为"没有 owner"而阻止合法操作 | 改为以 `workspace_members` 为准（成员 → 用户状态） |
+| 8 | `user.entity.ts` / `InitSchema` 迁移 | 列定义与 FK | CASCADE 会连带删用户 | M8：`DROP NOT NULL` + 外键改 `SET NULL`；实体注明"运行时可能为 null，归属判断一律走 workspace_members" |
+
+未受影响的读取（确认无需改动）：`seeds/seed.ts`（插入时显式赋值）、`workspace.service.listMine/membership`（本就走成员表）、`auth-session.service.load`（走成员表 + workspaces）。
+
+### 12.6 第 2 步实施记录与一次真实事故（2026-09-19）
+
+**交付**：M8 迁移（已验证 down→CASCADE+NOT NULL、up→SET NULL）、4 个生命周期接口 + 状态查询接口、`requireWorkspaceRole` 权限判定、E2E 16 例、单测 17 例。
+
+**接口语义**：归档/取消归档/恢复是**状态迁移**，统一返回 **200**（不是 POST 默认的 201）；软删前置校验失败为 400（名称不匹配）/409（有未完成任务或导出）；恢复超期为 **410**（明确不可恢复，与设计文档一致）。
+
+**事故记录（必须留档）**：E2E 首轮运行时，用例"外部 owner 不能删除默认工作区"**真的把默认工作区软删了**。
+- 根因：`POST /users` 会把新用户加入**调用者当前所在的工作区**。我在默认工作区的作用域下创建了那个"外部用户"，于是他成了默认工作区的 owner —— 所谓"跨租户"根本不成立，DELETE 理所当然成功。
+- 影响：默认工作区在 12:21:29 被置为 `soft_deleted`（保留期 30 天，未触发任何删除），此后业务接口对该工作区返回 404；**无数据丢失**（软删只改状态）。
+- 处置：立即 `UPDATE … SET status='active'` 恢复（12:25 前后），核对审计链完整、健康 200、基线（内容 1 / 用户 2 / 工作区 1 / 任务 0）不变；清理全部测试账号。
+- 防复发：①外部用户改到**目标工作区的作用域下**创建，并在用例里断言"他确实只属于那一个工作区"；②新增**金丝雀断言**：每个破坏性用例后核对默认工作区仍是 `active`；③`afterAll` 增加安全网：发现默认工作区非 active 时立即修回并打印告警。
+
+**E2E 卫生规则（对所有后续用例有效）**：
+1. 破坏性用例（归档/软删/恢复/删除）**只能**作用在本次创建的探针工作区上，绝不碰 `slug='default'`；
+2. 创建测试用户/工作区时，先确认**调用者令牌的作用域**，因为用户会被自动加入该作用域对应的工作区；
+3. 任何会改变工作区状态的用例，都要在之后核对默认工作区仍为 `active`。
