@@ -95,7 +95,10 @@
 | soft_deleted → active | `POST /workspaces/:id/restore`（`workspace.restore`） | `now() - deleted_at ≤ 30 天` | 可逆 | `workspace.restore` |
 | soft_deleted → purged | 定时任务 `WorkspacePurgeTask`（每天 04:00）或 `DELETE /workspaces/:id/data`（`workspace.purge`，需 §7 的二次确认） | ① `deleted_at ≤ now()-30d`（手工 purge 需先软删满 30 天）② 无进行中的导出任务 | **不可逆** | `workspace.purge` |
 
-**状态存储**：`workspaces.status` 已有（当前值 `active`），扩展取值 `active | archived | soft_deleted`；新增列：
+**状态存储**：`workspaces.status` 已存在。
+- **现状（与代码核对）**：`WorkspaceStatus = 'active' | 'suspended'`（`workspace.entity.ts:5`），生产库 1 行且为 `active`。
+- **本设计扩展为**：`active | archived | soft_deleted`；**`suspended` 废弃**（语义与 `archived` 重叠且从未使用）——迁移时把可能存在的 `suspended` 行改写为 `archived` 并写审计（当前生产库无此类行，属防御性处理）。
+- 同时新增列：
 - `archived_at`（timestamptz，可空）
 - `deleted_at`（timestamptz，可空）——30 天保留期的计时起点
 - `purge_after`（timestamptz，可空）——软删时写入 `deleted_at + 30 天`，便于索引查询
