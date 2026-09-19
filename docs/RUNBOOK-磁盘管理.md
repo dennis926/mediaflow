@@ -90,3 +90,24 @@ PY
 3. 备份类：先跑完整性校验（`b0_1_verify_backup.py`），再按"最近 7 天 + 每月一份"清理，并同步删 `.sha256`。
 4. 缓存类：pip/uv/npm/pnpm/apt/journal 直接清，浏览器缓存（playwright/puppeteer）保留。
 5. 清理后复查：`df -h /`、相关服务 `systemctl is-active`、mediaflow `/api/health` = 200。
+
+## 六、变更记录
+
+### 2026-09-19：site-backup-manager 保留策略 30 天 → 7 天（Hermes 执行，用户授权）
+
+| 项 | 内容 |
+| --- | --- |
+| 变更前 | `retention_days = 30`（按 ~1G/天，本地稳态约 30G，会反复逼近 80% 告警线） |
+| 变更后 | `retention_days = 7` |
+| 执行方式 | 调用项目自身 `backup_core.load_config()` / `save_config()` 改写加密配置；**未手工编辑 `config.enc`** |
+| 配置备份 | `/var/lib/site-backup-manager/config.enc.bak-20260919115239`（600；回滚：`cp <该备份> config.enc`） |
+| 差异核对 | 除 `retention_days` 外，其余 19 个键的键名与取值**均未变化**（含 `baidu_enabled=true`、`schedule_enabled=true`、加密口令长度不变） |
+| 服务状态 | `site-backup-manager` active、`site-backup-scheduler.timer` active |
+| 历史备份 | **未删除任何文件**（保留 8 份），由下一次成功备份按新策略自然清理 7 天前的 |
+| 脚本 | `/root/.hermes/workspace/b0_retention_change.py`（可重复运行；含改前备份、差异核对、失败回滚） |
+
+**后续观察要点（3 天）**
+1. 每天 03:30 的备份任务仍成功（面板任务记录 / `journalctl -u site-backup-manager`）。
+2. 备份完成后，7 天前的归档与其 `.sha256` 旁文件被自动清理（检查归档份数与目录大小）。
+3. 若出现"清理没生效"，检查项目自身的 `_cleanup_local()` 是否只在成功路径调用（历史上只在备份成功的当次执行）。
+4. 若清理异常且需要回滚：`cp /var/lib/site-backup-manager/config.enc.bak-20260919115239 /var/lib/site-backup-manager/config.enc`（下称 30 天策略）。
