@@ -58,13 +58,20 @@ code="$(curl -s -o /dev/null -w '%{http_code}' -m 10 https://auto.liangyijianye.
 [[ "$code" == "200" ]] && pass "健康接口 200" || fail "健康接口返回 $code"
 
 echo "-- 5. 配置一致性"
-maxmb="$(PGPASSWORD="${DB_PASSWORD:-mediaflow_dev}" psql -h 127.0.0.1 -U mediaflow -d mediaflow -t -A -c \
+media_max_mb="$(PGPASSWORD="${DB_PASSWORD:-mediaflow_dev}" psql -h 127.0.0.1 -U mediaflow -d mediaflow -t -A -c \
   "SELECT COALESCE((SELECT value FROM system_settings WHERE key='MEDIA_MAX_FILE_MB' AND value <> ''), '50')" 2>/dev/null || echo 50)"
-# 代码里的常量是表达式（如 2048 * 1024 * 1024），用 node 求值后再比较
-ceiling_expr="$(grep -oE 'UPLOAD_CEILING_BYTES = [0-9_ *]+' "$ROOT/apps/api/src/modules/media/media.controller.ts" | sed 's/.*= //')"
-ceiling_mb="$(( $(node -e "process.stdout.write(String(Math.round((${ceiling_expr:-0})/1024/1024)))") ))"
-pass "MEDIA_MAX_FILE_MB=${maxmb}M / 代码硬上限 ${ceiling_mb}M"
-[[ "$ceiling_mb" -gt "$maxmb" ]] && warn "代码硬上限高于配置业务上限（大文件会先占内存/磁盘再被拒）"
+pass "MEDIA_MAX_FILE_MB=${media_max_mb}M（上传上限来自运行时配置）"
+# 任务 4 起上传改为磁盘暂存：代码里不应再有 GB 级静态硬上限
+if grep -q 'UPLOAD_CEILING_BYTES' "$ROOT/apps/api/src/modules/media/media.controller.ts" 2>/dev/null; then
+  fail "media.controller.ts 仍存在静态上传上限常量（应改为按配置动态限制）"
+else
+  pass "上传未使用静态硬上限（按 MEDIA_MAX_FILE_MB 动态限制）"
+fi
+if grep -q 'diskStorage' "$ROOT/apps/api/src/modules/media/media-upload.interceptor.ts" 2>/dev/null; then
+  pass "上传走磁盘暂存（非内存）"
+else
+  fail "上传未使用 diskStorage（可能又退回内存缓冲）"
+fi
 
 echo "-- 6. 关键依赖下限（防止被回退到有漏洞的版本）"
 nodemailer_version="$(node -e "try{process.stdout.write(JSON.parse(require('fs').readFileSync(require.resolve('nodemailer/package.json',{paths:['apps/api']}),'utf8')).version)}catch(e){process.stdout.write('0.0.0')}" 2>/dev/null)"
