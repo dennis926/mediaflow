@@ -5,8 +5,9 @@ import { JwtService } from '@nestjs/jwt';
 import { describe, expect, it, vi } from 'vitest';
 import { JwtAuthGuard } from '../jwt-auth.guard';
 import { AuthSessionService, AuthSessionSnapshot } from '../auth-session.service';
+import { WORKSPACE_LIFECYCLE_KEY } from '../workspace-lifecycle.decorator';
 
-const ACTIVE_SESSION: AuthSessionSnapshot = { active: true, member: true, roles: ['owner'], exists: true };
+const ACTIVE_SESSION: AuthSessionSnapshot = { active: true, member: true, roles: ['owner'], exists: true, workspaceStatus: 'active' };
 
 interface SessionMocks {
   resolve: ReturnType<typeof vi.fn>;
@@ -19,9 +20,15 @@ function buildGuard(options: {
   session?: AuthSessionSnapshot | null;
   authEnforced?: string;
   isPublic?: boolean;
+  /** 该路由是否标记为"工作区生命周期"接口（B0.4：豁免工作区状态闸门） */
+  lifecycle?: boolean;
 } = {}): { guard: JwtAuthGuard; jwt: JwtService; sessions: SessionMocks } {
   const jwt = new JwtService({ secret: options.secret ?? 'test-secret' });
-  const reflector = { getAllAndOverride: vi.fn(() => options.isPublic ?? false) } as unknown as Reflector;
+  const reflector = {
+    getAllAndOverride: vi.fn((key: string) =>
+      key === WORKSPACE_LIFECYCLE_KEY ? Boolean(options.lifecycle) : (options.isPublic ?? false),
+    ),
+  } as unknown as Reflector;
   const config = { get: vi.fn((key: string) => (key === 'AUTH_ENFORCED' ? options.authEnforced : undefined)) } as unknown as ConfigService;
   const sessions = {
     resolve: vi.fn(async () => (options.session === undefined ? ACTIVE_SESSION : options.session)),
@@ -33,11 +40,12 @@ function buildGuard(options: {
 
 interface GuardRequest {
   headers: Record<string, string>;
+  method?: string;
   user?: unknown;
 }
 
-function contextWithToken(token: string | null): { context: never; request: GuardRequest } {
-  const request: GuardRequest = { headers: token ? { authorization: `Bearer ${token}` } : {} };
+function contextWithToken(token: string | null, method = 'GET'): { context: never; request: GuardRequest } {
+  const request: GuardRequest = { headers: token ? { authorization: `Bearer ${token}` } : {}, method };
   const context = {
     getHandler: () => undefined,
     getClass: () => undefined,
@@ -135,5 +143,40 @@ describe('JwtAuthGuard 权限即时生效（任务 2 / 审计 P1-2）', () => {
   it('生产配置（AUTH_ENFORCED 缺失或 true）仍然要求令牌', async () => {
     const { guard } = buildGuard({ authEnforced: 'true' });
     await expect(guard.canActivate(contextWithToken(null).context)).rejects.toBeInstanceOf(UnauthorizedException);
+  });
+});
+
+describe('JwtAuthGuard 工作区状态闸门（B0.4）', () => {
+  const archived: AuthSessionSnapshot = { ...ACTIVE_SESSION, workspaceStatus: 'archived' };
+  const softDeleted: AuthSessionSnapshot = { ...ACTIVE_SESSION, workspaceStatus: 'soft_deleted' };
+
+  it('归档态：读操作放行（仍可查看历史）', async () => {
+    const { guard, jwt } = buildGuard({ session: archived });
+    const { context } = contextWithToken(tokenOf(jwt, {}), 'GET');
+    await expect(guard.canActivate(context)).resolves.toBe(true);
+  });
+
+  it('归档态：写操作 403，提示先取消归档', async () => {
+    const { guard, jwt } = buildGuard({ session: archived });
+    const { context } = contextWithToken(tokenOf(jwt, {}), 'POST');
+    await expect(guard.canActivate(context)).rejects.toThrow(/已归档/);
+  });
+
+  it('软删态：任何业务请求都 404（与"非成员"一致，不暴露该工作区存在过）', async () => {
+    const { guard, jwt } = buildGuard({ session: softDeleted });
+    const { context } = contextWithToken(tokenOf(jwt, {}), 'GET');
+    await expect(guard.canActivate(context)).rejects.toThrow(/不存在或已被删除/);
+  });
+
+  it('生命周期接口豁免状态闸门：软删态下仍可调用（否则无法恢复自己的工作区）', async () => {
+    const { guard, jwt } = buildGuard({ session: softDeleted, lifecycle: true });
+    const { context } = contextWithToken(tokenOf(jwt, {}), 'POST');
+    await expect(guard.canActivate(context)).resolves.toBe(true);
+  });
+
+  it('公开接口不受工作区状态影响（登录/刷新等）', async () => {
+    const { guard, jwt } = buildGuard({ session: softDeleted, isPublic: true });
+    const { context } = contextWithToken(tokenOf(jwt, {}), 'POST');
+    await expect(guard.canActivate(context)).resolves.toBe(true);
   });
 });

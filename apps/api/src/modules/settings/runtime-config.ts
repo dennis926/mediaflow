@@ -198,6 +198,14 @@ export interface MonitorRuntimeConfig {
   opsBaseUrl: string;
 }
 
+/**
+ * 工作区生命周期配置（B0.4）：保留期与清除前备份保留期都来自设置，不写死在代码里。
+ */
+export interface WorkspaceRuntimeConfig {
+  softDeleteRetentionDays: number;
+  purgeBackupRetentionDays: number;
+}
+
 export interface RuntimeConfig {
   site: SiteConfig;
   notify: NotifyRuntimeConfig;
@@ -209,6 +217,7 @@ export interface RuntimeConfig {
   publish: PublishRuntimeConfig;
   permissions: PermissionsRuntimeConfig;
   monitor: MonitorRuntimeConfig;
+  workspace: WorkspaceRuntimeConfig;
 }
 
 export const DEFAULT_SITE: SiteConfig = {
@@ -361,6 +370,11 @@ export const DEFAULT_NOTIFY_RUNTIME: NotifyRuntimeConfig = {
   accountExpiryWarnDays: 7,
 };
 
+export const DEFAULT_WORKSPACE_RUNTIME: WorkspaceRuntimeConfig = {
+  softDeleteRetentionDays: 30,
+  purgeBackupRetentionDays: 180,
+};
+
 export const DEFAULT_MONITOR_RUNTIME: MonitorRuntimeConfig = {
   enabled: true,
   intervalSeconds: 300,
@@ -379,6 +393,7 @@ export const DEFAULT_MONITOR_RUNTIME: MonitorRuntimeConfig = {
 const snapshot: RuntimeConfig = {
   site: { ...DEFAULT_SITE },
   monitor: { ...DEFAULT_MONITOR_RUNTIME },
+  workspace: { ...DEFAULT_WORKSPACE_RUNTIME },
   auth: { ...DEFAULT_AUTH_RUNTIME },
   media: { ...DEFAULT_MEDIA_RUNTIME },
   notify: { ...DEFAULT_NOTIFY_RUNTIME },
@@ -527,6 +542,11 @@ export function applyRuntimeConfig(flat: Record<string, string | undefined>, onE
     dailyTokenQuota: num(flat.AI_DAILY_TOKEN_QUOTA, DEFAULT_AI_RUNTIME.dailyTokenQuota, 0, 1_000_000_000),
   };
 
+  snapshot.workspace = {
+    softDeleteRetentionDays: num(flat.WORKSPACE_SOFT_DELETE_RETENTION_DAYS, DEFAULT_WORKSPACE_RUNTIME.softDeleteRetentionDays, 7, 365),
+    purgeBackupRetentionDays: num(flat.WORKSPACE_PURGE_BACKUP_RETENTION_DAYS, DEFAULT_WORKSPACE_RUNTIME.purgeBackupRetentionDays, 30, 3650),
+  };
+
   snapshot.monitor = {
     enabled: bool(flat.MONITOR_ENABLED, DEFAULT_MONITOR_RUNTIME.enabled),
     intervalSeconds: num(flat.MONITOR_INTERVAL_SECONDS, DEFAULT_MONITOR_RUNTIME.intervalSeconds, 60, 3600),
@@ -603,6 +623,7 @@ export function defaultConfigSnapshot(): RuntimeConfig {
   return {
     site: { ...DEFAULT_SITE },
     monitor: { ...DEFAULT_MONITOR_RUNTIME },
+    workspace: { ...DEFAULT_WORKSPACE_RUNTIME },
     auth: { ...DEFAULT_AUTH_RUNTIME },
     media: { ...DEFAULT_MEDIA_RUNTIME },
     notify: { ...DEFAULT_NOTIFY_RUNTIME },

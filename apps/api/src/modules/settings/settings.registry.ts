@@ -8,7 +8,8 @@ export type SettingGroup =
   | 'publish'
   | 'notify'
   | 'platform'
-  | 'monitor';
+  | 'monitor'
+  | 'workspace';
 
 export interface SettingDefinition {
   key: string;
@@ -786,6 +787,24 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
     placeholder: '300000',
   },
   {
+    key: 'WORKSPACE_SOFT_DELETE_RETENTION_DAYS',
+    group: 'workspace',
+    label: '工作区删除保留天数',
+    description: '工作区删除后进入保留期，期间可恢复；到期后由定时任务永久清除。默认 30 天，可设 7-365 天（对外合同时按约定调整）',
+    secret: false,
+    envKey: 'WORKSPACE_SOFT_DELETE_RETENTION_DAYS',
+    placeholder: '30',
+  },
+  {
+    key: 'WORKSPACE_PURGE_BACKUP_RETENTION_DAYS',
+    group: 'workspace',
+    label: '永久清除前备份保留天数',
+    description: '永久清除前会自动导出该工作区数据到独立备份文件（清除的唯一后悔药）；默认 180 天，到期由清理任务删除并写审计',
+    secret: false,
+    envKey: 'WORKSPACE_PURGE_BACKUP_RETENTION_DAYS',
+    placeholder: '180',
+  },
+  {
     key: 'MONITOR_ENABLED',
     group: 'monitor',
     label: '开启运行监控',
@@ -912,4 +931,5 @@ export const SETTING_GROUP_LABELS: Record<SettingGroup, string> = {
   publish: '发布队列',
   platform: '平台密钥',
   monitor: '运行监控',
+  workspace: '工作区与租户',
 };

@@ -7,6 +7,7 @@ import { AuditService } from '../../audit/audit.service';
 import { RoleCode } from '../workspace/entities/role.entity';
 import { User } from '../workspace/entities/user.entity';
 import { WorkspaceMember } from '../workspace/entities/workspace-member.entity';
+import { Workspace, WorkspaceStatus } from '../workspace/entities/workspace.entity';
 
 export interface AuthSessionSnapshot {
   /** 用户当前是否 active（停用后其未过期令牌必须立即失效） */
@@ -17,6 +18,11 @@ export interface AuthSessionSnapshot {
   roles: RoleCode[];
   /** 用户行是否还存在（软删除后为 false） */
   exists: boolean;
+  /**
+   * 工作区生命周期状态（B0.4）。工作区行已不存在（被永久清除）时按 soft_deleted 处理，
+   * 守卫据此对非生命周期接口返回 404。
+   */
+  workspaceStatus: WorkspaceStatus;
 }
 
 /**
@@ -37,6 +43,7 @@ export class AuthSessionService {
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
     @InjectRepository(User) private readonly users: Repository<User>,
     @InjectRepository(WorkspaceMember) private readonly members: Repository<WorkspaceMember>,
+    @InjectRepository(Workspace) private readonly workspaces: Repository<Workspace>,
     private readonly audit: AuditService,
   ) {}
 
@@ -68,15 +75,18 @@ export class AuthSessionService {
     const user = await this.users.findOne({ where: { id: userId }, relations: { roles: true } });
     if (!user) {
       this.logger.warn(`令牌指向的用户不存在（可能已被删除）：${userId}`);
-      return { active: false, member: false, roles: [], exists: false };
+      return { active: false, member: false, roles: [], exists: false, workspaceStatus: 'soft_deleted' };
     }
     const member = await this.members.findOne({ where: { userId, workspaceId } });
+    const workspace = await this.workspaces.findOne({ where: { id: workspaceId } });
     const memberRoles = (member?.roleCodes ?? []) as RoleCode[];
     return {
       active: user.status === 'active',
       member: Boolean(member),
       roles: memberRoles.length > 0 ? memberRoles : (user.roles?.map((role) => role.code) ?? []),
       exists: true,
+      // 工作区行不存在 = 已被永久清除：对业务接口等同"已软删"（404）
+      workspaceStatus: (workspace?.status ?? 'soft_deleted') as WorkspaceStatus,
     };
   }
 
@@ -85,7 +95,22 @@ export class AuthSessionService {
    * 必须在停用/启用/改角色/删除用户/成员增删改之后调用。
    */
   async invalidate(userId: string): Promise<number> {
-    const pattern = `auth:user:${userId}:*`;
+    const removed = await this.deleteByPattern(`auth:user:${userId}:*`);
+    if (removed > 0) this.logger.debug(`已失效 ${removed} 条会话缓存：${userId}`);
+    return removed;
+  }
+
+  /**
+   * 使某个工作区的**全部成员**会话缓存失效（B0.4：归档/软删/恢复/永久清除时必须调用）。
+   * 与按用户失效同一模式，用 SCAN 而不是 KEYS，避免在缓存量大时阻塞 Redis。
+   */
+  async invalidateWorkspace(workspaceId: string): Promise<number> {
+    const removed = await this.deleteByPattern(`auth:user:*:${workspaceId}`);
+    if (removed > 0) this.logger.debug(`已失效 ${removed} 条工作区会话缓存：${workspaceId}`);
+    return removed;
+  }
+
+  private async deleteByPattern(pattern: string): Promise<number> {
     let removed = 0;
     try {
       let cursor = '0';
@@ -99,7 +124,6 @@ export class AuthSessionService {
     } catch (error) {
       this.logger.warn(`清理会话缓存失败：${error instanceof Error ? error.message : String(error)}`);
     }
-    if (removed > 0) this.logger.debug(`已失效 ${removed} 条会话缓存：${userId}`);
     return removed;
   }
 

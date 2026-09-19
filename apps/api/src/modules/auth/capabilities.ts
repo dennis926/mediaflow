@@ -17,7 +17,13 @@ export type Capability =
   | 'platform.bind'
   | 'analytics.sync'
   | 'audit.read'
-  | 'workspace.manage';
+  | 'workspace.manage'
+  // B0.4 工作区生命周期（归档 → 软删 → 恢复 → 硬删）
+  | 'workspace.archive'
+  | 'workspace.delete'
+  | 'workspace.restore'
+  | 'workspace.export'
+  | 'workspace.purge';
 
 export const CAPABILITIES: Capability[] = [
   'settings.write',
@@ -32,6 +38,11 @@ export const CAPABILITIES: Capability[] = [
   'analytics.sync',
   'audit.read',
   'workspace.manage',
+  'workspace.archive',
+  'workspace.delete',
+  'workspace.restore',
+  'workspace.export',
+  'workspace.purge',
 ];
 
 export const CAPABILITY_LABELS: Record<Capability, string> = {
@@ -47,6 +58,11 @@ export const CAPABILITY_LABELS: Record<Capability, string> = {
   'analytics.sync': '同步平台数据',
   'audit.read': '查看审计日志',
   'workspace.manage': '管理工作区与成员',
+  'workspace.archive': '归档/取消归档工作区（只读，可随时撤销）',
+  'workspace.delete': '删除工作区（软删，保留期内可恢复）',
+  'workspace.restore': '恢复已删除的工作区',
+  'workspace.export': '导出工作区数据（只读，便于交接与备份）',
+  'workspace.purge': '永久清除工作区数据（不可逆，高危）',
 };
 
 /** 默认矩阵：与改造前的 @Roles 行为完全一致，改配置后即可按公司需要调整。 */
@@ -63,6 +79,12 @@ export const DEFAULT_PERMISSION_MATRIX: Record<Capability, RoleCode[]> = {
   'analytics.sync': ['owner', 'admin'],
   'audit.read': ['owner', 'admin'],
   'workspace.manage': ['owner', 'admin'],
+  // 生命周期：导出是只读操作，允许 admin；删除/恢复/归档/永久清除仅 owner
+  'workspace.archive': ['owner'],
+  'workspace.delete': ['owner'],
+  'workspace.restore': ['owner'],
+  'workspace.export': ['owner', 'admin'],
+  'workspace.purge': ['owner'],
 };
 
 export const DEFAULT_ROLE_LABELS: Record<string, string> = {

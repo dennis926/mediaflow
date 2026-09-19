@@ -4,6 +4,9 @@
 > 必须先经确认再逐步实施（每步一个迁移 + 每步一个交付报告）。
 >
 > 编写日期：2026-09-19｜基于当前代码与生产库实况（22 张表、1 个工作区、数据基线：内容 1 / 用户 2 / 审计 2854 行）
+>
+> **实施进度**：第 1 步（M1–M3 迁移 + 状态机 + 缓存失效）已完成并通过测试（见文末 §12）；
+> 第 2–6 步待逐步实施。本次修订已吸收用户对 6 个确认点的决策与 4 项补充要求。
 
 ---
 
@@ -30,7 +33,7 @@
 | `media_assets` | 无 | `CASCADE`（**行**） | 素材库属于工作区；**文件**需由清理任务单独删除（见 §1.4） |
 | `brand_knowledge` | 无 | `CASCADE`（行） | 知识库属于工作区；`source_url` 指向的留档文件同样要删 |
 | `content_templates` | 无 | `CASCADE` | 内容模板属于工作区 |
-| `social_accounts` | 无 | `CASCADE` | 平台账号绑定（含加密凭证）必须随工作区销毁——这也是合规要求 |
+| `social_accounts` | 无 | `CASCADE` | 平台账号绑定（含加密凭证）必须随工作区销毁——这也是合规要求。**清除后额外写审计** `workspace.purge.social_accounts_destroyed`，payload 记录销毁条数（凭证密文随行删除，不在任何日志/备份之外留存） |
 | `platforms` | 无 | `CASCADE` | 工作区级的平台清单（种子数据） |
 | `workspace_members` | 无 | `CASCADE` | 成员关系 |
 | `notifications` | 无 | `CASCADE` | 站内通知是过程产物，无长期价值 |
@@ -46,6 +49,8 @@
 | `usage_records`（B0.7 新增） | **保留**（`workspace_id` 不加外键） | 同上，配额与计费的事实来源 |
 | `invoices`（B0.7 新增） | **保留** | 财务凭据，法律上需长期留存（建议 ≥ 5 年）；即使租户退租也要能出示 |
 | `subscriptions`（B0.7 新增） | **保留**（标记 `canceled_at`，不删） | 订阅历史用于对账与续费纠纷 |
+| `workspace_purge_batches`（B0.4 新增） | **永久保留** | 它本身就是"工作区已不存在"之后的证据：谁在何时删了哪个工作区、逐表删了多少行、保留了什么。删了它就等于毁掉清除记录 |
+| `workspace_export_jobs`（B0.4 新增） | 保留到产物过期（7 天）后再由任务清理 | 导出任务要在工作区硬删后仍能下载，故**不加外键** |
 
 **保留方式**：这些表在硬删时**不做任何删除或置空**，只写一条 `purge_batch` 标记（见 §7），用于区分"历史遗留"与"仍在使用的租户"。
 查询侧按 `workspace_id` 过滤即可，成本/审计页面在租户已删除时显示"该工作区已于 X 时间删除"。
@@ -104,7 +109,8 @@
 - `purge_after`（timestamptz，可空）——软删时写入 `deleted_at + 30 天`，便于索引查询
 
 **30 天保留期实现方式**：软删写 `deleted_at`/`purge_after` → 每日 04:00 扫描 `status='soft_deleted' AND purge_after <= now()` → 走 purge 流程（§7）→ 写 `purge_batch` 账本 → 删除 `workspaces` 行。
-**恢复期可配置**：设置项 `WORKSPACE_RETENTION_DAYS`（默认 30，范围 7–365），以便对外 SaaS 时按合同调整。
+**恢复期可配置**：设置项 **`WORKSPACE_SOFT_DELETE_RETENTION_DAYS`**（默认 30，范围 7–365，分组「工作区与租户」）。
+硬删的前置校验与定时任务都**读该配置**，不写死任何天数；对外 SaaS 时按合同调整即可。
 
 ---
 
@@ -268,7 +274,14 @@ CREATE TABLE workspace_export_jobs (
 
 ### 7.2 执行顺序（每一步都留痕）
 
-1. **独立备份**：`pg_dump` 该工作区数据到 `/www/backup/mediaflow/workspace-purge/{workspaceId}-{ts}.sql.gz`（按表 `WHERE workspace_id = …` 逐表导出 + 账本表全量），权限 600，**保留 90 天**；
+1. **独立备份（purge 的硬前置：备份失败即中止，绝不先删后备份）**
+   - 位置：`/www/backup/mediaflow/purge/{workspaceId}/{YYYYMMDD-HHMMSS}.sql.gz`
+   - 内容：按表 `WHERE workspace_id = …` 逐表导出 + 该工作区的 `workspace_members`/`workspaces` 行 + 账本表全量
+   - 命名含校验和：`{workspaceId}-{ts}-{sha256 前 12 位}.sql.gz`，并把完整 sha256 写入 `workspace_purge_batches.backup_sha256`
+   - 权限 600；**保留 180 天**（配置项 `WORKSPACE_PURGE_BACKUP_RETENTION_DAYS`，默认 180）
+   - **异地要求**：备份**不得与数据库同机存放**。当前服务器无独立对象存储，属技术债（见 `docs/TECHDEBT-purge备份异地.md`）；
+     有异地存储后改为先上传校验、再删本地。清理任务在 180 天后删除本地备份并写审计 `workspace.purge_backup_expired`
+   - 失败处理：备份命令非 0 退出 / `gzip -t` 校验失败 / 磁盘空间不足 → **purge 立即中止**，工作区保持 soft_deleted，写审计 `workspace.purge_failed`
 2. 写 `purge_batch` 账本行（见 §7.3），状态 `started`；
 3. 删除文件（media/knowledge，按 §1.4）；
 4. 在**单个事务**内按 §1.1 顺序删除业务表行（`workspace_members` → `notifications` → `platforms`/`social_accounts` → `analytics`/`track_events` → `publish_tasks`/`content_reviews` → `content_revisions`/`content_variants`/`contents` → `media_assets`/`brand_knowledge`/`content_templates`）；
@@ -421,3 +434,55 @@ SELECT count(*) FROM <表> t WHERE NOT EXISTS (SELECT 1 FROM workspaces w WHERE 
 | 6 | 文档与运维：RUNBOOK、备份保留、监控项 | — |
 
 **每步之间都会停下来报告**；第 4 步（purge）会先用一个临时创建的"演练工作区"完整跑一遍，再考虑对真实数据启用。
+
+---
+
+## 12. 补充要求与实施进度（2026-09-19 用户决策后修订）
+
+### 12.1 演练工作区（补充 2）
+
+purge 是唯一不可逆的操作，**必须先在演练工作区上跑通**，再考虑对真实数据启用：
+
+| 步骤 | 内容 |
+| --- | --- |
+| 1 | 创建演练工作区：`POST /api/workspaces`，名称带前缀 `演练-purge-{时间戳}`（独立的 `workspace_id`，与生产数据物理隔离在同一库的不同租户行） |
+| 2 | 灌入测试数据：内容 + 变体 + 修订 + 审核 + 发布任务 + 素材 + 知识库 + 成员（用固定前缀，便于核对） |
+| 3 | 归档 → 验证只读 → 取消归档 |
+| 4 | 软删 → 验证成员 404、缓存失效 |
+| 5 | 恢复 → 逐项核对数据完整（与软删前快照一致） |
+| 6 | 再次软删；演练实例把 `WORKSPACE_SOFT_DELETE_RETENTION_DAYS` 临时设为 **1 天**（**只在演练进程/演练实例生效，不写生产配置**） |
+| 7 | 触发 `WorkspacePurgeTask` → purge → 逐表核对行数归零、账本保留、`users` 行仍在且 `workspace_id` 为 NULL |
+| 8 | 清理：删除演练工作区的 purge 备份、导出产物、临时配置；核对生产表基线未变 |
+
+完整操作步骤见 **`docs/RUNBOOK-purge演练.md`**。
+
+### 12.2 跨租户越权测试（补充 3，必须覆盖）
+
+| # | 场景 | 期望 |
+| --- | --- | --- |
+| 15 | A 区 owner 调 `DELETE /api/workspaces/{B_id}` | **403**（目标工作区角色判定：他不是 B 的 owner） |
+| 16 | A 区 owner 调 `POST /api/workspaces/{B_id}/restore` | **403** |
+| 17 | A 区 owner 调 `POST /api/workspaces/{B_id}/export` | **403** |
+| 18 | 当前工作区被软删后，其 owner 调 `POST /api/workspaces/{自己}/restore` | **200**（生命周期接口豁免状态闸门 + 目标工作区角色判定） |
+| 19 | purge 某工作区后，原成员仍能登录、并能访问其所在的其他工作区 | **200**（验证 M8：用户未被连带删除） |
+
+### 12.3 导出限流（补充 4）
+
+- 同一工作区**同时只允许 1 个导出任务**，重复请求返回 **409**（Redis 锁 + 数据库二次校验）；
+- 产物 **7 天**后自动清理，删除前写审计 `workspace.export_expired`；
+- 一次性签名下载链接 **15 分钟**有效，过期拒绝（401）；
+- 单次导出 ≤5GB，超限 413；`includeMedia=false` 可只导元数据。
+
+### 12.4 第 1 步实施记录（已完成）
+
+| 交付 | 内容 |
+| --- | --- |
+| 迁移 M1 | `1789701100000-WorkspaceArchiveFields.ts`：`workspaces` 增 `archived_at`/`deleted_at`/`purge_after` + 复合索引 `(status, purge_after)`；历史 `suspended` → `archived` 并写审计 |
+| 迁移 M2 | `1789701200000-WorkspaceExportJobs.ts`：`workspace_export_jobs`（17 列，无外键） |
+| 迁移 M3 | `1789701300000-WorkspacePurgeBatches.ts`：`workspace_purge_batches`（20 列，含 `backup_sha256`/`social_accounts_destroyed`，无外键） |
+| 状态机 | `WorkspaceStatus = 'active' \| 'archived' \| 'soft_deleted'`（`suspended` 废弃）；实体新增三个时间列 |
+| 配置 | 新设置分组「工作区与租户」：`WORKSPACE_SOFT_DELETE_RETENTION_DAYS`(30, 7–365)、`WORKSPACE_PURGE_BACKUP_RETENTION_DAYS`(180, 30–3650)，均进入 `runtime().workspace` |
+| 能力点 | 新增 5 个：`workspace.archive/delete/restore`（owner）、`workspace.export`（owner+admin）、`workspace.purge`（owner） |
+| 缓存失效 | `AuthSessionService.invalidateWorkspace(workspaceId)`（SCAN `auth:user:*:{workspaceId}`）+ 快照新增 `workspaceStatus` |
+| 状态闸门 | 守卫：软删 → 404、归档 → 写 403 / 读放行；`@WorkspaceLifecycle()` 标记的接口豁免（否则无法恢复自己的工作区）；**修正了守卫 catch 吞掉 403 的缺陷** |
+| 测试 | 单元 257 通过（新增 11：能力点矩阵、保留期配置、快照状态、按工作区失效、守卫 5 例）；3 个迁移实测「应用 → 逐个回滚 → 重放」 |

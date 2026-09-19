@@ -1,6 +1,7 @@
 import {
   CanActivate,
   ExecutionContext,
+  ForbiddenException,
   Injectable,
   NotFoundException,
   UnauthorizedException,
@@ -12,6 +13,10 @@ import { Request } from 'express';
 import { AuthUser } from './auth.types';
 import { AuthSessionService } from './auth-session.service';
 import { IS_PUBLIC_KEY } from './public.decorator';
+import { WORKSPACE_LIFECYCLE_KEY } from './workspace-lifecycle.decorator';
+
+/** 只读方法：归档态下仍然放行（查看历史，但不能改动） */
+const READ_ONLY_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
 interface JwtPayload {
   sub: string;
@@ -58,6 +63,25 @@ export class JwtAuthGuard implements CanActivate {
         if (!session.active) throw new UnauthorizedException('账号已被停用，请联系管理员');
         if (!session.member) throw new NotFoundException('你不是该工作区的成员，请切换工作区或联系管理员');
 
+        /**
+         * 工作区状态闸门（B0.4）：
+         * - 已软删（或被永久清除）→ 404，与"非成员"一致，不暴露该工作区曾经存在
+         * - 已归档 → 读放行、写 403（提示先取消归档）
+         * 公开接口与生命周期接口豁免：前者不需要登录态，后者按"目标工作区"在服务层判权限。
+         */
+        const lifecycleRoute = this.reflector.getAllAndOverride<boolean>(WORKSPACE_LIFECYCLE_KEY, [
+          context.getHandler(),
+          context.getClass(),
+        ]);
+        if (!isPublic && !lifecycleRoute) {
+          if (session.workspaceStatus === 'soft_deleted') {
+            throw new NotFoundException('该工作区不存在或已被删除');
+          }
+          if (session.workspaceStatus === 'archived' && !READ_ONLY_METHODS.has(request.method)) {
+            throw new ForbiddenException('工作区已归档（只读），请先取消归档后再操作');
+          }
+        }
+
         const tokenRoles = payload.roles as AuthUser['roles'];
         const drifted = tokenRoles.length !== session.roles.length
           || session.roles.some((role) => !tokenRoles.includes(role));
@@ -84,8 +108,15 @@ export class JwtAuthGuard implements CanActivate {
         };
         return true;
       } catch (error) {
-        // 权限类错误（401/404）要原样抛出，不能退化成"登录状态失效"
-        if (error instanceof UnauthorizedException || error instanceof NotFoundException) throw error;
+        // 权限/状态类错误（401/403/404）要原样抛出，不能退化成"登录状态失效"——
+        // 否则"工作区已归档"会被误报成"请重新登录"，用户永远找不到真正原因
+        if (
+          error instanceof UnauthorizedException ||
+          error instanceof ForbiddenException ||
+          error instanceof NotFoundException
+        ) {
+          throw error;
+        }
         if (!isPublic) throw new UnauthorizedException('登录状态已失效，请重新登录');
       }
     }
