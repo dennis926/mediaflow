@@ -4,7 +4,10 @@ import cookieParser from 'cookie-parser';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { DataSource } from 'typeorm';
+import type Redis from 'ioredis';
 import { AppModule } from '../src/app.module';
+import { PublishQueueService } from '../src/publish/publish.queue';
+import { REDIS_CLIENT } from '../src/redis/redis.constants';
 import { AllExceptionsFilter } from '../src/common/filters/all-exceptions.filter';
 import { ResponseInterceptor } from '../src/common/interceptors/response.interceptor';
 
@@ -22,11 +25,18 @@ const ADMIN_PASSWORD = process.env.E2E_ADMIN_PASSWORD ?? '';
 const credentialsReady = Boolean(ADMIN_EMAIL && ADMIN_PASSWORD);
 
 const testStartedAt = new Date();
+/** 端到端测试专用的队列与消费组，绝不与生产共用。 */
+const E2E_STREAM = 'mediaflow:publish:tasks:e2e';
+const E2E_GROUP = 'publish-workers-e2e';
 
 describe.skipIf(!credentialsReady)('MediaFlow 端到端流程', () => {
   let app: INestApplication;
   let token = '';
   let contentId = '';
+  /** 本次测试创建的发布任务 id：用于把队列里对应的消息一并清掉。 */
+  let createdTaskIds: string[] = [];
+  /** 测试前的队列长度，用于证明清理后队列没有增长。 */
+  let queueLengthBefore = 0;
 
   beforeAll(async () => {
     process.env.PUBLISH_WORKER_ENABLED = 'false';
@@ -37,6 +47,14 @@ describe.skipIf(!credentialsReady)('MediaFlow 端到端流程', () => {
     process.env.MEDIAFLOW_SETTING_OVERRIDE_AI_PROVIDER = 'mock';
     process.env.MEDIAFLOW_SETTING_OVERRIDE_PUBLISH_WORKER_ENABLED = 'false';
     process.env.MEDIAFLOW_SETTING_OVERRIDE_AI_MODEL = 'mock-model';
+    /**
+     * 队列也必须隔离：E2E 跑在真实 Redis 上，如果和生产 Worker 共用同一条流，
+     * 生产 Worker 会在「测试创建任务 → teardown 删任务」之间把消息消费掉，
+     * 为随即被删掉的任务写通知与审计（幽灵记录）。用测试专用流+消费组，
+     * 生产 Worker 完全看不到这些消息。
+     */
+    process.env.MEDIAFLOW_SETTING_OVERRIDE_PUBLISH_STREAM_NAME = E2E_STREAM;
+    process.env.MEDIAFLOW_SETTING_OVERRIDE_PUBLISH_GROUP_NAME = E2E_GROUP;
 
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
     app = moduleRef.createNestApplication();
@@ -46,6 +64,7 @@ describe.skipIf(!credentialsReady)('MediaFlow 端到端流程', () => {
     app.useGlobalInterceptors(new ResponseInterceptor());
     app.useGlobalFilters(new AllExceptionsFilter());
     await app.init();
+    queueLengthBefore = await app.get(PublishQueueService).length();
   }, 60_000);
 
   afterAll(async () => {
@@ -64,9 +83,30 @@ describe.skipIf(!credentialsReady)('MediaFlow 端到端流程', () => {
         await dataSource.query("DELETE FROM content_reviews WHERE content_id IN (SELECT id FROM contents WHERE title LIKE '端到端测试内容%')");
         await dataSource.query("DELETE FROM contents WHERE title LIKE '端到端测试内容%'");
         await dataSource.query("DELETE FROM ai_generations WHERE provider = 'mock' AND created_at >= $1", [testStartedAt]);
+
+        /**
+         * Redis 流里也要清：任务行删掉后消息还在，生产 Worker 稍后会消费到孤儿消息，
+         * 为已不存在的任务写通知与审计（幽灵记录）。只删本次任务 id 对应的消息，
+         * 其他消息（含别人的未确认消息）不动。
+         */
+        const queue = app.get(PublishQueueService);
+        const removal = await queue.removeByTaskIds(createdTaskIds);
+        const queueLengthAfter = await queue.length();
+        const leftover = await queue.removeByTaskIds(createdTaskIds);
+        console.log(
+          `[E2E] 队列清理（测试专用流 ${E2E_STREAM}）：本次任务 ${createdTaskIds.length} 个，` +
+            `删除消息 ${removal.removed} 条（扫描 ${removal.inspected} 条），XLEN ${queueLengthBefore} → ${queueLengthAfter}，` +
+            `残留 ${leftover.removed} 条`,
+        );
+        if (leftover.removed !== 0) {
+          throw new Error(`E2E 队列清理失败：仍有 ${leftover.removed} 条本次测试的消息留在队列中`);
+        }
+        // 测试专用流本身也删掉，保证 Redis 里不留任何测试痕迹（生产流绝不触碰）。
+        await app.get<Redis>(REDIS_CLIENT).call('DEL', E2E_STREAM);
       }
-    } catch {
-      // 清理失败不影响测试结论
+    } catch (error) {
+      // 清理失败不改变测试结论，但必须显式暴露，避免静默留下脏数据
+      console.error(`[E2E] 清理失败：${error instanceof Error ? error.message : String(error)}`);
     }
     await app?.close();
   });
@@ -136,6 +176,7 @@ describe.skipIf(!credentialsReady)('MediaFlow 端到端流程', () => {
       .send({ contentId, platforms: ['wechat_mp', 'zhihu'] })
       .expect(201);
     expect(created.body.data.length).toBe(2);
+    createdTaskIds.push(...(created.body.data as Array<{ id: string }>).map((task) => task.id));
     const taskId = created.body.data[0].id as string;
 
     const detail = await request(app.getHttpServer())

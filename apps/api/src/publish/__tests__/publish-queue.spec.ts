@@ -90,3 +90,69 @@ describe('发布队列长度保护（任务 4b，含未确认消息保护）', (
     expect(xtrim).toHaveBeenCalledWith('mediaflow:publish:tasks', 'MAXLEN', '~', '10000');
   });
 });
+
+describe('清理已消失任务的队列消息（任务 8c：防止 Worker 处理幽灵任务）', () => {
+  /** 极简 ioredis 替身：只提供 xrange 与 call，用于观察 XDEL 的一举一动。 */
+  function streamMock(entries: Array<[string, string[]]>) {
+    const xrange = vi.fn(async () => entries);
+    const call = vi.fn(async () => 'OK');
+    const client = { xrange, call } as unknown as Redis;
+    return { client, xrange, call };
+  }
+
+  it('只删除 taskId 命中的消息，其他消息（含别的未确认消息）不动', async () => {
+    const { client, call } = streamMock([
+      ['1-0', ['taskId', 'me-1', 'enqueuedAt', '2026-01-01T00:00:00.000Z']],
+      ['2-0', ['taskId', 'other-1', 'enqueuedAt', '2026-01-01T00:00:01.000Z']],
+      ['3-0', ['taskId', 'me-2', 'enqueuedAt', '2026-01-01T00:00:02.000Z']],
+    ]);
+    const queue = new PublishQueueService(client);
+
+    const result = await queue.removeByTaskIds(['me-1', 'me-2']);
+
+    expect(result).toEqual({ removed: 2, inspected: 3, matched: ['1-0', '3-0'] });
+    expect(call).toHaveBeenCalledTimes(1);
+    expect(call).toHaveBeenCalledWith('XDEL', 'mediaflow:publish:tasks', '1-0', '3-0');
+  });
+
+  it('空 taskIds 时直接返回，不发起 XDEL（避免误清空队列）', async () => {
+    const { client, xrange, call } = streamMock([['1-0', ['taskId', 'me-1']]]);
+    const queue = new PublishQueueService(client);
+
+    const result = await queue.removeByTaskIds([]);
+
+    expect(result).toEqual({ removed: 0, inspected: 0, matched: [] });
+    expect(xrange).not.toHaveBeenCalled();
+    expect(call).not.toHaveBeenCalled();
+  });
+
+  it('消息字段畸形或缺 taskId 时跳过，不误删', async () => {
+    const { client, call } = streamMock([
+      ['1-0', ['enqueuedAt', '2026-01-01T00:00:00.000Z']],
+      ['2-0', ['taskId']],
+      ['3-0', []],
+    ]);
+    const queue = new PublishQueueService(client);
+
+    const result = await queue.removeByTaskIds(['me-1']);
+
+    expect(result.removed).toBe(0);
+    expect(result.inspected).toBe(3);
+    expect(call).not.toHaveBeenCalled();
+  });
+
+  it('重复调用是幂等的：第二次没有命中就不会再 XDEL', async () => {
+    const entries: Array<[string, string[]]> = [['1-0', ['taskId', 'me-1']]];
+    const xrange = vi.fn(async () => entries);
+    const call = vi.fn(async () => 'OK');
+    const queue = new PublishQueueService({ xrange, call } as unknown as Redis);
+
+    const first = await queue.removeByTaskIds(['me-1']);
+    entries.length = 0; // 模拟 XDEL 之后流里已无该消息
+    const second = await queue.removeByTaskIds(['me-1']);
+
+    expect(first.removed).toBe(1);
+    expect(second.removed).toBe(0);
+    expect(call).toHaveBeenCalledTimes(1);
+  });
+});

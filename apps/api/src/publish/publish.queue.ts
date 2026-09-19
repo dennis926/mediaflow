@@ -92,6 +92,30 @@ export class PublishQueueService implements OnModuleDestroy {
     }
   }
 
+  /**
+   * Removes queued messages that belong to the given task ids.
+   *
+   * Needed when a task disappears before the worker consumes its message (deleted content,
+   * cascaded delete, test teardown): without this the worker later picks up an orphan message
+   * and writes notifications/audit rows for a task that no longer exists.
+   *
+   * Only messages whose `taskId` field matches are deleted - anything else in the stream,
+   * including other consumers' pending entries, is left untouched.
+   */
+  async removeByTaskIds(taskIds: string[]): Promise<{ removed: number; inspected: number; matched: string[] }> {
+    if (taskIds.length === 0) return { removed: 0, inspected: 0, matched: [] };
+    const wanted = new Set(taskIds);
+    const entries = (await this.redis.xrange(streamName(), '-', '+')) as unknown as Array<[string, string[]]>;
+    const matched: string[] = [];
+    for (const [id, fields] of entries) {
+      const index = Array.isArray(fields) ? fields.indexOf('taskId') : -1;
+      const value = index >= 0 ? fields[index + 1] : undefined;
+      if (value && wanted.has(value)) matched.push(id);
+    }
+    if (matched.length > 0) await this.redis.call('XDEL', streamName(), ...matched);
+    return { removed: matched.length, inspected: entries.length, matched };
+  }
+
   /** 取消费组里最早一条未 ack 的消息 ID（没有则为 null）。 */
   async pendingFloor(): Promise<string | null> {
     try {
