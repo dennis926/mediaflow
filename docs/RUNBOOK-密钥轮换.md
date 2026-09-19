@@ -50,3 +50,30 @@
 | 启动报错 "SETTINGS_ENCRYPTION_KEY 必须配置" | 密钥缺失/过短（<32 字符） | 从密钥管理系统取回并写入 `.env`（600），重启 |
 | 读取密钥类配置报"解密失败" | 主密钥与密文不匹配（换过密钥/换过 JWT_SECRET） | 用归档的旧密钥解密 → 用当前密钥重加密；无法解密则重录该项 |
 | 轮换后 AI 调用失败 | 重加密未完成或密钥写错 | 从 `pre-key-rotation-*.sql.gz` 恢复 + 还原旧 `.env` → 重启 → 复盘 |
+
+## 轮换记录
+
+### 第 1 次轮换：2026-09-19（JWT_SECRET 派生 → 专用 SETTINGS_ENCRYPTION_KEY）
+
+| 项 | 值 |
+| --- | --- |
+| 日期 | 2026-09-19 08:20–08:21（CST） |
+| 执行人 | 运维脚本 `apps/api/scripts/rotate-settings-key.cjs`（人工监督执行） |
+| 审批 | 用户批准（执行前经过临时库 6 场景演练 + dry-run 核对） |
+| 影响范围 | 表 `system_settings`、列 `value`，**2 行**（`AI_API_KEY`、`AI_PROVIDER_CONFIGS`） |
+| 旧主密钥 | `JWT_SECRET`（48 字符），指纹 sha256 前 12 位：`9d87f6490bc0` |
+| 新主密钥 | `SETTINGS_ENCRYPTION_KEY`（44 字符 base64 = 32 字节），指纹：`728ff7d1c48a` |
+| 停机时间 | API 停止约 60 秒（Web/数据库不受影响） |
+| 审计日志 | `settings.encryption_key.rotated`（含 assets：rows=2、newKeyFingerprint） |
+| 验证 | 全量 2 行解密成功；登录正常；`GET /ai/provider-configs` 掩码正常；`POST /settings/ai/test` ok；真实 AI 适配成功（2 个平台变体） |
+| 备份 | `.env.bak-202609190820`、`dist.bak-202609190820`、`pre-key-rotation-2026-09-19_0742.sql.gz`（均在 `/www/backup/mediaflow/`） |
+| 归档位置 | `/root/.mediaflow-secrets/settings-encryption-key-2026-09-19.txt`（600）+ **待人工存入独立密钥管理系统** |
+| 旧密钥处置 | 保留 30 天（至 2026-10-19），确认无回滚需求后销毁 |
+
+**本次特殊说明**：轮换前的加密密钥是 `JWT_SECRET` 的回退值。轮换后 `JWT_SECRET` 仍用于签发 JWT，
+但不再参与设置加密——**两者已解耦**，后续轮换互不影响。
+
+**演练与生产执行的差异（已按用户要求调整执行顺序）**：
+演练脚本首轮暴露"`nest build` 直接覆盖生产 dist"的风险，且原定顺序（先构建、后重加密）会在
+"数据库已是新密文、旧服务仍持旧密钥"的窗口内造成解密失败。故生产执行改为**原子序列**：
+停止服务 → 备份 dist/.env → dry-run → 写新密钥 → 改源码并构建 → 重加密 → 回读验证 → 启动 → 业务验证 → 审计。

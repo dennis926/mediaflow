@@ -16,11 +16,15 @@ export class CryptoService {
   private readonly key: Buffer;
 
   constructor(config: ConfigService) {
-    const master = config.get<string>('SETTINGS_ENCRYPTION_KEY') || config.get<string>('JWT_SECRET') || '';
-    if (!master) {
-      this.logger.warn('未配置 SETTINGS_ENCRYPTION_KEY / JWT_SECRET，密钥类配置将无法加密存储');
+    const master = (config.get<string>('SETTINGS_ENCRYPTION_KEY') ?? '').trim();
+    if (master.length < 32) {
+      throw new Error(
+        'SETTINGS_ENCRYPTION_KEY 必须配置且长度 ≥ 32' +
+          (master ? `（当前仅 ${master.length} 字符）` : '（当前为空）') +
+          '：密钥类配置（AI Key、平台 Secret）依赖它加解密；回退到 JWT_SECRET 或硬编码会在密钥轮换时造成永久不可解密。',
+      );
     }
-    this.key = scryptSync(master || 'mediaflow-fallback-key', 'mediaflow-settings', 32);
+    this.key = scryptSync(master, 'mediaflow-settings', 32);
   }
 
   encrypt(plain: string): string {
