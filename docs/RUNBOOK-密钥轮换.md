@@ -77,3 +77,34 @@
 演练脚本首轮暴露"`nest build` 直接覆盖生产 dist"的风险，且原定顺序（先构建、后重加密）会在
 "数据库已是新密文、旧服务仍持旧密钥"的窗口内造成解密失败。故生产执行改为**原子序列**：
 停止服务 → 备份 dist/.env → dry-run → 写新密钥 → 改源码并构建 → 重加密 → 回读验证 → 启动 → 业务验证 → 审计。
+
+## 轮换后 24 小时观察期
+
+轮换完成不等于结束。密钥类变更的故障常在数小时后以"某个功能悄悄不可用"的形式出现，因此强制观察 24 小时。
+
+| 动作 | 频率 | 方式 |
+| --- | --- | --- |
+| 健康检查（本机 + 公网） | 30 分钟 | `scripts/post-rotation-watch.sh`（异常才告警，正常只写日志） |
+| 密钥/解密/AI 错误扫描 | 30 分钟 | 同上（扫描 `/var/log/mediaflow-api.log`） |
+| 密文解密抽查 | 观察期结束时 | `apps/api/scripts/verify-settings-key.cjs`（只读，不应失败） |
+| AI 调用成功率 | 观察期结束时 | `ai_generations` 表近 24 小时成功/失败计数 |
+| 汇总报告 | T+24h | `scripts/post-rotation-report.sh` |
+
+观察期内的日志：`/root/.hermes/workspace/mediaflow_key_rotation_watch.log`。
+
+**若发现 AI 调用失败或解密错误**：不要反复重启尝试，直接执行下方回滚步骤。
+
+### 回滚步骤（完整 9 步，不得只做部分）
+
+```bash
+TS=202609190820                      # 备份时间戳（按实际替换）
+systemctl stop mediaflow-api                                        # 1 停止服务
+pg_dump -h 127.0.0.1 -U mediaflow mediaflow | gzip > /www/backup/mediaflow/failed-attempt-$(date +%Y%m%d_%H%M).sql.gz   # 2 先留存现场
+gunzip -c /www/backup/mediaflow/pre-key-rotation-2026-09-19_0742.sql.gz | PGPASSWORD=mediaflow_dev psql -h 127.0.0.1 -U mediaflow -d mediaflow   # 3 恢复数据库
+cp /www/backup/mediaflow/.env.bak-$TS /www/wwwroot/mediaflow/.env && chmod 600 /www/wwwroot/mediaflow/.env             # 4 恢复 .env（SETTINGS_ENCRYPTION_KEY 回到空值）
+cd /www/wwwroot/mediaflow && git checkout apps/api/src/common/crypto.service.ts                                        # 5 恢复源码
+rm -rf apps/api/dist && cp -a /www/backup/mediaflow/dist.bak-$TS apps/api/dist                                         # 6 恢复 dist
+systemctl start mediaflow-api                                        # 7 启动
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:4000/api/health                                            # 8 健康应为 200
+cd apps/api && node scripts/verify-settings-key.cjs                  # 9 解密验证（回滚后旧密钥应能解密全部行）
+```
