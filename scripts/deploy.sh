@@ -18,21 +18,27 @@ cd "$ROOT"
 CHECK_ONLY=0
 WITH_MIGRATE=0
 API_ONLY=0
+CONFIG_ONLY=0
 for arg in "$@"; do
   case "$arg" in
     --check-only) CHECK_ONLY=1 ;;
     --with-migrate) WITH_MIGRATE=1 ;;
     --api) API_ONLY=1 ;;
+    # 只校验配置与代码约束（不连库、不看服务），CI 与巡检用
+    --config-only) CONFIG_ONLY=1 ;;
     *) echo "未知参数：$arg"; exit 2 ;;
   esac
 done
+
+PREFLIGHT_ARGS=(--strict)
+[[ $CONFIG_ONLY == 1 ]] && PREFLIGHT_ARGS=(--config-only)
 
 say() { printf '\n\033[1m== %s ==\033[0m\n' "$1"; }
 ok() { printf '  \033[32m✓\033[0m %s\n' "$1"; }
 bad() { printf '  \033[31m✗ %s\033[0m\n' "$1"; }
 
 say "第 0 步：断言（失败即中止，不重启服务）"
-if ! bash scripts/preflight.sh --strict; then
+if ! bash scripts/preflight.sh "${PREFLIGHT_ARGS[@]}"; then
   bad "预检未通过 —— 已中止部署，服务保持当前运行状态（未重启）"
   exit 1
 fi

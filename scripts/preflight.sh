@@ -2,8 +2,10 @@
 # 部署前预检：把"生产必须成立的开关与权限"变成可执行断言。
 #
 # 用法：
-#   bash scripts/preflight.sh          # 常规检查（关键项失败即退出非 0）
-#   bash scripts/preflight.sh --strict # 发布门禁（更严格，含密钥与依赖）
+#   bash scripts/preflight.sh                    # 常规检查（关键项失败即退出非 0）
+#   bash scripts/preflight.sh --strict           # 发布门禁（额外做依赖漏洞门禁）
+#   bash scripts/preflight.sh --config-only      # 只校验配置与代码约束（不起服务、不连库，CI 可用）
+#   bash scripts/preflight.sh --config-only --strict
 #
 # 退出码：0 = 通过；1 = 有关键项失败（部署必须中止）。
 set -uo pipefail
@@ -11,7 +13,14 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="${ENV_FILE:-$ROOT/.env}"
 STRICT=0
-[[ "${1:-}" == "--strict" ]] && STRICT=1
+CONFIG_ONLY=0
+for arg in "$@"; do
+  case "$arg" in
+    --strict) STRICT=1 ;;
+    --config-only) CONFIG_ONLY=1 ;;
+    *) echo "未知参数：$arg"; exit 2 ;;
+  esac
+done
 
 FAIL=0
 WARN=0
@@ -19,7 +28,7 @@ pass() { printf '  \033[32m✓\033[0m %s\n' "$1"; }
 fail() { printf '  \033[31m✗ %s\033[0m\n' "$1"; FAIL=$((FAIL + 1)); }
 warn() { printf '  \033[33m! %s\033[0m\n' "$1"; WARN=$((WARN + 1)); }
 
-echo "== MediaFlow 部署预检（$(date '+%F %T')） =="
+echo "== MediaFlow 部署预检（$(date '+%F %T')，模式：$( [[ $CONFIG_ONLY == 1 ]] && echo '仅配置' || echo '完整' )$( [[ $STRICT == 1 ]] && echo ' + 严格' )） =="
 
 echo "-- 1. 敏感文件权限"
 if [[ ! -f "$ENV_FILE" ]]; then
@@ -38,9 +47,10 @@ while IFS= read -r bf; do
   [[ "$perm" == "600" ]] || fail "备份文件 $bf 权限为 $perm（应为 600）"
 done < <(find /www/backup/mediaflow -maxdepth 1 -type f -name '*.sql*' 2>/dev/null)
 
-echo "-- 2. 生产必开开关"
+echo "-- 2. 生产必开开关与密钥质量"
 grep -q '^AUTH_ENFORCED=true' "$ENV_FILE" && pass "AUTH_ENFORCED=true" || fail "AUTH_ENFORCED 必须为 true（否则无令牌可访问接口）"
 grep -q '^PUBLISH_WORKER_ENABLED=true' "$ENV_FILE" && pass "PUBLISH_WORKER_ENABLED=true" || fail "PUBLISH_WORKER_ENABLED 必须为 true，否则发布任务不会被执行"
+
 # 密钥类断言只比对「长度 + sha256 前 12 位指纹」，绝不回显密钥值本身。
 settings_key="$(sed -n 's/^SETTINGS_ENCRYPTION_KEY=//p' "$ENV_FILE")"
 jwt_secret="$(sed -n 's/^JWT_SECRET=//p' "$ENV_FILE")"
@@ -56,7 +66,7 @@ fi
 if [[ ${#jwt_secret} -ge 48 ]]; then
   pass "JWT_SECRET 长度 ${#jwt_secret}（≥48，指纹 $(fingerprint "$jwt_secret")）"
 else
-  fail "JWT_SECRET 长度 ${#jwt_secret}（必须 ≥48）"
+  fail "JWT_SECRET 长度 ${#jwt_secret}（必须 ≥48，否则启动会被拒绝）"
 fi
 if [[ "$(fingerprint "$jwt_secret")" == "$LEAKED_JWT_FP" ]]; then
   fail "JWT_SECRET 仍是 2026-09-19 泄露的那把密钥（指纹 $LEAKED_JWT_FP），必须轮换"
@@ -69,30 +79,39 @@ else
   pass "签名密钥与加密密钥相互独立"
 fi
 
-echo "-- 3. 单实例约束（发布 Worker 只能有一个消费者进程）"
-consumers="$(redis-cli XINFO CONSUMERS mediaflow:publish:tasks publish-workers 2>/dev/null | grep -c '^name' || true)"
-if [[ "${consumers:-0}" -le 1 ]]; then
-  pass "队列消费者数 $consumers（≤1，单实例约束）"
-elif [[ $STRICT == 1 ]]; then
-  fail "队列消费者数 $consumers（严格模式要求 ≤1，避免重复消费）"
+if [[ $CONFIG_ONLY == 1 ]]; then
+  echo "-- 3/4. 运行时检查（单实例、服务与健康）——仅配置模式下跳过"
 else
-  warn "队列消费者数 $consumers（多实例部署需确认无重复消费）"
+  echo "-- 3. 单实例约束（发布 Worker 只能有一个消费者进程）"
+  consumers="$(redis-cli XINFO CONSUMERS mediaflow:publish:tasks publish-workers 2>/dev/null | grep -c '^name' || true)"
+  if [[ "${consumers:-0}" -le 1 ]]; then
+    pass "队列消费者数 $consumers（≤1，单实例约束）"
+  elif [[ $STRICT == 1 ]]; then
+    fail "队列消费者数 $consumers（严格模式要求 ≤1，避免重复消费）"
+  else
+    warn "队列消费者数 $consumers（多实例部署需确认无重复消费）"
+  fi
+
+  echo "-- 4. 服务与健康"
+  systemctl is-active --quiet mediaflow-api && pass "mediaflow-api 运行中" || fail "mediaflow-api 未运行"
+  systemctl is-active --quiet mediaflow-web && pass "mediaflow-web 运行中" || fail "mediaflow-web 未运行"
+  code="$(curl -s -o /dev/null -w '%{http_code}' -m 10 https://auto.liangyijianye.cn/api/health || echo 000)"
+  [[ "$code" == "200" ]] && pass "健康接口 200" || fail "健康接口返回 $code"
 fi
 
-echo "-- 4. 服务与健康"
-systemctl is-active --quiet mediaflow-api && pass "mediaflow-api 运行中" || fail "mediaflow-api 未运行"
-systemctl is-active --quiet mediaflow-web && pass "mediaflow-web 运行中" || fail "mediaflow-web 未运行"
-code="$(curl -s -o /dev/null -w '%{http_code}' -m 10 https://auto.liangyijianye.cn/api/health || echo 000)"
-[[ "$code" == "200" ]] && pass "健康接口 200" || fail "健康接口返回 $code"
-
-echo "-- 5. 配置一致性"
-media_max_mb="$(PGPASSWORD="${DB_PASSWORD:-mediaflow_dev}" psql -h 127.0.0.1 -U mediaflow -d mediaflow -t -A -c \
-  "SELECT COALESCE((SELECT value FROM system_settings WHERE key='MEDIA_MAX_FILE_MB' AND value <> ''), '50')" 2>/dev/null || echo 50)"
-env_media_mb="$(sed -n 's/^MEDIA_MAX_FILE_MB=//p' "$ENV_FILE")"
-if [[ -n "$env_media_mb" && -n "$media_max_mb" && "$env_media_mb" != "$media_max_mb" ]]; then
-  fail "MEDIA_MAX_FILE_MB 不一致：.env=${env_media_mb} 数据库=${media_max_mb}（数据库优先，需对齐）"
+echo "-- 5. 配置一致性（上传上限）"
+if [[ $CONFIG_ONLY == 0 ]]; then
+  media_max_mb="$(PGPASSWORD="${DB_PASSWORD:-mediaflow_dev}" psql -h 127.0.0.1 -U mediaflow -d mediaflow -t -A -c \
+    "SELECT COALESCE((SELECT value FROM system_settings WHERE key='MEDIA_MAX_FILE_MB' AND value <> ''), '50')" 2>/dev/null || echo 50)"
+  env_media_mb="$(sed -n 's/^MEDIA_MAX_FILE_MB=//p' "$ENV_FILE")"
+  if [[ -n "$env_media_mb" && -n "$media_max_mb" && "$env_media_mb" != "$media_max_mb" ]]; then
+    fail "MEDIA_MAX_FILE_MB 不一致：.env=${env_media_mb} 数据库=${media_max_mb}（数据库优先，需对齐）"
+  else
+    pass "MEDIA_MAX_FILE_MB=${media_max_mb}M（环境变量与数据库配置一致）"
+  fi
 else
-  pass "MEDIA_MAX_FILE_MB=${media_max_mb}M（环境变量与数据库配置一致）"
+  env_media_mb="$(sed -n 's/^MEDIA_MAX_FILE_MB=//p' "$ENV_FILE")"
+  [[ -n "$env_media_mb" ]] && pass "MEDIA_MAX_FILE_MB=${env_media_mb}M（仅配置模式不做数据库比对）" || warn "未设置 MEDIA_MAX_FILE_MB（使用默认值）"
 fi
 # 任务 4 起上传改为磁盘暂存：代码里不应再有 GB 级静态硬上限
 if grep -q 'UPLOAD_CEILING_BYTES' "$ROOT/apps/api/src/modules/media/media.controller.ts" 2>/dev/null; then
@@ -104,6 +123,12 @@ if grep -q 'diskStorage' "$ROOT/apps/api/src/modules/media/media-upload.intercep
   pass "上传走磁盘暂存（非内存）"
 else
   fail "上传未使用 diskStorage（可能又退回内存缓冲）"
+fi
+# 失败路径必须清临时文件：2026-09-19 修复的漏点，防止回归
+if grep -q 'discardTempFile' "$ROOT/apps/api/src/modules/media/media-upload.interceptor.ts" 2>/dev/null; then
+  pass "上传失败会清理临时文件"
+else
+  fail "上传拦截器未清理失败路径的临时文件（会持续堆积垃圾文件）"
 fi
 
 echo "-- 6. 关键依赖下限（防止被回退到有漏洞的版本）"

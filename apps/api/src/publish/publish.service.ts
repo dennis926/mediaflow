@@ -363,6 +363,9 @@ export class PublishService {
     if (task.status === PublishTaskStatus.Published) {
       throw new BadRequestException('已发布的任务不能重排');
     }
+    if (task.status === PublishTaskStatus.Canceled) {
+      throw new BadRequestException('已取消的任务不能重排：如需重新发布请新建任务');
+    }
 
     const previousStatus = task.status;
     const extra = { ...task.extra };
@@ -583,10 +586,17 @@ export class PublishService {
     const task = await this.tasks.findOne({ where: { id } });
     if (!task) throw new NotFoundException('发布任务不存在');
 
+    /**
+     * 取消是用户的明确决定，不能被 retry 悄悄复活（P2-4）：否则一次误点就会把
+     * 已放弃的内容重新推给平台。取消态请改用「新建任务」。
+     */
+    if (task.status === PublishTaskStatus.Canceled) {
+      throw new BadRequestException('已取消的任务不能重试：取消是明确决定，如需重新发布请新建任务');
+    }
+
     const retryable: PublishTaskStatus[] = [
       PublishTaskStatus.Failed,
       PublishTaskStatus.ManualRequired,
-      PublishTaskStatus.Canceled,
       PublishTaskStatus.Pending,
     ];
     if (!retryable.includes(task.status)) {

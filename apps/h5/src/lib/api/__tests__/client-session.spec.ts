@@ -136,3 +136,33 @@ describe('H5 请求 401 处理（任务 6b）', () => {
     expect(getToken()).toBe('access-1');
   });
 });
+
+describe('H5 退出登录（任务 6b / 类别 6）', () => {
+  it('退出时把 refreshToken 交给服务端登出接口（本地清除前先拉黑）', async () => {
+    const { authApi } = await import('../endpoints');
+    const fetchMock = mockFetchSequence([{ status: 201, body: { code: 0, message: 'ok', data: { ok: true } } }]);
+    setSession('access-9', 'refresh-9');
+
+    await authApi.logout(getRefreshToken() ?? undefined);
+
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, { method: string; headers: Record<string, string>; body: string }];
+    expect(String(url)).toContain('/auth/logout');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(init.body)).toEqual({ refreshToken: 'refresh-9' });
+  });
+
+  it('退出后本地两个令牌都被清掉，且不再尝试续期（没有 refreshToken 就没法再刷新）', async () => {
+    setSession('access-9', 'refresh-9');
+    const fetchMock = mockFetchSequence([{ status: 201, body: { code: 0, message: 'ok', data: { ok: true } } }]);
+    const { authApi } = await import('../endpoints');
+
+    await authApi.logout(getRefreshToken() ?? undefined);
+    clearSession();
+
+    expect(getToken()).toBeNull();
+    expect(getRefreshToken()).toBeNull();
+    expect(window.localStorage.getItem(REFRESH_STORAGE_KEY)).toBeNull();
+    // 服务端黑名单已生效，本地也再无凭据：后续请求只能重新登录
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
