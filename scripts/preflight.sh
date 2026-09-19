@@ -66,8 +66,16 @@ ceiling_mb="$(( $(node -e "process.stdout.write(String(Math.round((${ceiling_exp
 pass "MEDIA_MAX_FILE_MB=${maxmb}M / 代码硬上限 ${ceiling_mb}M"
 [[ "$ceiling_mb" -gt "$maxmb" ]] && warn "代码硬上限高于配置业务上限（大文件会先占内存/磁盘再被拒）"
 
+echo "-- 6. 关键依赖下限（防止被回退到有漏洞的版本）"
+nodemailer_version="$(node -e "try{process.stdout.write(JSON.parse(require('fs').readFileSync(require.resolve('nodemailer/package.json',{paths:['apps/api']}),'utf8')).version)}catch(e){process.stdout.write('0.0.0')}" 2>/dev/null)"
+if [[ "$(printf '%s\n%s\n' "9.1.1" "$nodemailer_version" | sort -V | head -1)" == "9.1.1" ]]; then
+  pass "nodemailer $nodemailer_version（≥9.1.1）"
+else
+  fail "nodemailer $nodemailer_version 低于 9.1.1（含多个已修复漏洞）"
+fi
+
 if [[ $STRICT == 1 ]]; then
-  echo "-- 6. 依赖漏洞（严格模式）"
+  echo "-- 7. 依赖漏洞（严格模式）"
   if (cd "$ROOT" && pnpm audit --prod --audit-level=high >/dev/null 2>&1); then pass "无 high 及以上漏洞"; else fail "存在 high/critical 依赖漏洞，见 pnpm audit --prod"; fi
 fi
 

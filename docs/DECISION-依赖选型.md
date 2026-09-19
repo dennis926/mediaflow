@@ -37,3 +37,37 @@
 
 `pnpm audit --prod`：**87 → 18 条（critical 3 → 0，high 41 → 3）**；
 剩余的 3 条 high 全部来自未启用的 `nodemailer`。
+
+---
+
+## 5. 标准动作：依赖漏洞必须做「可达性评估」（2026-09-19 追加）
+
+今后处理任何依赖漏洞，都按以下顺序，不允许"看到告警就盲目升级"或"看到告警就忽略"：
+
+1. **定位依赖路径**：`pnpm why <包> --prod`，区分直接依赖 / 传递依赖。
+2. **判断运行时是否可达**：
+   - 进程是否真的加载它（例：`/proc/<pid>/map_files`、`require.cache` 探针）；
+   - 相关功能是否已启用（例：SMTP 是否配置、外发通知是否为 0 条）；
+   - 项目是否调用脆弱函数（例：`file-type` 的解析函数 vs 自研魔数校验）。
+3. **分级处理**：
+   - **可达** → 优先修，且必须跑真实链路验证（例：bcrypt 用既有哈希真实登录；nodemailer 用真实 SMTP 发信）；
+   - **不可达** → 降为 P3，记录证据与"何时会变可达"（例：`nodemailer` 一旦配置 SMTP 即可达）。
+4. **修复方式优先级**：根治（换掉带毒依赖链，如 bcrypt 6 去掉 node-pre-gyp/tar）> 同 major overrides > major 升级 > 记录并接受。
+5. **结果留痕**：更新 `pnpm audit --prod` 快照到 `/root/.hermes/workspace/audit-after.txt`，并在本文件登记。
+
+## 6. nodemailer：已升级到 10.0.10（2026-09-19）
+
+- 起因：任务 5 判断其"未启用不可达"；但评估改造成本后发现用法只有 1 处
+  （`notification-channel.service.ts:96-109`：`createTransport({host,port,secure,auth,connectionTimeout})` + `sendMail({from,to,subject,text})`），
+  且该 API 形状在 6→7→8→9→10 之间未变 → **改造成本 0 行**，故直接升级到最新 10.0.10（清掉全部 12 条告警）。
+- 验证方式：**真实发信**。用本地 SMTP 接收器（临时）配置通知渠道，触发一次队列容量告警
+  （走 `notify(external=true)` → `dispatch()` → `sendEmail()`），接收器收到完整报文：
+  `From: notify@example.com` / `To: ops@example.com` / `Subject: [MediaFlow] 发布队列超过…` / 正文为告警文本 + 上下文 JSON。
+  验证后已把 `NOTIFY_EMAIL_ENABLED` 恢复为 false、SMTP 相关项清空。
+- `scripts/preflight.sh` 增加断言：`nodemailer` 实际版本必须 ≥ 9.1.1（防止被依赖回退到有漏洞的旧版本）。
+
+## 7. @nestjs/core 的 moderate 漏洞（阶段 B 评估）
+
+- 漏洞：`@nestjs/core Improperly Neutralizes Special Elements`，**同线（10.x）无补丁**，修复版本为 ≥11.1.18。
+- 判定：可达但影响面对本项目有限（涉及 Nest 内部的特殊元素处理），且 Nest 10 → 11 属 major（装饰器/DI 行为、Express 5 等变化）。
+- 处理：**阶段 B 评估 Nest 11 升级**（与多租户/计费改造一起做），当前记录并接受。
