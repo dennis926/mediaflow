@@ -12,6 +12,7 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import type { Response } from 'express';
+import { IsOptional, IsString, MaxLength } from 'class-validator';
 import { Public } from '../auth/public.decorator';
 import { AuthUser } from '../auth/auth.types';
 import { toActor } from '../auth/actor.util';
@@ -22,7 +23,15 @@ import { MediaPage, MediaService } from './media.service';
 import { MediaService as Service } from './media.service';
 import { MediaUploadInterceptor } from './media-upload.interceptor';
 
-interface UploadMediaDto {
+/**
+ * Multipart fields arrive as strings; validating here keeps a too-long group name from
+ * reaching the database (it used to fail there with a raw "value too long for type
+ * character varying(80)" 500 - both confusing for users and an internal detail leak).
+ */
+class UploadMediaDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(80, { message: '分组名最长 80 个字符' })
   groupName?: string;
 }
 

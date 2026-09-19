@@ -3,17 +3,18 @@ import {
   CallHandler,
   ExecutionContext,
   Injectable,
+  Logger,
   NestInterceptor,
   PayloadTooLargeException,
 } from '@nestjs/common';
 import type { Request } from 'express';
 import multer from 'multer';
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, unlinkSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { extname, join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { Observable } from 'rxjs';
-import { finalize } from 'rxjs/operators';
+import { Observable, throwError } from 'rxjs';
+import { catchError, finalize } from 'rxjs/operators';
 import { AuthUser } from '../auth/auth.types';
 import { runtime } from '../settings/runtime-config';
 import { MediaUploadLimiter } from './media-upload.limiter';
@@ -51,7 +52,24 @@ function buildUploader(maxBytes: number) {
  */
 @Injectable()
 export class MediaUploadInterceptor implements NestInterceptor {
+  private readonly logger = new Logger(MediaUploadInterceptor.name);
+
   constructor(private readonly limiter: MediaUploadLimiter) {}
+
+  /**
+   * Removes the temp file multer already wrote when the request fails before the service can
+   * take ownership of it (validation errors, unexpected handler errors).
+   * On success the service has moved the file into the media dir, so this is a no-op.
+   */
+  private discardTempFile(request: Request & { file?: { path?: string } }): void {
+    const path = request.file?.path;
+    if (!path) return;
+    try {
+      if (existsSync(path)) unlinkSync(path);
+    } catch (error) {
+      this.logger.warn(`清理上传临时文件失败：${path}（${error instanceof Error ? error.message : String(error)}）`);
+    }
+  }
 
   async intercept(context: ExecutionContext, next: CallHandler): Promise<Observable<unknown>> {
     const request = context.switchToHttp().getRequest<Request & { user?: AuthUser }>();
@@ -85,7 +103,17 @@ export class MediaUploadInterceptor implements NestInterceptor {
       throw error;
     }
 
-    // finalize 在成功与失败两条路径上都会执行 → 计数不会泄漏
-    return next.handle().pipe(finalize(() => void this.limiter.release(userId)));
+    /**
+     * 失败路径必须自己收拾临时文件：校验错误（如分组名超长）发生在 multer 落盘之后、
+     * MediaService 接管之前，谁都不会去删它 → 临时目录会攒垃圾。
+     * finalize 在成功与失败两条路径上都会执行 → 并发计数不会泄漏。
+     */
+    return next.handle().pipe(
+      catchError((error: unknown) => {
+        this.discardTempFile(request as Request & { file?: { path?: string } });
+        return throwError(() => error);
+      }),
+      finalize(() => void this.limiter.release(userId)),
+    );
   }
 }
