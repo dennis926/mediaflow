@@ -283,3 +283,44 @@ pnpm --filter @mediaflow/api run build
 Nginx 已在站点配置里统一加上：`Strict-Transport-Security`、`X-Content-Type-Options: nosniff`、
 `X-Frame-Options: SAMEORIGIN`、`Referrer-Policy`、`Permissions-Policy`。
 API 自身的跨域是**白名单制**（`WEB_URL` / `H5_URL` / `CORS_ORIGINS` + `chrome-extension://`），不是 `*`。
+
+## 部署脚本（scripts/deploy.sh）与部署断言
+
+**部署的唯一入口是 `scripts/deploy.sh`**，它为"坏配置不得上线"提供强制保证。
+
+### 用法
+
+```bash
+bash scripts/deploy.sh                 # 断言 → 构建（API/PC/H5）→ 重启 → 健康校验
+bash scripts/deploy.sh --check-only    # 只跑断言（巡检/演练，不做任何变更）
+bash scripts/deploy.sh --with-migrate  # 额外执行数据库迁移
+bash scripts/deploy.sh --api           # 只重建后端（前端不动）
+```
+
+### 强制断言（第 0 步：任一项失败即中止，**不重启任何服务**）
+
+| 断言 | 要求 |
+| --- | --- |
+| `.env` 权限 | 必须 600 |
+| 运行日志权限 | `/var/log/mediaflow-api.log`、`mediaflow-web.log` 为 640 |
+| 备份权限 | `/www/backup/mediaflow/*.sql*` 为 600 |
+| `AUTH_ENFORCED` | 必须 true（否则无令牌即可访问接口） |
+| `PUBLISH_WORKER_ENABLED` | 必须 true（否则发布任务无人执行） |
+| `SETTINGS_ENCRYPTION_KEY` | 非空且长度 ≥32（指纹化输出，不回显值） |
+| `JWT_SECRET` | 长度 ≥48，且**指纹 ≠ 2026-09-19 泄露值**（`9d87f6490bc0`） |
+| 密钥分离 | `JWT_SECRET` ≠ `SETTINGS_ENCRYPTION_KEY` |
+| 队列消费者数 | ≤1（严格模式为失败项，多实例会造成重复消费） |
+| 健康接口 | 200 |
+| 上传上限 | `MEDIA_MAX_FILE_MB` 环境变量与数据库配置一致；代码内不得再有静态硬上限，且必须走磁盘暂存 |
+| 依赖下限 | `nodemailer` ≥ 9.1.1（防回退） |
+| 依赖漏洞（`--strict`） | 不得存在 high/critical |
+
+### 失败行为（已实测）
+
+断言失败时脚本在**第 0 步**即中止：不安装、不构建、不重启。实测耗时 3.3 秒，
+服务 MainPID 与 `dist` 时间戳均未变化，线上保持可用（健康 200）。
+
+### 断言与密钥的关系
+
+所有密钥类断言**只输出长度与 sha256 前 12 位指纹**，绝不回显密钥值（2026-09-19 的
+JWT_SECRET 泄露事件即因回显造成，详见 `docs/RUNBOOK-密钥轮换.md` 的禁止事项）。

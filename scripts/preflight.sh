@@ -41,15 +41,43 @@ done < <(find /www/backup/mediaflow -maxdepth 1 -type f -name '*.sql*' 2>/dev/nu
 echo "-- 2. 生产必开开关"
 grep -q '^AUTH_ENFORCED=true' "$ENV_FILE" && pass "AUTH_ENFORCED=true" || fail "AUTH_ENFORCED 必须为 true（否则无令牌可访问接口）"
 grep -q '^PUBLISH_WORKER_ENABLED=true' "$ENV_FILE" && pass "PUBLISH_WORKER_ENABLED=true" || fail "PUBLISH_WORKER_ENABLED 必须为 true，否则发布任务不会被执行"
-if grep -qE '^SETTINGS_ENCRYPTION_KEY=.+' "$ENV_FILE"; then
-  pass "SETTINGS_ENCRYPTION_KEY 已设置"
+# 密钥类断言只比对「长度 + sha256 前 12 位指纹」，绝不回显密钥值本身。
+settings_key="$(sed -n 's/^SETTINGS_ENCRYPTION_KEY=//p' "$ENV_FILE")"
+jwt_secret="$(sed -n 's/^JWT_SECRET=//p' "$ENV_FILE")"
+fingerprint() { printf '%s' "$1" | sha256sum | cut -c1-12; }
+# 历史泄露值（2026-09-19 任务 8b 已轮换，禁止再出现）
+LEAKED_JWT_FP='9d87f6490bc0'
+
+if [[ ${#settings_key} -ge 32 ]]; then
+  pass "SETTINGS_ENCRYPTION_KEY 已设置且长度 ${#settings_key}（≥32，指纹 $(fingerprint "$settings_key")）"
 else
-  if [[ $STRICT == 1 ]]; then fail "SETTINGS_ENCRYPTION_KEY 为空（密钥类配置将回退 JWT_SECRET）"; else warn "SETTINGS_ENCRYPTION_KEY 为空（阶段 A 任务 7 修复前属已知项）"; fi
+  fail "SETTINGS_ENCRYPTION_KEY 长度 ${#settings_key}（必须 ≥32，且不得回退 JWT_SECRET）"
+fi
+if [[ ${#jwt_secret} -ge 48 ]]; then
+  pass "JWT_SECRET 长度 ${#jwt_secret}（≥48，指纹 $(fingerprint "$jwt_secret")）"
+else
+  fail "JWT_SECRET 长度 ${#jwt_secret}（必须 ≥48）"
+fi
+if [[ "$(fingerprint "$jwt_secret")" == "$LEAKED_JWT_FP" ]]; then
+  fail "JWT_SECRET 仍是 2026-09-19 泄露的那把密钥（指纹 $LEAKED_JWT_FP），必须轮换"
+else
+  pass "JWT_SECRET 非历史泄露值（已轮换）"
+fi
+if [[ -n "$jwt_secret" && "$jwt_secret" == "$settings_key" ]]; then
+  fail "JWT_SECRET 与 SETTINGS_ENCRYPTION_KEY 相同（签名密钥与加密密钥必须分离）"
+else
+  pass "签名密钥与加密密钥相互独立"
 fi
 
 echo "-- 3. 单实例约束（发布 Worker 只能有一个消费者进程）"
 consumers="$(redis-cli XINFO CONSUMERS mediaflow:publish:tasks publish-workers 2>/dev/null | grep -c '^name' || true)"
-if [[ "${consumers:-0}" -le 1 ]]; then pass "队列消费者数 $consumers"; else warn "队列消费者数 $consumers（多实例部署需确认无重复消费）"; fi
+if [[ "${consumers:-0}" -le 1 ]]; then
+  pass "队列消费者数 $consumers（≤1，单实例约束）"
+elif [[ $STRICT == 1 ]]; then
+  fail "队列消费者数 $consumers（严格模式要求 ≤1，避免重复消费）"
+else
+  warn "队列消费者数 $consumers（多实例部署需确认无重复消费）"
+fi
 
 echo "-- 4. 服务与健康"
 systemctl is-active --quiet mediaflow-api && pass "mediaflow-api 运行中" || fail "mediaflow-api 未运行"
@@ -60,7 +88,12 @@ code="$(curl -s -o /dev/null -w '%{http_code}' -m 10 https://auto.liangyijianye.
 echo "-- 5. 配置一致性"
 media_max_mb="$(PGPASSWORD="${DB_PASSWORD:-mediaflow_dev}" psql -h 127.0.0.1 -U mediaflow -d mediaflow -t -A -c \
   "SELECT COALESCE((SELECT value FROM system_settings WHERE key='MEDIA_MAX_FILE_MB' AND value <> ''), '50')" 2>/dev/null || echo 50)"
-pass "MEDIA_MAX_FILE_MB=${media_max_mb}M（上传上限来自运行时配置）"
+env_media_mb="$(sed -n 's/^MEDIA_MAX_FILE_MB=//p' "$ENV_FILE")"
+if [[ -n "$env_media_mb" && -n "$media_max_mb" && "$env_media_mb" != "$media_max_mb" ]]; then
+  fail "MEDIA_MAX_FILE_MB 不一致：.env=${env_media_mb} 数据库=${media_max_mb}（数据库优先，需对齐）"
+else
+  pass "MEDIA_MAX_FILE_MB=${media_max_mb}M（环境变量与数据库配置一致）"
+fi
 # 任务 4 起上传改为磁盘暂存：代码里不应再有 GB 级静态硬上限
 if grep -q 'UPLOAD_CEILING_BYTES' "$ROOT/apps/api/src/modules/media/media.controller.ts" 2>/dev/null; then
   fail "media.controller.ts 仍存在静态上传上限常量（应改为按配置动态限制）"
