@@ -64,8 +64,10 @@ if [[ $API_ONLY != 1 ]]; then
   pnpm --filter @mediaflow/h5 run build || { bad "H5 构建失败"; exit 1; }
   H5_TARGET=/www/wwwroot/auto.liangyijianye.cn/h5
   [[ -d "$H5_TARGET" ]] || { bad "H5 目标目录不存在：$H5_TARGET"; exit 1; }
+  # 先清掉上一版带 hash 的产物：否则每次发布都会累积旧 bundle（磁盘白占 + 可能被缓存命中旧版）
+  rm -rf "$H5_TARGET"/assets "$H5_TARGET"/index.html
   cp -r apps/h5/dist/. "$H5_TARGET"/ || { bad "H5 发布失败"; exit 1; }
-  ok "H5 已发布到 $H5_TARGET"
+  ok "H5 已发布到 $H5_TARGET（已清理上一版产物，当前 $(find "$H5_TARGET"/assets -type f | wc -l) 个资源文件）"
 fi
 
 if [[ $WITH_MIGRATE == 1 ]]; then
