@@ -1,4 +1,4 @@
-import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import {
   AdapterCapabilities,
@@ -95,6 +95,12 @@ export class PublishService {
     return this.registry.get(platform);
   }
 
+  /** 「该内容在该平台已有未完成任务」的统一文案（平台名用中文标签，便于运营理解）。 */
+  private duplicateMessage(platforms: string[]): string {
+    const labels = platforms.map((platform) => PLATFORM_LABELS[platform as PlatformCode] ?? platform).join('、');
+    return `该内容在以下平台已有未完成任务：${labels}（同一内容同一平台不重复排期；如需重新发布，请先取消该任务或等待其完成）`;
+  }
+
   async createTasks(dto: CreatePublishTaskDto, actor: PublishActor): Promise<PublishTask[]> {
     const scope = await this.workspaceContext.current();
     const content = await this.contents.findOne({ where: { id: dto.contentId, workspaceId: scope.workspaceId } });
@@ -133,6 +139,19 @@ export class PublishService {
     const scheduledAt = dto.scheduledAt ? new Date(dto.scheduledAt) : null;
     if (scheduledAt && Number.isNaN(scheduledAt.getTime())) throw new BadRequestException('scheduledAt 不是合法时间');
 
+    /**
+     * 幂等闸门（审计 P2-2）：同一内容在同一平台已有「未完成任务」时不再重复建单。
+     * 否则一次误点就会把同一篇内容推给平台两次——这是真实的内容事故，不是重复劳动。
+     * 数据库侧另有部分唯一索引兜底（并发下后到的请求会命中唯一冲突，转成同样的 409）。
+     */
+    const activeStatuses = [PublishTaskStatus.Pending, PublishTaskStatus.Scheduled, PublishTaskStatus.Publishing];
+    const existingActive = await this.tasks.find({
+      where: { contentId: content.id, platform: In(platforms), status: In(activeStatuses) },
+    });
+    if (existingActive.length > 0) {
+      throw new ConflictException(this.duplicateMessage([...new Set(existingActive.map((task) => task.platform))]));
+    }
+
     const created: PublishTask[] = [];
     for (const platform of platforms) {
       const adapter = this.adapterFor(platform);
@@ -159,7 +178,14 @@ export class PublishService {
         createdBy: actor.id ?? null,
         extra: {},
       });
-      const saved = await this.tasks.save(task);
+      let saved: PublishTask;
+      try {
+        saved = await this.tasks.save(task);
+      } catch (error) {
+        // 部分唯一索引（UQ_publish_tasks_active_content_platform）命中：并发下两个请求同时建单
+        if ((error as { code?: string }).code === '23505') throw new ConflictException(this.duplicateMessage([platform]));
+        throw error;
+      }
 
       if (!isFuture) await this.queue.enqueue(saved.id);
       await this.audit.record({

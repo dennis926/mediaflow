@@ -28,11 +28,17 @@ function buildService(options: {
   queue?: Partial<PublishQueueService>;
   /** 最新一轮审核记录（测审核闸门用） */
   review?: Record<string, unknown> | null;
+  /** 已存在的「未完成任务」，用于验证 P2-2 幂等闸门 */
+  activeTasks?: Array<Record<string, unknown>>;
   requireApproval?: boolean;
 }): { service: PublishService; queue: PublishQueueService; tasks: Repository<PublishTask>; reviews: Repository<ContentReview>; settings: SettingsService } {
   const contents = repositoryMock<Content>({ findOne: vi.fn(async () => options.content as Content | null) });
   const variants = repositoryMock<ContentVariant>({ findOne: vi.fn(async () => (options.variant ?? null) as ContentVariant | null) });
-  const tasks = repositoryMock<PublishTask>({ save: vi.fn(async (value: PublishTask) => ({ ...value, id: 'task-1' })) });
+  const tasks = repositoryMock<PublishTask>({
+    save: vi.fn(async (value: PublishTask) => ({ ...value, id: 'task-1' })),
+    // 幂等闸门（P2-2）：默认没有活跃任务；需要时用 options.activeTasks 注入
+    find: vi.fn(async () => (options.activeTasks ?? []) as unknown as PublishTask[]),
+  });
   const accounts = repositoryMock<SocialAccount>();
   const queue = { enqueue: vi.fn(async () => '1-0') } as unknown as PublishQueueService;
   const audit = { record: vi.fn(async () => undefined) } as unknown as AuditService;
@@ -265,5 +271,47 @@ describe('发布闸门：以审核记录为准（任务 3 / 审计 P1-1）', () 
     const { service, reviews } = buildService({ content: baseContent, requireApproval: false });
     await expect(service.createTasks(dto(), { id: 'u-1', name: 'x' })).resolves.toBeTruthy();
     expect((reviews.findOne as unknown as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+  });
+});
+
+describe('PublishService 幂等闸门（P2-2 重复排期）', () => {
+  it('同一内容同一平台已有未完成任务时抛 409（不重复建单）', async () => {
+    const { service, tasks, queue } = buildService({
+      content: { id: 'content-9', title: '稿件', aiGenerated: false, aiFlagChecked: false } as Partial<Content>,
+      activeTasks: [{ id: 'task-old', platform: PlatformCode.WechatMp, status: 'pending' }],
+    });
+
+    await expect(
+      service.createTasks({ contentId: 'content-9', platforms: [PlatformCode.WechatMp] }, { name: 'tester' }),
+    ).rejects.toThrow(/已有未完成任务/);
+
+    expect(tasks.save).not.toHaveBeenCalled();
+    expect(queue.enqueue).not.toHaveBeenCalled();
+  });
+
+  it('数据库唯一索引兜底：并发下唯一冲突（23505）也转成 409', async () => {
+    const uniqueViolation = Object.assign(new Error('duplicate key value violates unique constraint'), { code: '23505' });
+    const { service, tasks } = buildService({
+      content: { id: 'content-10', title: '并发稿件', aiGenerated: false, aiFlagChecked: false } as Partial<Content>,
+    });
+    (tasks.save as unknown as ReturnType<typeof vi.fn>).mockRejectedValueOnce(uniqueViolation);
+
+    await expect(
+      service.createTasks({ contentId: 'content-10', platforms: [PlatformCode.WechatMp] }, { name: 'tester' }),
+    ).rejects.toThrow(/已有未完成任务/);
+  });
+
+  it('任务完成后（已发布/已取消）可以再次建单', async () => {
+    const { service, tasks } = buildService({
+      content: { id: 'content-11', title: '可重发稿件', aiGenerated: false, aiFlagChecked: false } as Partial<Content>,
+      activeTasks: [], // 闸门只拦 pending/scheduled/publishing
+    });
+
+    const created = await service.createTasks(
+      { contentId: 'content-11', platforms: [PlatformCode.WechatMp] },
+      { name: 'tester' },
+    );
+    expect(created).toHaveLength(1);
+    expect(tasks.save).toHaveBeenCalledTimes(1);
   });
 });

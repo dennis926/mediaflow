@@ -203,9 +203,16 @@ export class OpsMonitorService {
     let detail: string;
     try {
       const stats = statfsSync(dir);
-      const total = stats.blocks * stats.bsize;
-      const free = stats.bfree * stats.bsize;
-      current = total === 0 ? 0 : Math.round(((total - free) / total) * 1000) / 10;
+      /**
+       * 与 `df` 保持一致的口径：
+       * - 已用 = blocks - bfree
+       * - 分母 = 已用 + bavail（bavail **不含** root 保留块，bfree 含）
+       * 早期版本用 (blocks-bfree)/blocks，会低估几个百分点（实测 46.7% vs df 51.2%），
+       * 导致监控数字和运维在命令行看到的对不上。
+       */
+      const usedBlocks = stats.blocks - stats.bfree;
+      const totalBlocks = usedBlocks + stats.bavail;
+      current = totalBlocks === 0 ? 0 : Math.round((usedBlocks / totalBlocks) * 1000) / 10;
       detail =
         current > threshold
           ? `素材目录所在磁盘已用 ${current}%（阈值 ${threshold}%）：请清理历史素材或扩容，写满会导致上传与发布全部失败。`

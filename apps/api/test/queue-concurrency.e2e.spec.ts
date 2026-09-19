@@ -108,29 +108,36 @@ describe.skipIf(!e2eCredentialsReady)('类别 4：重复投递 / 并发认领', 
     expect(cancelAgain.status).toBe(400);
   });
 
-  it('4. 同一内容同平台重复建单：当前不去重（P2-2 已知问题，事实性描述）', async () => {
+  it('4. 同一内容同平台重复建单 → 第二次 409；取消后可再次建单（P2-2 已修）', async () => {
     const first = await request(server())
       .post('/api/publish/tasks')
       .set(auth())
       .send({ contentId, platforms: ['zhihu'] })
       .expect(201);
+    const firstId = first.body.data[0].id as string;
+    h.createdTaskIds.push(firstId);
+
+    // 幂等闸门：同一内容同一平台已有未完成任务时不再建单
     const second = await request(server())
+      .post('/api/publish/tasks')
+      .set(auth())
+      .send({ contentId, platforms: ['zhihu'] });
+    expect(second.status).toBe(409);
+    expect(String(second.body.message)).toContain('已有未完成任务');
+
+    const rows = await h.dataSource.query(
+      "SELECT count(*)::int AS n FROM publish_tasks WHERE content_id = $1 AND platform = 'zhihu' AND status IN ('pending','scheduled','publishing')",
+      [contentId],
+    );
+    expect(rows[0].n).toBe(1);
+
+    // 取消后（不再活跃）可以重新排期
+    await request(server()).delete(`/api/publish/tasks/${firstId}`).set(auth()).expect(200);
+    const third = await request(server())
       .post('/api/publish/tasks')
       .set(auth())
       .send({ contentId, platforms: ['zhihu'] })
       .expect(201);
-
-    const firstId = first.body.data[0].id as string;
-    const secondId = second.body.data[0].id as string;
-    h.createdTaskIds.push(firstId, secondId);
-
-    // 当前行为：重复建单会产生两条任务（同一内容会被推两次）。
-    // 这是 P2-2 记录在案的缺口；若将来实现了去重，本用例应改为断言只有一条。
-    expect(firstId).not.toBe(secondId);
-    const rows = await h.dataSource.query(
-      "SELECT count(*)::int AS n FROM publish_tasks WHERE content_id = $1 AND platform = 'zhihu' AND status <> 'canceled'",
-      [contentId],
-    );
-    expect(rows[0].n).toBe(2);
+    h.createdTaskIds.push(third.body.data[0].id as string);
   });
 });
