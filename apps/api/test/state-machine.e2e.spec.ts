@@ -153,4 +153,60 @@ describe.skipIf(!e2eCredentialsReady)('类别 1：状态机越权', () => {
     expect(transitions).toContain('rejected');
     expect(transitions).toContain('archived');
   });
+  it('8. 审核通过后只改标签（不动正文）同样使审批失效 → 退回 draft + 发布 400（P2-1）', async () => {
+    // 上一条用例把它归档了；归档态不能提审，先取消归档（顺带覆盖 unarchive 路径）
+    await request(server()).patch(`/api/contents/${contentId}/archive`).set(auth(owner)).send({ archived: false }).expect(200);
+    expect(await getStatus(contentId)).toBe('draft');
+
+    await submitReview(contentId).expect(201);
+    await decide(await latestReviewId(contentId), 'approved', '测试：标签改动前通过').expect(200);
+    expect(await getStatus(contentId)).toBe('approved');
+
+    // 闸门不能只看正文：改标签/素材/封面同样算"内容变了"
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    await request(server())
+      .put(`/api/contents/${contentId}`)
+      .set(auth(owner))
+      .send({ tags: ['审核后新增标签'] })
+      .expect(200);
+
+    expect(await getStatus(contentId)).toBe('draft');
+    const response = await publishAttempt(contentId);
+    expect(response.status).toBe(400);
+    expect(response.body.code).toBe(40000);
+  });
+
+  it('9. AI 生成内容：未复核标识不得发布，复核后可发布且正文含显式标识（合规 P1-3 闸门）', async () => {
+    const created = await request(server())
+      .post('/api/contents')
+      .set(auth(owner))
+      .send({ title: `${PREFIX} AI标识 ${Date.now()}`, body: 'AI 生成正文', aiFlagType: 'assisted' })
+      .expect(201);
+    const aiContentId = created.body.data.id as string;
+    expect(created.body.data.aiGenerated).toBe(true);
+    expect(String(created.body.data.body)).toContain('（本文由 AI 辅助生成）');
+
+    // 未复核标识 → 直接发布被拒
+    const blocked = await request(server())
+      .post('/api/publish/tasks')
+      .set(auth(owner))
+      .send({ contentId: aiContentId, platforms: ['wechat_mp'] });
+    expect(blocked.status).toBe(400);
+    expect(String(blocked.body.message)).toContain('AI 标识校验');
+
+    await request(server())
+      .patch(`/api/contents/${aiContentId}/ai-flag-check`)
+      .set(auth(owner))
+      .send({ checked: true, note: '端到端测试' })
+      .expect(200);
+    await submitReview(aiContentId).expect(201);
+    await decide(await latestReviewId(aiContentId), 'approved', '测试：AI 内容通过').expect(200);
+
+    const published = await request(server())
+      .post('/api/publish/tasks')
+      .set(auth(owner))
+      .send({ contentId: aiContentId, platforms: ['wechat_mp'] })
+      .expect(201);
+    h.createdTaskIds.push(...(published.body.data as Array<{ id: string }>).map((task) => task.id));
+  });
 });

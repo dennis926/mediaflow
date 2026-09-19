@@ -1,0 +1,72 @@
+# MediaFlow 持续集成（最小方案）
+#
+# 目标：让"坏代码进不了 main"。CI 失败即视为不可合并（需要在 GitHub 仓库设置里开启分支保护，
+# 见 docs/RUNBOOK-部署与回滚.md 第六节——那一步只能由仓库管理员在网页上点）。
+#
+# 为什么拆成两个 job：全流程串行约 4.5-5 分钟，接近 5 分钟上限；
+# 拆成「静态检查」与「单元测试」并行执行，墙钟时间减半，任一失败都会让整个 CI 变红。
+#
+# 明确不做的事：不跑 E2E（需要真实数据库/Redis 与管理员凭据）、不降级 audit 等级、不跳过任何步骤。
+
+name: CI
+
+on:
+  push:
+    branches: ['main', 'develop']
+  pull_request:
+    branches: ['main', 'develop']
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # 项目 .npmrc 里也有 production=false；这里再显式声明，避免 devDependencies 被跳过
+  NODE_ENV: development
+
+jobs:
+  static:
+    name: 静态检查（类型/规范/凭据/依赖漏洞）
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: pnpm
+      - name: 安装依赖
+        run: pnpm install --frozen-lockfile
+      - name: 类型检查（全部包）
+        run: pnpm -r typecheck
+      - name: 代码规范
+        run: pnpm -r lint
+      - name: 凭据扫描（真实密钥 / 密文 / .env / 历史泄露指纹）
+        run: pnpm check:secrets
+      - name: 部署断言（仅配置，不依赖本机服务）
+        run: bash scripts/preflight.sh --config-only
+      - name: 依赖漏洞门禁（high 及以上必须修）
+        run: pnpm audit --prod --audit-level=high
+
+  test:
+    name: 单元测试（全部包）
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: pnpm
+      - name: 安装依赖
+        run: pnpm install --frozen-lockfile
+      - name: 构建共享包
+        run: pnpm build:packages
+      - name: 运行单元测试
+        run: pnpm -r test

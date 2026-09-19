@@ -324,3 +324,28 @@ bash scripts/deploy.sh --api           # 只重建后端（前端不动）
 
 所有密钥类断言**只输出长度与 sha256 前 12 位指纹**，绝不回显密钥值（2026-09-19 的
 JWT_SECRET 泄露事件即因回显造成，详见 `docs/RUNBOOK-密钥轮换.md` 的禁止事项）。
+
+## 持续集成（.github/workflows/ci.yml）
+
+CI 拆成两个并行 job，任一失败整个 CI 变红：
+
+| job | 步骤 |
+| --- | --- |
+| 静态检查 | `pnpm install --frozen-lockfile` → `pnpm -r typecheck` → `pnpm -r lint` → `pnpm check:secrets` → `bash scripts/preflight.sh --config-only` → `pnpm audit --prod --audit-level=high` |
+| 单元测试 | `pnpm install --frozen-lockfile` → `pnpm build:packages` → `pnpm -r test` |
+
+**为什么拆两个 job**：串行执行约 4.5-5 分钟，接近 5 分钟上限；并行后墙钟≈最长 job + 安装时间。
+**明确不做**：不跑 E2E（需要真实数据库/Redis 与管理员凭据，属发布前人工步骤）、不降低 audit 等级、不跳过步骤。
+
+### 待办（必须由仓库管理员在 GitHub 网页完成）
+
+- [ ] **开启分支保护**：Settings → Branches → Add rule（`main`）→ 勾选 **Require status checks to pass before merging**，并选中 CI 的 `static` 与 `test` 两个 job。这一步是"CI 失败必须阻止合并"的唯一落地方式，代码侧无法代替。
+- [ ] 若仓库尚未推送到 GitHub，CI 不会运行——请先把仓库推到远程（例如 `dennis926/mediaflow`）。
+
+### 本地等价命令（提交前自查）
+
+```bash
+pnpm -r typecheck && pnpm -r lint && pnpm check:secrets && pnpm -r test
+bash scripts/preflight.sh --config-only
+pnpm audit --prod --audit-level=high
+```
