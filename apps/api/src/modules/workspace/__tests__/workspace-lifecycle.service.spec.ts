@@ -2,6 +2,7 @@ import { describe, expect, it, vi, afterEach } from 'vitest';
 import type { Repository } from 'typeorm';
 import type { AuditService } from '../../../audit/audit.service';
 import type { AuthSessionService } from '../../auth/auth-session.service';
+import type { NotificationService } from '../../notification/notification.service';
 import type { WorkspaceContextService } from '../../../common/workspace-context.service';
 import { applyRuntimeConfig } from '../../settings/runtime-config';
 import { Workspace } from '../entities/workspace.entity';
@@ -41,6 +42,8 @@ function build(options: {
   member?: Record<string, unknown> | null;
   activeTasks?: number;
   runningExports?: number;
+  /** 同一租户内其它仍可用的工作区数量（0 = 这是最后一个） */
+  otherWorkspaces?: number;
 } = {}) {
   const current = options.workspace === undefined ? workspace() : options.workspace;
   const store = new Map<string, Workspace>();
@@ -55,7 +58,7 @@ function build(options: {
       if (row) store.set(WS_ID, { ...row, ...patch } as Workspace);
       return { affected: 1 };
     }),
-    count: vi.fn(async () => 1),
+    count: vi.fn(async () => options.otherWorkspaces ?? 1),
     save: vi.fn(async (value: unknown) => value),
     create: vi.fn((value: unknown) => value),
   } as unknown as Repository<Workspace>;
@@ -76,17 +79,21 @@ function build(options: {
   const invalidateWorkspace = vi.fn(async () => 1);
   const sessions = { invalidate: vi.fn(async () => 1), invalidateWorkspace } as unknown as AuthSessionService;
 
+  const notify = vi.fn(async (_input: unknown) => undefined);
+  const notifications = { notify } as unknown as NotificationService;
+
   const service = new WorkspaceService(
     workspaces,
     members,
     users,
     tasks,
     exportJobs,
+    notifications,
     workspaceContext,
     audit,
     sessions,
   );
-  return { service, auditRecord, invalidateWorkspace, tasks, exportJobs, store };
+  return { service, auditRecord, invalidateWorkspace, tasks, exportJobs, notify, store };
 }
 
 const actor = { id: USER_ID, name: '操作人' };
@@ -207,5 +214,41 @@ describe('B0.4 按目标工作区判权限（requireWorkspaceRole）', () => {
   it('软删态的工作区，其 owner 依然能通过权限判定（否则无法恢复）', async () => {
     const { service } = build({ workspace: workspace({ status: 'soft_deleted', purgeAfter: new Date(Date.now() + 86400000) }) });
     await expect(service.restoreWorkspace(WS_ID, USER_ID, actor)).resolves.toMatchObject({ status: 'active' });
+  });
+});
+
+describe('B0.4 最后一个工作区的软保护（决策 2）', () => {
+  it('是最后一个工作区且未确认 → 400，并给出确认方式；不写库、不审计', async () => {
+    const { service, auditRecord } = build({ otherWorkspaces: 0 });
+    await expect(service.softDeleteWorkspace(WS_ID, USER_ID, '测试工作区', actor)).rejects.toThrow(/最后一个工作区/);
+    expect(auditRecord).not.toHaveBeenCalled();
+  });
+
+  it('是最后一个工作区但显式确认 → 200，写专用审计并发出站内＋外部通知', async () => {
+    const { service, auditRecord, notify } = build({ otherWorkspaces: 0 });
+    const view = await service.softDeleteWorkspace(WS_ID, USER_ID, '测试工作区', actor, '关停账号', true);
+
+    expect(view.status).toBe('soft_deleted');
+    expect(auditRecord).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'workspace.soft_delete.last_workspace', payload: expect.objectContaining({ wasLast: true }) }),
+    );
+    expect(notify).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'workspace.soft_delete.last_workspace', external: true }),
+    );
+  });
+
+  it('还有其它工作区时不触发软保护（无需 confirmLastWorkspace）', async () => {
+    const { service, notify } = build({ otherWorkspaces: 2 });
+    const view = await service.softDeleteWorkspace(WS_ID, USER_ID, '测试工作区', actor);
+    expect(view.status).toBe('soft_deleted');
+    expect(notify).not.toHaveBeenCalled();
+  });
+
+  it('普通软删的审计里带有 wasLast=false（便于统计）', async () => {
+    const { service, auditRecord } = build({ otherWorkspaces: 1 });
+    await service.softDeleteWorkspace(WS_ID, USER_ID, '测试工作区', actor);
+    expect(auditRecord).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'workspace.soft_delete', payload: expect.objectContaining({ wasLast: false }) }),
+    );
   });
 });

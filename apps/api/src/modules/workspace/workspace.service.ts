@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, ForbiddenException, GoneException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { In, Not, Repository } from 'typeorm';
 import { AuditService } from '../../audit/audit.service';
 import { WorkspaceContextService } from '../../common/workspace-context.service';
 import { RoleCode } from './entities/role.entity';
@@ -10,6 +10,7 @@ import { AuthSessionService } from '../auth/auth-session.service';
 import { Workspace, WorkspaceStatus } from './entities/workspace.entity';
 import { WorkspaceExportJob } from './entities/workspace-export-job.entity';
 import { PublishTask } from '../publish/entities/publish-task.entity';
+import { NotificationService } from '../notification/notification.service';
 import { runtime } from '../settings/runtime-config';
 
 export interface WorkspaceSummary {
@@ -62,6 +63,7 @@ export class WorkspaceService {
     @InjectRepository(User) private readonly users: Repository<User>,
     @InjectRepository(PublishTask) private readonly tasks: Repository<PublishTask>,
     @InjectRepository(WorkspaceExportJob) private readonly exportJobs: Repository<WorkspaceExportJob>,
+    private readonly notifications: NotificationService,
     private readonly workspaceContext: WorkspaceContextService,
     private readonly audit: AuditService,
     private readonly sessions: AuthSessionService,
@@ -196,6 +198,7 @@ export class WorkspaceService {
     confirmName: string,
     actor: WorkspaceActor,
     reason?: string,
+    confirmLastWorkspace = false,
   ): Promise<WorkspaceStatusView> {
     const { workspace } = await this.requireWorkspaceRole(workspaceId, userId);
     if (workspace.status === 'soft_deleted') throw new ConflictException('该工作区已被删除');
@@ -217,6 +220,21 @@ export class WorkspaceService {
     });
     if (runningExports > 0) throw new ConflictException('该工作区有正在进行的导出任务，请等待其完成');
 
+    /**
+     * 最后一个工作区的**软保护**（B0.4 决策 2）：
+     * 不做硬阻止（用户可能确实要关停），但必须让他在知情的前提下确认，并留下审计与通知。
+     * 判断范围是"同一租户内其它仍处于 active/archived 的工作区"。
+     */
+    const remaining = await this.workspaces.count({
+      where: { tenantId: workspace.tenantId, id: Not(workspace.id), status: In(['active', 'archived'] as never[]) },
+    });
+    const isLastWorkspace = remaining === 0;
+    if (isLastWorkspace && !confirmLastWorkspace) {
+      throw new BadRequestException(
+        '这是你的最后一个工作区，删除后将无法登录平台。如确认，请在请求中带 confirmLastWorkspace: true',
+      );
+    }
+
     const retentionDays = runtime().workspace.softDeleteRetentionDays;
     const deletedAt = new Date();
     const purgeAfter = new Date(deletedAt.getTime() + retentionDays * 24 * 60 * 60 * 1000);
@@ -230,8 +248,34 @@ export class WorkspaceService {
       retentionDays,
       purgeAfter: purgeAfter.toISOString(),
       reason: reason ?? null,
+      wasLast: isLastWorkspace,
     });
-    this.logger.warn(`工作区已软删（${retentionDays} 天内可恢复）：${workspace.name}`);
+    if (isLastWorkspace) {
+      // 单独的动作名，便于审计检索"谁关停了自己的最后一个工作区"
+      await this.recordLifecycle('workspace.soft_delete.last_workspace', workspace, actor, {
+        wasLast: true,
+        purgeAfter: purgeAfter.toISOString(),
+        retentionDays,
+      });
+      await this.notifications
+        .notify({
+          type: 'workspace.soft_delete.last_workspace',
+          level: 'warning',
+          title: '你已删除最后一个工作区',
+          body:
+            `工作区「${workspace.name}」已进入保留期，${retentionDays} 天内可恢复（到期时间 ${purgeAfter.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}）。` +
+            `恢复方式：POST /api/workspaces/${workspace.id}/restore（或到「工作区」页面点恢复）。到期后将不可恢复。`,
+          resourceType: 'workspace',
+          resourceId: workspace.id,
+          payload: { wasLast: true, purgeAfter: purgeAfter.toISOString(), restoreEndpoint: `/api/workspaces/${workspace.id}/restore` },
+          // 平台可能已无法使用（没有其它工作区），尽量通过外部渠道也发一份
+          external: true,
+        })
+        .catch((error: unknown) => {
+          this.logger.warn(`最后一个工作区告警通知失败：${error instanceof Error ? error.message : String(error)}`);
+        });
+    }
+    this.logger.warn(`工作区已软删（${retentionDays} 天内可恢复）：${workspace.name}${isLastWorkspace ? '｜注意：这是该租户最后一个工作区' : ''}`);
     return this.statusView(await this.workspaces.findOneOrFail({ where: { id: workspace.id } }));
   }
 

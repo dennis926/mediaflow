@@ -273,3 +273,20 @@ scheduled ──(到点，由扫描器入队)──> pending
 - 发布：`/api/publish/tasks/:id/retry`、`/api/publish/calendar`
 - 数据：`/api/analytics/overview`、`/api/analytics/trend`
 - 账号：`/api/accounts`、`/api/accounts/bind`
+
+## 工作区生命周期与导出（B0.4）
+
+| 方法 | 路径 | 能力点 | 说明 |
+| --- | --- | --- | --- |
+| POST | `/api/workspaces/:id/archive` | `workspace.archive` | 归档（只读态）；**200**，重复归档 409 |
+| POST | `/api/workspaces/:id/unarchive` | `workspace.archive` | 取消归档；非归档态 409 |
+| DELETE | `/api/workspaces/:id` | `workspace.delete` | 软删（保留期内可恢复）；body `{confirmName, reason?, confirmLastWorkspace?}`；名称不匹配 400、有未完成任务/导出 409、最后一个工作区未确认 400 |
+| POST | `/api/workspaces/:id/restore` | `workspace.restore` | 恢复；超期 **410**（不可恢复） |
+| GET | `/api/workspaces/:id/status` | `workspace.manage` | 状态视图（含 `daysUntilPurge` 倒计时） |
+| POST | `/api/workspaces/:id/export` | `workspace.export` | 申请导出；超 5GB 413、并发 409 |
+| GET | `/api/workspaces/:id/export/:jobId` | `workspace.export` | 导出进度与校验和 |
+| POST | `/api/workspaces/:id/export/:jobId/link` | `workspace.export` | 一次性下载链接（15 分钟） |
+| GET | `/api/workspaces/:id/export/:jobId/download` | 公开（令牌即鉴权） | 凭 `?token=` 下载；用过即失效 |
+
+> 这 9 个路由均标注 `@WorkspaceLifecycle()`：即便调用者当前所在的工作区已被归档/软删，也允许调用（否则用户无法恢复自己的工作区）。
+> 权限一律按**目标工作区**判定（非成员 404、成员非 owner 403）。

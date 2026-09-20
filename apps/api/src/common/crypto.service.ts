@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHmac, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 
 const PREFIX = 'enc:v1:';
 const ALGORITHM = 'aes-256-gcm';
@@ -51,6 +51,24 @@ export class CryptoService {
       this.logger.error(`解密失败：${error instanceof Error ? error.message : String(error)}`);
       return null;
     }
+  }
+
+  /**
+   * 用主密钥派生的签名密钥对载荷做 HMAC-SHA256（十六进制）。
+   *
+   * 用途：导出产物的一次性下载令牌 —— 令牌必须不可伪造，但不需要可逆加密。
+   * 与加解密共用同一主密钥的派生结果，因此轮换密钥会让旧令牌自然失效（安全上可接受）。
+   */
+  hmac(payload: string): string {
+    return createHmac('sha256', this.key).update(payload).digest('hex');
+  }
+
+  /** 校验 HMAC（定长比较，避免时序侧信道）。 */
+  verifyHmac(payload: string, signature: string): boolean {
+    const expected = Buffer.from(this.hmac(payload), 'utf8');
+    const provided = Buffer.from(signature ?? '', 'utf8');
+    if (expected.length !== provided.length) return false;
+    return timingSafeEqual(expected, provided);
   }
 
   isEncrypted(value: string | null): boolean {

@@ -1,6 +1,10 @@
 import { WorkspaceLifecycle } from '../auth/workspace-lifecycle.decorator';
+import { Public } from '../auth/public.decorator';
 import { DeleteWorkspaceDto } from './dto/workspace-lifecycle.dto';
-import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Post, Put } from '@nestjs/common';
+import { RequestWorkspaceExportDto } from './dto/workspace-export.dto';
+import { Body, Controller, Delete, Get, HttpCode, Ip, Headers, Param, ParseUUIDPipe, Post, Put, Query, Res } from '@nestjs/common';
+import type { Response } from 'express';
+import { createReadStream } from 'node:fs';
 import { ArrayMaxSize, ArrayMinSize, IsArray, IsIn, IsOptional, IsString, IsUUID, Length } from 'class-validator';
 import { Capability } from '../auth/capabilities';
 import { AuthUser } from '../auth/auth.types';
@@ -8,6 +12,7 @@ import { toActor } from '../auth/actor.util';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { ROLE_CODES } from './entities/role.entity';
 import { WorkspaceMemberView, WorkspaceService, WorkspaceStatusView, WorkspaceSummary } from './workspace.service';
+import { ExportJobView, WorkspaceExportService } from './workspace-export.service';
 
 class CreateWorkspaceDto {
   @IsString()
@@ -39,7 +44,10 @@ class UpsertMemberDto {
  */
 @Controller('workspaces')
 export class WorkspaceController {
-  constructor(private readonly workspacesService: WorkspaceService) {}
+  constructor(
+    private readonly workspacesService: WorkspaceService,
+    private readonly exportService: WorkspaceExportService,
+  ) {}
 
   @Get()
   mine(@CurrentUser() user?: AuthUser): Promise<WorkspaceSummary[]> {
@@ -82,7 +90,14 @@ export class WorkspaceController {
     @Body() dto: DeleteWorkspaceDto,
     @CurrentUser() user?: AuthUser,
   ): Promise<WorkspaceStatusView> {
-    return this.workspacesService.softDeleteWorkspace(id, user?.id ?? '', dto.confirmName, toActor(user), dto.reason);
+    return this.workspacesService.softDeleteWorkspace(
+      id,
+      user?.id ?? '',
+      dto.confirmName,
+      toActor(user),
+      dto.reason,
+      dto.confirmLastWorkspace ?? false,
+    );
   }
 
   @Capability('workspace.restore')
@@ -98,6 +113,67 @@ export class WorkspaceController {
   @Get(':id/status')
   status(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user?: AuthUser): Promise<WorkspaceStatusView> {
     return this.workspacesService.workspaceStatus(id, user?.id ?? '');
+  }
+
+
+  // ---------- 租户数据导出（B0.4 第 3 步） ----------
+
+  /** 申请导出：立即返回 jobId，后台流式生成 ZIP（同一工作区同时只允许 1 个任务）。 */
+  @Capability('workspace.export')
+  @WorkspaceLifecycle()
+  @Post(':id/export')
+  requestExport(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: RequestWorkspaceExportDto,
+    @CurrentUser() user?: AuthUser,
+  ): Promise<ExportJobView> {
+    return this.exportService.requestExport(id, user?.id ?? '', toActor(user), dto);
+  }
+
+  /** 查询导出进度与结果。 */
+  @Capability('workspace.export')
+  @WorkspaceLifecycle()
+  @Get(':id/export/:jobId')
+  exportJob(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('jobId', ParseUUIDPipe) jobId: string,
+    @CurrentUser() user?: AuthUser,
+  ): Promise<ExportJobView> {
+    return this.exportService.getJob(id, jobId, user?.id ?? '');
+  }
+
+  /** 申请一次性下载链接（15 分钟有效，用过即失效）。 */
+  @Capability('workspace.export')
+  @WorkspaceLifecycle()
+  @HttpCode(200)
+  @Post(':id/export/:jobId/link')
+  exportLink(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('jobId', ParseUUIDPipe) jobId: string,
+    @CurrentUser() user?: AuthUser,
+  ): Promise<{ url: string; expiresAt: string }> {
+    return this.exportService.createDownloadLink(id, jobId, user?.id ?? '');
+  }
+
+  /**
+   * 凭令牌下载产物。令牌本身即鉴权（HMAC + 15 分钟 + 一次性），因此是公开路由：
+   * 这样即使工作区已被软删/清除，产物仍能在有效期内被取走。
+   */
+  @Public()
+  @Get(':id/export/:jobId/download')
+  async exportDownload(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('jobId', ParseUUIDPipe) jobId: string,
+    @Query('token') token: string,
+    @Res() response: Response,
+    @Ip() ip?: string,
+    @Headers('user-agent') userAgent?: string,
+  ): Promise<void> {
+    const file = await this.exportService.resolveDownload(id, jobId, token ?? '', { ip: ip ?? null, userAgent: userAgent ?? null });
+    response.setHeader('Content-Type', 'application/zip');
+    response.setHeader('Content-Length', String(file.sizeBytes));
+    response.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(file.fileName)}`);
+    createReadStream(file.path).pipe(response);
   }
 
   @Capability('workspace.manage')

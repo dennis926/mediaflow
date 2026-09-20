@@ -81,3 +81,32 @@ describe('CryptoService 加解密行为（类别 7）', () => {
     expect(other.decrypt(cipher)).toBeNull();
   });
 });
+
+describe('CryptoService HMAC 签名（导出下载令牌，B0.4 第 3 步）', () => {
+  it('同一载荷签名稳定，且可用 verifyHmac 校验', () => {
+    const service = serviceOf({ SETTINGS_ENCRYPTION_KEY: SETTINGS_KEY });
+    const payload = 'job-1|w-1|1730000000';
+    const signature = service.hmac(payload);
+
+    expect(signature).toMatch(/^[0-9a-f]{64}$/);
+    expect(service.hmac(payload)).toBe(signature);
+    expect(service.verifyHmac(payload, signature)).toBe(true);
+  });
+
+  it('载荷被篡改或签名错误 → 校验失败', () => {
+    const service = serviceOf({ SETTINGS_ENCRYPTION_KEY: SETTINGS_KEY });
+    const signature = service.hmac('job-1|w-1|1730000000');
+
+    expect(service.verifyHmac('job-2|w-1|1730000000', signature)).toBe(false);
+    expect(service.verifyHmac('job-1|w-1|1730000000', 'deadbeef')).toBe(false);
+    expect(service.verifyHmac('job-1|w-1|1730000000', '')).toBe(false);
+  });
+
+  it('不同主密钥签出的令牌互不通过（轮换后旧令牌失效）', () => {
+    const first = serviceOf({ SETTINGS_ENCRYPTION_KEY: SETTINGS_KEY });
+    const other = serviceOf({ SETTINGS_ENCRYPTION_KEY: 'T'.repeat(44) });
+    const payload = 'job-1|w-1|1730000000';
+
+    expect(other.verifyHmac(payload, first.hmac(payload))).toBe(false);
+  });
+});

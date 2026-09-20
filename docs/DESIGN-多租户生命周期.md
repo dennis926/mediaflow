@@ -521,3 +521,39 @@ purge 是唯一不可逆的操作，**必须先在演练工作区上跑通**，�
 1. 破坏性用例（归档/软删/恢复/删除）**只能**作用在本次创建的探针工作区上，绝不碰 `slug='default'`；
 2. 创建测试用户/工作区时，先确认**调用者令牌的作用域**，因为用户会被自动加入该作用域对应的工作区；
 3. 任何会改变工作区状态的用例，都要在之后核对默认工作区仍为 `active`。
+
+### 12.7 第 3 步实施记录：租户数据导出 + 最后一个工作区软保护（2026-09-21）
+
+**导出接口（4 个，均带 `@WorkspaceLifecycle()` 与 `workspace.export` 能力点）**
+
+| 接口 | 行为 |
+| --- | --- |
+| `POST /api/workspaces/:id/export` | 申请导出 → **201** `{jobId, status:'queued'}`；同工作区已有进行中任务 → **409**；预估超 5GB → **413**（拒绝，不截断）；权限=目标工作区 owner/admin（非成员 404） |
+| `GET /api/workspaces/:id/export/:jobId` | 查询进度/结果（progress、sizeBytes、sha256 校验和、expiresAt） |
+| `POST /api/workspaces/:id/export/:jobId/link` | 申请一次性下载链接（**200**，15 分钟有效） |
+| `GET /api/workspaces/:id/export/:jobId/download?token=…` | 凭令牌下载（公开路由：令牌即鉴权，因此工作区被软删/清除后产物仍可取）；令牌**用过即失效**（Redis SETNX） |
+
+**ZIP 结构**：`manifest.json`（工作区信息、各表行数、逐文件 sha256、总大小、脱敏列清单、整体 checksum）、`README.txt`（中文说明）、
+`data/*.jsonl`（11 张表）、`media/*`（素材二进制，`includeMedia=false` 时为空）、`audit/audit_logs.jsonl`（可关）。
+**脱敏**：`social_accounts` 的 `access_token` / `refresh_token` 一律替换为占位串——导出包会被下载到本地，绝不能带平台令牌。
+
+**实现要点**：素材以文件流进包（`createReadStream` + `jszip.generateNodeStream({streamFiles:true})` + `pipeline`），
+写盘同时计算 ZIP 的 sha256；导出任务异步执行（`queued → running → completed | failed`），完成后写 `workspace.export.completed` 审计。
+**清理**：每日 4 点 `WorkspaceExportCleanupTask` 删除 7 天前的产物并写 `workspace.export.expired`（E2E 用例 9 实测）。
+
+**最后一个工作区的软保护（决策 2）**：`DELETE /workspaces/:id` 的 DTO 新增 `confirmLastWorkspace`。
+若删除后租户内不再有 active/archived 工作区且未确认 → **400** 并给出提示；确认后照常软删，额外写审计
+`workspace.soft_delete.last_workspace`（payload `wasLast: true`）并发出站内 + 外部通知（含恢复方式与到期时间）。
+**不做硬阻止**：SaaS 场景下用户可能确实要关停账号，硬阻止会把人卡死；软保护 = 知情 + 留痕 + 可恢复。
+
+**测试**：`apps/api/test/workspace-export.e2e.spec.ts`（10 例）——申请/轮询完成、并发 409、权限 403、跨租户 404、
+一次性链接（首次 200 / 二次 401）、ZIP 结构与 manifest 校验（逐文件 sha256、行数与导出前快照一致、凭证脱敏）、
+5GB 拒绝（插入 6GB 的素材行后申请 → 413 且不产生任务）、用真实签名密钥自签过期令牌 → 401、到期清理 + 审计、审计链四件套齐全。
+单元：`crypto.service.spec.ts` 增 3 例（HMAC 签名/校验/换钥失效）、`workspace-lifecycle.service.spec.ts` 增 4 例（最后一个工作区）。
+
+**E2E 骨架清理补齐**：此前只清业务表，`uploads/media` 与 `uploads/exports` 会越攒越多（本次一次性清掉 6 个残留素材、
+3 个导出任务、9 个空目录）。现 harness 会在 teardown 清理"本次运行创建的"素材行 + 文件、导出任务 + 产物目录。
+
+**生产真实导出验证（演练工作区，验证后已清理）**：申请 → 完成（5233 字节，ZIP sha256 `4d30822eb62c…`）→ 一次性链接下载 **200**、
+二次使用 **401** → 解压：13 个 data/media/audit 条目 + manifest + README，**逐文件 sha256 全部一致**，
+`social_accounts.jsonl` 无令牌 → 库内行数与 manifest 相同（contents 1 / media_assets 1）→ 审计链 requested → completed → downloaded 完整。

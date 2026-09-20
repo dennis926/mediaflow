@@ -1,4 +1,6 @@
 import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { existsSync, rmSync, unlinkSync } from 'node:fs';
+import { join } from 'node:path';
 import { Test } from '@nestjs/testing';
 import cookieParser from 'cookie-parser';
 import type Redis from 'ioredis';
@@ -41,7 +43,49 @@ export interface E2eHarness {
   close(): Promise<void>;
 }
 
+/**
+ * 跑 E2E 前的**硬检查**：默认工作区必须是 active。
+ *
+ * 背景：E2E 直接跑在生产库上（见 docs/TECHDEBT-E2E隔离.md）。2026-09-19 的一次用例失误
+ * 把默认工作区软删了，导致整套用例大面积 404。此后每个套件在启动应用**之前**先做这项检查：
+ * 默认工作区不是 active 就直接拒绝运行，避免"在坏地基上继续跑测试"把问题放大。
+ *
+ * 用独立的 pg 连接（不启动 Nest 应用）以便尽早失败。绕过方式（仅本地排障）：E2E_SKIP_PRECONDITION=1。
+ */
+export async function assertDefaultWorkspaceIsActive(): Promise<void> {
+  if (process.env.E2E_SKIP_PRECONDITION === '1') return;
+  const { Client } = await import('pg');
+  const client = new Client({
+    host: process.env.DB_HOST ?? '127.0.0.1',
+    port: Number(process.env.DB_PORT ?? 5432),
+    database: process.env.DB_NAME ?? 'mediaflow',
+    user: process.env.DB_USER ?? 'mediaflow',
+    password: process.env.DB_PASSWORD ?? 'mediaflow_dev',
+  });
+  await client.connect();
+  try {
+    const { rows } = await client.query(
+      "SELECT name, status FROM workspaces WHERE slug = 'default' ORDER BY created_at LIMIT 1",
+    );
+    const row = rows[0] as { name: string; status: string } | undefined;
+    if (!row) {
+      throw new Error('E2E 拒绝运行：找不到默认工作区（slug=default），请先执行 pnpm seed。');
+    }
+    if (row.status !== 'active') {
+      throw new Error(
+        `E2E 拒绝运行：默认工作区「${row.name}」当前状态为 ${row.status}（应为 active）。` +
+          '请先用 POST /api/workspaces/:id/restore（或直接把 workspaces.status 改回 active）恢复后再跑测试。',
+      );
+    }
+  } finally {
+    await client.end();
+  }
+}
+
 export async function createHarness(titlePrefix: string, options: { requireApproval?: boolean } = {}): Promise<E2eHarness> {
+  // 任何套件在启动应用之前都先过这道闸门
+  await assertDefaultWorkspaceIsActive();
+
   // Highest-priority settings channel: overrides the database for this process only.
   process.env.MEDIAFLOW_SETTING_OVERRIDE_AI_PROVIDER = 'mock';
   process.env.MEDIAFLOW_SETTING_OVERRIDE_AI_MODEL = 'mock-model';
@@ -144,6 +188,45 @@ export async function createHarness(titlePrefix: string, options: { requireAppro
         await dataSource.query('DELETE FROM workspace_members WHERE user_id = $1', [userId]);
         await dataSource.query('DELETE FROM users WHERE id = $1', [userId]);
       }
+      /**
+       * 上传的素材与导出产物也要清：此前只删业务表，导致 uploads/media 与 uploads/exports 越攒越多
+       * （2026-09-21 一次性清掉 6 个残留素材 + 3 个导出任务 + 9 个空目录，故在这里补齐）。
+       * 只处理"本次测试开始之后创建"的行，避免碰到真实数据。
+       */
+      const mediaRows: Array<{ id: string; stored_name: string }> = await dataSource.query(
+        'SELECT id, stored_name FROM media_assets WHERE created_at >= $1',
+        [startedAt],
+      );
+      const mediaDir = join(process.cwd(), '../../uploads/media');
+      for (const row of mediaRows) {
+        const file = join(mediaDir, row.stored_name);
+        try {
+          if (existsSync(file)) unlinkSync(file);
+        } catch {
+          // 文件已不在也无所谓，继续删行
+        }
+      }
+      if (mediaRows.length > 0) {
+        await dataSource.query('DELETE FROM media_assets WHERE created_at >= $1', [startedAt]);
+      }
+
+      // 导出任务与产物目录（本次运行创建的）
+      const exportJobs: Array<{ workspace_id: string }> = await dataSource.query(
+        'SELECT workspace_id FROM workspace_export_jobs WHERE created_at >= $1',
+        [startedAt],
+      );
+      if (exportJobs.length > 0) {
+        await dataSource.query('DELETE FROM workspace_export_jobs WHERE created_at >= $1', [startedAt]);
+        for (const workspaceId of new Set(exportJobs.map((row) => row.workspace_id))) {
+          const dir = join(process.cwd(), '../../uploads/exports', workspaceId);
+          try {
+            if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
+          } catch {
+            // 目录清理失败不影响测试结论
+          }
+        }
+      }
+
       // 测试工作区（先删成员再删工作区；users.workspace_id 对 workspaces 是 CASCADE，测试账号已先删）
       for (const workspaceId of harness.createdWorkspaceIds) {
         await dataSource.query('DELETE FROM workspace_members WHERE workspace_id = $1', [workspaceId]);
