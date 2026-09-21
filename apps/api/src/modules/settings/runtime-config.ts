@@ -1,3 +1,4 @@
+import { currentWorkspaceScope } from '../../common/workspace-context.store';
 /**
  * 运行时配置（可配置化中心）。
  *
@@ -407,9 +408,48 @@ const snapshot: RuntimeConfig = {
   },
 };
 
-/** 全局同步读取当前配置（默认值 + 后台覆盖）。 */
+/**
+ * 按工作区缓存的运行时快照（B0.5 租户级配置隔离）。
+ *
+ * 为什么需要它：`snapshot` 是**进程级单例**，而 `refreshRuntimeConfig()` 在"保存设置"时被调用。
+ * 之前任何工作区保存设置都会覆盖这个单例，于是 A 公司改了自己的权限矩阵/上传上限，
+ * 会**立刻影响 B 公司**（多租户下的越权面）。
+ *
+ * 现在：每个工作区各留一份快照，`runtime()` 按当前请求/任务的工作区作用域取；
+ * 作用域缺失时（启动、全局后台任务）回退到 `fallbackWorkspaceId` 那一份——它由启动时
+ * 解析到的默认工作区设定，行为与改造前完全一致。
+ */
+const workspaceSnapshots = new Map<string, RuntimeConfig>();
+let fallbackWorkspaceId: string | null = null;
+
+/**
+ * 同步读取当前配置：优先当前工作区的快照 → 兜底工作区的快照 → 平台默认值（代码默认 + env）。
+ *
+ * 之所以必须是同步：79 处业务代码直接 `runtime()`，改成 async 会牵动整个代码库。
+ * 工作区作用域本身是同步可读的（AsyncLocalStorage，见 workspace-context.store.ts）。
+ */
 export function runtime(): RuntimeConfig {
+  const scope = currentWorkspaceScope();
+  if (scope) {
+    const scoped = workspaceSnapshots.get(scope.workspaceId);
+    if (scoped) return scoped;
+  }
+  if (fallbackWorkspaceId) {
+    const fallback = workspaceSnapshots.get(fallbackWorkspaceId);
+    if (fallback) return fallback;
+  }
   return snapshot;
+}
+
+/** 当前工作区快照是否存在（排查"配置没生效"时用）。 */
+export function hasWorkspaceRuntimeConfig(workspaceId: string): boolean {
+  return workspaceSnapshots.has(workspaceId);
+}
+
+/** 工作区被彻底清除后丢弃它的快照，避免内存里一直留着死租户的配置。 */
+export function dropWorkspaceRuntimeConfig(workspaceId: string): void {
+  workspaceSnapshots.delete(workspaceId);
+  if (fallbackWorkspaceId === workspaceId) fallbackWorkspaceId = null;
 }
 
 function num(raw: string | undefined, fallback: number, min = 0, max = Number.MAX_SAFE_INTEGER): number {
@@ -456,8 +496,33 @@ function parseJson<T>(raw: string | undefined, fallback: T, onError?: (message: 
 /**
  * 用扁平化的设置快照刷新运行时配置。传入 undefined 的键表示沿用默认值。
  */
-export function applyRuntimeConfig(flat: Record<string, string | undefined>, onError?: (message: string) => void): void {
-  snapshot.site = {
+export function applyRuntimeConfig(
+  flat: Record<string, string | undefined>,
+  onError?: (message: string) => void,
+  /**
+   * 作用到哪个工作区：给了就只更新该工作区的快照（B0.5 起保存设置的正常路径）；
+   * 不给则更新平台默认快照（启动时的 env/默认值，以及单元测试里的行为覆盖）。
+   */
+  workspaceId?: string | null,
+): void {
+  const built = buildRuntimeConfig(flat, onError);
+  if (workspaceId) {
+    workspaceSnapshots.set(workspaceId, built);
+    if (!fallbackWorkspaceId) fallbackWorkspaceId = workspaceId;
+    return;
+  }
+  Object.assign(snapshot, built);
+}
+
+/** 显式设定"没有作用域时"使用哪个工作区的快照（启动时由 SettingsService 设定为默认工作区）。 */
+export function setFallbackWorkspace(workspaceId: string | null): void {
+  fallbackWorkspaceId = workspaceId;
+}
+
+/** 把扁平配置构建成一份独立的运行时配置对象（内部使用）。 */
+function buildRuntimeConfig(flat: Record<string, string | undefined>, onError?: (message: string) => void): RuntimeConfig {
+  const built = defaultConfigSnapshot();
+  built.site = {
     name: text(flat.SITE_NAME, DEFAULT_SITE.name),
     tagline: text(flat.SITE_TAGLINE, DEFAULT_SITE.tagline),
     company: text(flat.COMPANY_NAME, DEFAULT_SITE.company),
@@ -468,7 +533,7 @@ export function applyRuntimeConfig(flat: Record<string, string | undefined>, onE
     aiDisclosureSuffix: text(flat.AI_DISCLOSURE_SUFFIX, DEFAULT_SITE.aiDisclosureSuffix),
   };
 
-  snapshot.notify = {
+  built.notify = {
     minLevel: ((): NotifyRuntimeConfig['minLevel'] => {
       const value = (flat.NOTIFY_MIN_LEVEL ?? 'warning').trim();
       return (['info', 'warning', 'error'] as const).includes(value as never) ? (value as NotifyRuntimeConfig['minLevel']) : 'warning';
@@ -497,7 +562,7 @@ export function applyRuntimeConfig(flat: Record<string, string | undefined>, onE
     accountExpiryWarnDays: num(flat.ACCOUNT_EXPIRY_WARN_DAYS, DEFAULT_NOTIFY_RUNTIME.accountExpiryWarnDays, 0, 90),
   };
 
-  snapshot.media = {
+  built.media = {
     storageDir: text(flat.MEDIA_STORAGE_DIR, DEFAULT_MEDIA_RUNTIME.storageDir),
     tmpDir: text(flat.MEDIA_TMP_DIR, DEFAULT_MEDIA_RUNTIME.tmpDir),
     maxConcurrentUploads: num(flat.MEDIA_MAX_CONCURRENT_UPLOADS, DEFAULT_MEDIA_RUNTIME.maxConcurrentUploads, 0, 50),
@@ -515,7 +580,7 @@ export function applyRuntimeConfig(flat: Record<string, string | undefined>, onE
     contentHistoryLimit: num(flat.CONTENT_HISTORY_LIMIT, DEFAULT_MEDIA_RUNTIME.contentHistoryLimit, 0, 200),
   };
 
-  snapshot.knowledge = {
+  built.knowledge = {
     injectLimit: num(flat.KB_INJECT_LIMIT, DEFAULT_KNOWLEDGE_RUNTIME.injectLimit, 1, 20),
     chunkSize: num(flat.KB_CHUNK_SIZE, DEFAULT_KNOWLEDGE_RUNTIME.chunkSize, 200, 5000),
     chunkOverlap: num(flat.KB_CHUNK_OVERLAP, DEFAULT_KNOWLEDGE_RUNTIME.chunkOverlap, 0, 2000),
@@ -529,7 +594,7 @@ export function applyRuntimeConfig(flat: Record<string, string | undefined>, onE
     ocrTimeoutMs: num(flat.KB_OCR_TIMEOUT_MS, DEFAULT_KNOWLEDGE_RUNTIME.ocrTimeoutMs, 5000, 300_000),
   };
 
-  snapshot.ai = {
+  built.ai = {
     systemPrompt: text(flat.AI_SYSTEM_PROMPT, DEFAULT_AI_RUNTIME.systemPrompt),
     platformGuidance: parseJson<Record<string, string>>(flat.AI_PLATFORM_GUIDANCE, DEFAULT_AI_RUNTIME.platformGuidance, onError),
     temperature: float(flat.AI_TEMPERATURE, DEFAULT_AI_RUNTIME.temperature, 0, 2),
@@ -542,12 +607,12 @@ export function applyRuntimeConfig(flat: Record<string, string | undefined>, onE
     dailyTokenQuota: num(flat.AI_DAILY_TOKEN_QUOTA, DEFAULT_AI_RUNTIME.dailyTokenQuota, 0, 1_000_000_000),
   };
 
-  snapshot.workspace = {
+  built.workspace = {
     softDeleteRetentionDays: num(flat.WORKSPACE_SOFT_DELETE_RETENTION_DAYS, DEFAULT_WORKSPACE_RUNTIME.softDeleteRetentionDays, 7, 365),
     purgeBackupRetentionDays: num(flat.WORKSPACE_PURGE_BACKUP_RETENTION_DAYS, DEFAULT_WORKSPACE_RUNTIME.purgeBackupRetentionDays, 30, 3650),
   };
 
-  snapshot.monitor = {
+  built.monitor = {
     enabled: bool(flat.MONITOR_ENABLED, DEFAULT_MONITOR_RUNTIME.enabled),
     intervalSeconds: num(flat.MONITOR_INTERVAL_SECONDS, DEFAULT_MONITOR_RUNTIME.intervalSeconds, 60, 3600),
     queueLengthThreshold: num(flat.MONITOR_QUEUE_LENGTH_THRESHOLD, DEFAULT_MONITOR_RUNTIME.queueLengthThreshold, 1, 1_000_000),
@@ -563,7 +628,7 @@ export function applyRuntimeConfig(flat: Record<string, string | undefined>, onE
   };
 
   const parsedRules = parseJson<ComplianceRule[]>(flat.COMPLIANCE_RULES, DEFAULT_COMPLIANCE_RULES, onError);
-  snapshot.compliance =
+  built.compliance =
     Array.isArray(parsedRules) && parsedRules.length > 0
       ? parsedRules
           .filter((rule) => rule && Array.isArray(rule.terms) && rule.terms.length > 0)
@@ -575,18 +640,18 @@ export function applyRuntimeConfig(flat: Record<string, string | undefined>, onE
             penalty: Number.isFinite(rule.penalty) ? Number(rule.penalty) : 10,
           }))
       : DEFAULT_COMPLIANCE_RULES.map((rule) => ({ ...rule, terms: [...rule.terms] }));
-  if (snapshot.compliance.length === 0) {
-    snapshot.compliance = DEFAULT_COMPLIANCE_RULES.map((rule) => ({ ...rule, terms: [...rule.terms] }));
+  if (built.compliance.length === 0) {
+    built.compliance = DEFAULT_COMPLIANCE_RULES.map((rule) => ({ ...rule, terms: [...rule.terms] }));
   }
 
-  snapshot.auth = {
+  built.auth = {
     accessExpires: text(flat.AUTH_ACCESS_EXPIRES, DEFAULT_AUTH_RUNTIME.accessExpires),
     refreshExpires: text(flat.AUTH_REFRESH_EXPIRES, DEFAULT_AUTH_RUNTIME.refreshExpires),
   };
 
   const parsedMatrix = parseJson<Record<string, string[]>>(flat.PERMISSION_MATRIX, DEFAULT_PERMISSION_MATRIX_RUNTIME, onError);
   const parsedLabels = parseJson<Record<string, string>>(flat.ROLE_LABELS, DEFAULT_ROLE_LABELS_RUNTIME, onError);
-  snapshot.permissions = {
+  built.permissions = {
     matrix:
       parsedMatrix && typeof parsedMatrix === 'object' && Object.keys(parsedMatrix).length > 0
         ? Object.fromEntries(
@@ -602,7 +667,7 @@ export function applyRuntimeConfig(flat: Record<string, string | undefined>, onE
         : { ...DEFAULT_ROLE_LABELS_RUNTIME },
   };
 
-  snapshot.publish = {
+  built.publish = {
     streamName: text(flat.PUBLISH_STREAM_NAME, DEFAULT_PUBLISH_RUNTIME.streamName),
     groupName: text(flat.PUBLISH_GROUP_NAME, DEFAULT_PUBLISH_RUNTIME.groupName),
     maxLen: num(flat.PUBLISH_STREAM_MAXLEN, DEFAULT_PUBLISH_RUNTIME.maxLen, 1_000, 1_000_000),
@@ -616,6 +681,7 @@ export function applyRuntimeConfig(flat: Record<string, string | undefined>, onE
     workerEnabled: bool(flat.PUBLISH_WORKER_ENABLED, DEFAULT_PUBLISH_RUNTIME.workerEnabled),
     stuckMinutes: num(flat.PUBLISH_STUCK_MINUTES, DEFAULT_PUBLISH_RUNTIME.stuckMinutes, 1, 1440),
   };
+  return built;
 }
 
 /** 设置页用的默认值快照（导出配置、生成文档时用）。 */

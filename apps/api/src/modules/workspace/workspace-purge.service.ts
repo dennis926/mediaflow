@@ -14,6 +14,7 @@ import { runtime } from '../settings/runtime-config';
 import { WorkspaceExportJob } from './entities/workspace-export-job.entity';
 import { WorkspacePurgeBatch } from './entities/workspace-purge-batch.entity';
 import { WorkspaceService } from './workspace.service';
+import { SettingsService } from '../settings/settings.service';
 
 export interface PurgeResult {
   purgeBatchId: string;
@@ -116,6 +117,7 @@ export class WorkspacePurgeService {
     private readonly channels: NotificationChannelService,
     private readonly sessions: AuthSessionService,
     private readonly config: ConfigService,
+    private readonly settings: SettingsService,
   ) {}
 
   /**
@@ -222,6 +224,8 @@ export class WorkspacePurgeService {
       );
 
       await this.sessions.invalidateWorkspace(workspaceId);
+      // B0.5：同时丢弃该工作区的运行时配置快照，避免内存里长期留着已清除租户的配置
+      this.settings.forgetWorkspace(workspaceId);
       await this.audit
         .record({
           action: 'workspace.purge_completed',

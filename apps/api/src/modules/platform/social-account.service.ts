@@ -51,11 +51,18 @@ export class SocialAccountService {
     const rows = await this.accounts
       .createQueryBuilder('account')
       .addSelect(['account.accessToken'])
-      .where('account.workspaceId = :workspaceId', { workspaceId: scope.workspaceId })
+      .where('account.workspaceId = :workspaceId AND account.tenantId = :tenantId', {
+        workspaceId: scope.workspaceId,
+        tenantId: scope.tenantId,
+      })
       .andWhere(platform ? 'account.platformCode = :platform' : '1=1', platform ? { platform } : {})
       .orderBy('account.createdAt', 'DESC')
       .getMany();
-    const platformRows = await this.platforms.find();
+    // B0.5：平台字典是"每个工作区一份"，这里必须按工作区（+租户）过滤。
+    // 原先 `this.platforms.find()` 取全表，会把别的工作区/别家公司的平台行也拿进来做展示映射。
+    const platformRows = await this.platforms.find({
+      where: { tenantId: scope.tenantId, workspaceId: scope.workspaceId },
+    });
     return rows.map((row) => this.toView(row, platformRows));
   }
 
@@ -175,7 +182,11 @@ export class SocialAccountService {
     const account = await this.accounts
       .createQueryBuilder('account')
       .addSelect(['account.accessToken', 'account.refreshToken'])
-      .where('account.id = :id', { id: accountId })
+      .where('account.id = :id AND account.workspaceId = :workspaceId AND account.tenantId = :tenantId', {
+        id: accountId,
+        workspaceId: (await this.workspaceContext.current()).workspaceId,
+        tenantId: (await this.workspaceContext.current()).tenantId,
+      })
       .getOne();
     if (!account) throw new NotFoundException('平台账号不存在');
     return {
@@ -197,7 +208,10 @@ export class SocialAccountService {
     const rows = await this.accounts
       .createQueryBuilder('account')
       .addSelect(['account.refreshToken'])
-      .where('account.workspaceId = :workspaceId', { workspaceId: scope.workspaceId })
+      .where('account.workspaceId = :workspaceId AND account.tenantId = :tenantId', {
+        workspaceId: scope.workspaceId,
+        tenantId: scope.tenantId,
+      })
       .andWhere('account.refreshToken IS NOT NULL')
       .andWhere('account.tokenExpiresAt IS NOT NULL')
       .andWhere('account.tokenExpiresAt <= :threshold', { threshold })

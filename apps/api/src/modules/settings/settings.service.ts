@@ -4,9 +4,10 @@ import { Repository } from 'typeorm';
 import { AuditService } from '../../audit/audit.service';
 import { CryptoService } from '../../common/crypto.service';
 import { WorkspaceContextService } from '../../common/workspace-context.service';
+import { currentWorkspaceScope } from '../../common/workspace-context.store';
 import { SystemSetting } from './entities/system-setting.entity';
 import { SETTING_BY_KEY, SETTING_DEFINITIONS, SETTING_GROUP_LABELS, SettingGroup } from './settings.registry';
-import { applyRuntimeConfig, runtime } from './runtime-config';
+import { applyRuntimeConfig, dropWorkspaceRuntimeConfig, runtime, setFallbackWorkspace } from './runtime-config';
 
 export interface SettingView {
   key: string;
@@ -43,7 +44,15 @@ export class SettingsService implements OnModuleInit {
   private readonly logger = new Logger(SettingsService.name);
   /** Bumped on every write so cached consumers (e.g. the AI provider) rebuild. */
   private version = 1;
+  /**
+   * 配置值缓存。**键必须含租户与工作区**：早期只按 key 缓存，多工作区场景下
+   * A 公司读到的会是 B 公司（或默认工作区）的值 —— 涉及 AI 密钥这类敏感项时是越权读取（B0.5 修复）。
+   */
   private readonly cache = new Map<string, string | null>();
+
+  private cacheKey(tenantId: string, workspaceId: string, key: string): string {
+    return `${tenantId}::${workspaceId}::${key}`;
+  }
 
   constructor(
     @InjectRepository(SystemSetting) private readonly repository: Repository<SystemSetting>,
@@ -77,9 +86,24 @@ export class SettingsService implements OnModuleInit {
     return values;
   }
 
-  /** 把当前配置刷进运行时快照；保存设置后会自动调用。 */
+  /**
+   * 把当前工作区的配置刷进**它自己那一份**运行时快照（B0.5）。
+   *
+   * 启动时（没有请求作用域）解析到的是默认工作区：此时额外把它设为"无作用域时的兜底"，
+   * 这样队列 worker、cron 任务读到的仍然是运维在后台配的那一套（与改造前行为一致），
+   * 而其它工作区保存设置只影响自己的工作区，不再互相覆盖。
+   */
   async refreshRuntimeConfig(): Promise<void> {
-    applyRuntimeConfig(await this.flat(), (message) => this.logger.warn(`配置解析失败：${message}`));
+    const scope = await this.workspaceContext.current();
+    const flat = await this.flat();
+    applyRuntimeConfig(flat, (message) => this.logger.warn(`配置解析失败：${message}`), scope.workspaceId);
+    if (!currentWorkspaceScope()) setFallbackWorkspace(scope.workspaceId);
+    this.logger.debug(`运行时配置已刷新：工作区 ${scope.workspaceId}`);
+  }
+
+  /** 工作区被彻底清除时调用：丢弃它的运行时快照（避免内存里长期留着死租户的配置）。 */
+  forgetWorkspace(workspaceId: string): void {
+    dropWorkspaceRuntimeConfig(workspaceId);
   }
 
   /** Effective value: database override, then environment, then undefined. */
@@ -92,10 +116,14 @@ export class SettingsService implements OnModuleInit {
     const override = process.env[`MEDIAFLOW_SETTING_OVERRIDE_${key}`];
     if (override !== undefined) return override;
 
-    if (this.cache.has(key)) return this.cache.get(key) ?? null;
     const definition = SETTING_BY_KEY.get(key);
     const scope = await this.workspaceContext.current();
-    const row = await this.repository.findOne({ where: { workspaceId: scope.workspaceId, key } });
+    const cacheKey = this.cacheKey(scope.tenantId, scope.workspaceId, key);
+    if (this.cache.has(cacheKey)) return this.cache.get(cacheKey) ?? null;
+    // 租户 + 工作区双条件：只按工作区过滤时，构造出的"同工作区但属别的租户"的行会被读到（B0.5 修复）
+    const row = await this.repository.findOne({
+      where: { tenantId: scope.tenantId, workspaceId: scope.workspaceId, key },
+    });
 
     let value: string | null = null;
     if (row && row.value !== null && row.value !== '') {
@@ -104,7 +132,7 @@ export class SettingsService implements OnModuleInit {
       const fromEnv = process.env[definition.envKey];
       value = fromEnv && fromEnv.trim() !== '' ? fromEnv : null;
     }
-    this.cache.set(key, value);
+    this.cache.set(cacheKey, value);
     return value;
   }
 
@@ -122,7 +150,7 @@ export class SettingsService implements OnModuleInit {
 
   async list(): Promise<SettingGroupView[]> {
     const scope = await this.workspaceContext.current();
-    const rows = await this.repository.find({ where: { workspaceId: scope.workspaceId } });
+    const rows = await this.repository.find({ where: { tenantId: scope.tenantId, workspaceId: scope.workspaceId } });
     const byKey = new Map(rows.map((row) => [row.key, row]));
 
     const groups = new Map<SettingGroup, SettingView[]>();
@@ -174,7 +202,7 @@ export class SettingsService implements OnModuleInit {
 
       const trimmed = item.value?.trim() ?? '';
       const existing = await this.repository.findOne({
-        where: { workspaceId: scope.workspaceId, key: item.key },
+        where: { tenantId: scope.tenantId, workspaceId: scope.workspaceId, key: item.key },
       });
 
       if (trimmed === '') {

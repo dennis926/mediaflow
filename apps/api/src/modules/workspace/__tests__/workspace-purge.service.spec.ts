@@ -9,6 +9,7 @@ import type { WorkspaceExportJob } from '../entities/workspace-export-job.entity
 import type { WorkspacePurgeBatch } from '../entities/workspace-purge-batch.entity';
 import { BACKUP_TABLES, WorkspacePurgeService } from '../workspace-purge.service';
 import type { WorkspaceService } from '../workspace.service';
+import type { SettingsService } from '../../settings/settings.service';
 
 /**
  * B0.4 第 4 步：永久清除的前置校验与"备份失败即中止"。
@@ -82,8 +83,11 @@ function build(options: {
   const invalidateWorkspace = vi.fn(async () => 1);
   const sessions = { invalidateWorkspace } as unknown as AuthSessionService;
   const config = { get: vi.fn(() => undefined) } as unknown as ConfigService;
+  // B0.5：清除后要丢弃该工作区的运行时配置快照
+  const forgetWorkspace = vi.fn();
+  const settings = { forgetWorkspace } as unknown as SettingsService;
 
-  const service = new WorkspacePurgeService(batches, exportJobs, dataSource, workspaces, audit, channels, sessions, config);
+  const service = new WorkspacePurgeService(batches, exportJobs, dataSource, workspaces, audit, channels, sessions, config, settings);
   if (options.backupFails) {
     // 备份失败场景：模拟"备份目录不可写"
     vi.spyOn(service, 'backupWorkspace').mockRejectedValue(new Error('备份目录不可写（EACCES）'));
