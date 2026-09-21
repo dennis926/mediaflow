@@ -1,0 +1,69 @@
+[
+ {
+  "action": "prescript",
+  "name": "注入登录态",
+  "source": "localStorage.setItem('mediaflow.token', '<登录后用 API 取得的 accessToken>');localStorage.setItem('mediaflow.refreshToken', '<refreshToken>');"
+ },
+ {
+  "action": "goto",
+  "name": "工作区页",
+  "url": "https://auto.liangyijianye.cn/workspaces",
+  "settleMs": 8000
+ },
+ {
+  "action": "eval",
+  "name": "关键元素",
+  "js": "(() => { const card=document.querySelector('[data-testid=workspace-lifecycle]'); return { url: location.href, card: !!card, status: document.querySelector('[data-testid=lifecycle-status]')?.textContent, exportPanel: !!document.querySelector('[data-testid=workspace-export-panel]'), exportNotice: document.body.innerText.includes('导出产物将在 7 天后自动删除'), buttons: [...document.querySelectorAll('button')].map(b=>b.textContent.trim()).filter(Boolean).slice(0,12) }; })()"
+ },
+ {
+  "action": "screenshot",
+  "name": "工作区页整体",
+  "path": "/tmp/ui1_workspaces.png"
+ },
+ {
+  "action": "eval",
+  "name": "打开删除确认框",
+  "js": "(() => { const b=[...document.querySelectorAll('button')].find(x=>x.textContent.trim()==='删除工作区'); if(!b) return 'no-button'; b.click(); return 'clicked'; })()"
+ },
+ {
+  "action": "sleep",
+  "seconds": 2
+ },
+ {
+  "action": "eval",
+  "name": "确认框关键元素",
+  "js": "(() => { return { dialog: !!document.querySelector('[role=dialog]'), warning: !!document.querySelector('[data-testid=last-workspace-warning]'), checkbox: !!document.querySelector('[data-testid=last-workspace-ack] input'), exitNote: document.querySelector('[data-testid=purge-exit-note]')?.textContent?.trim(), confirmDisabled: [...document.querySelectorAll('[role=dialog] button')].find(x=>x.textContent.includes('确认删除'))?.disabled }; })()"
+ },
+ {
+  "action": "screenshot",
+  "name": "删除确认框",
+  "path": "/tmp/ui2_delete_dialog.png"
+ },
+ {
+  "action": "eval",
+  "name": "关闭确认框",
+  "js": "(() => { const b=[...document.querySelectorAll('[role=dialog] button')].find(x=>x.textContent.trim()==='取消'); b?.click(); return 'closed'; })()"
+ },
+ {
+  "action": "sleep",
+  "seconds": 1.5
+ },
+ {
+  "action": "eval",
+  "name": "打开归档确认框",
+  "js": "(() => { const b=[...document.querySelectorAll('button')].find(x=>x.textContent.includes('归档工作区')); if(!b) return 'no-button'; b.click(); return 'clicked'; })()"
+ },
+ {
+  "action": "sleep",
+  "seconds": 2
+ },
+ {
+  "action": "screenshot",
+  "name": "归档确认框",
+  "path": "/tmp/ui3_archive_dialog.png"
+ },
+ {
+  "action": "errors",
+  "name": "控制台错误"
+ }
+]
