@@ -82,14 +82,38 @@ fi
 if [[ $CONFIG_ONLY == 1 ]]; then
   echo "-- 3/4. 运行时检查（单实例、服务与健康）——仅配置模式下跳过"
 else
-  echo "-- 3. 单实例约束（发布 Worker 只能有一个消费者进程）"
-  consumers="$(redis-cli XINFO CONSUMERS mediaflow:publish:tasks publish-workers 2>/dev/null | grep -c '^name' || true)"
-  if [[ "${consumers:-0}" -le 1 ]]; then
-    pass "队列消费者数 $consumers（≤1，单实例约束）"
+  echo "-- 3. 单实例约束（发布 Worker 只能有一个**在跑**的消费者）"
+  # 口径说明：消费者记录会随进程退出而残留（应用下次启动会自行清理，见 PublishWorker.pruneIdleConsumers）；
+  # 残留记录 pending=0 且长时间 idle，不会重复消费。只有 pending>0 或近 120 秒内仍在拉取的消费者才算"真的在跑"。
+  # 若把残留也算作并发，会出现"预检拦住重启、而重启恰好是清理残留的手段"的死锁（2026-09-21 实测遇到）。
+  # 用 --json 解析，避免逐行文本解析错位。
+  consumer_stats="$(redis-cli --json XINFO CONSUMERS mediaflow:publish:tasks publish-workers 2>/dev/null | python3 -c "
+import json,sys
+try:
+    rows=json.load(sys.stdin)
+except Exception:
+    print('0 0'); raise SystemExit
+active=stale=0
+for entry in rows:
+    if isinstance(entry, dict):
+        pending=int(entry.get('pending',0)); idle=int(entry.get('idle',10**9))
+    else:
+        data=dict(zip(entry[0::2], entry[1::2])); pending=int(data.get('pending',0)); idle=int(data.get('idle',10**9))
+    if pending>0 or idle<120000: active+=1
+    else: stale+=1
+print(active, stale)
+" 2>/dev/null || echo "0 0")"
+  active_consumers="${consumer_stats%% *}"
+  stale_consumers="${consumer_stats##* }"
+  if [[ "${active_consumers:-0}" -le 1 ]]; then
+    pass "在跑的消费者 ${active_consumers} 个（≤1，单实例约束）"
   elif [[ $STRICT == 1 ]]; then
-    fail "队列消费者数 $consumers（严格模式要求 ≤1，避免重复消费）"
+    fail "有 ${active_consumers} 个消费者正在拉取队列（要求 ≤1，避免重复消费）"
   else
-    warn "队列消费者数 $consumers（多实例部署需确认无重复消费）"
+    warn "有 ${active_consumers} 个消费者正在拉取队列（多实例部署需确认无重复消费）"
+  fi
+  if [[ "${stale_consumers:-0}" -gt 0 ]]; then
+    warn "存在 ${stale_consumers} 个残留消费者记录（pending=0，不会重复消费；重启 API 会自行清理）"
   fi
 
   echo "-- 4. 服务与健康"

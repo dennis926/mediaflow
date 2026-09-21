@@ -557,3 +557,35 @@ purge 是唯一不可逆的操作，**必须先在演练工作区上跑通**，�
 **生产真实导出验证（演练工作区，验证后已清理）**：申请 → 完成（5233 字节，ZIP sha256 `4d30822eb62c…`）→ 一次性链接下载 **200**、
 二次使用 **401** → 解压：13 个 data/media/audit 条目 + manifest + README，**逐文件 sha256 全部一致**，
 `social_accounts.jsonl` 无令牌 → 库内行数与 manifest 相同（contents 1 / media_assets 1）→ 审计链 requested → completed → downloaded 完整。
+
+### 12.8 第 4 步实施记录：永久清除（purge）与演练（2026-09-21）
+
+**接口**
+
+| 接口 | 行为 |
+| --- | --- |
+| `GET /api/workspaces/:id/purge-preview` | 清除前预估影响面（逐表行数 + 文件数），仅 owner |
+| `DELETE /api/workspaces/:id/data` | **不可逆**；body `{confirmName, confirmText:'永久删除', reason?}`；非软删 409、保留期未满 409、名称/确认串不对 400、有进行中导出 409；**备份失败 503 且不删任何数据** |
+
+**执行顺序（每一步都留痕）**：写账本 `started` → 审计 `purge_started` → **备份（失败即中止）** → 删文件（素材/知识库，失败进 failures 不阻断）→ **单事务删除业务数据 + 工作区行** → 账本 `completed`（逐表行数、文件数、备份路径/sha256/到期、保留的账本表、销毁的账号数）→ `purge_completed` + `social_accounts_destroyed` 审计 → 缓存失效 → 外部通报。
+**定时任务**：每日 04:00 扫描 `status='soft_deleted' AND purge_after <= now()` 自动清除（没有 owner 的工作区不自动清，记 WARN 等人工处理）；每日 04:30 清理超过 180 天的 purge 备份并写 `workspace.purge_backup_expired`。
+
+**演练暴露并修复的三个问题**
+
+1. **备份表顺序错了（真实缺陷）**：备份沿用了"删除顺序（子表在前）"，恢复时 `content_variants.content_id` 找不到 `contents` → 外键冲突 → **整包回滚、恢复 0 行**。
+   修复：拆出 `BACKUP_TABLES`（**父表在前**，workspaces → contents → 其子表 → 其余），与删除顺序刻意相反；补 2 条顺序回归单测。
+2. **purge 完成通报不该写站内通知**：站内通知属于 A 类业务数据，而通知产生时工作区已不存在 → 落进刚被清除的工作区里（实测"A 类清空后仍残留 1 条通知"）。修复：只走外部渠道（邮件/群机器人），责任人留痕由账本 + 审计承担。
+3. **预检的"消费者 ≤1"会自锁**：消费者记录会随进程退出残留（pending=0 无害），而清理它的手段恰是重启 API——预检拦住重启即死锁。修复：预检按"**在跑的**消费者"（pending>0 或 idle<120s）判定，残留记录降级为提示；解析改用 `redis-cli --json` + python（原 `paste` 逐行解析会错位）。
+
+**演练结果（`/root/.hermes/workspace/b0_4_purge_drill.log`）**
+
+| 检查 | 结果 |
+| --- | --- |
+| A 类 14 张表 | **全部为 0**（含 notifications）；工作区行消失 |
+| B 类账本 | audit_logs 10 行保留、ai_generations 1 条保留、purge 账本 completed（含逐表行数） |
+| C 类全局 | users/roles/user_roles/system_settings/typeorm_migrations **全部不变** |
+| 备份文件 | 600 权限、`gzip -t` OK、sha256 与账本一致、内容含该工作区数据 |
+| **备份可恢复** | 建表结构后重放：**各表行数与清除前完全一致** |
+| 备份失败中止 | 503、**一条数据都没删**、工作区仍 soft_deleted、账本 failed、`purge_failed` 审计 1 条 |
+| 约束 4 生产验证 | 默认工作区 active、基线（1 内容 / 2 用户 / 1 工作区 / 0 任务）不变、无演练残留 |
+| 约束 5 配置隔离 | 演练实例 1 天（被夹到最小值 7 天，符合设计）；生产仍为未配置（默认 30 天） |

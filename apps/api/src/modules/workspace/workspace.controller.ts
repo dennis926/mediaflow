@@ -13,6 +13,8 @@ import { CurrentUser } from '../auth/current-user.decorator';
 import { ROLE_CODES } from './entities/role.entity';
 import { WorkspaceMemberView, WorkspaceService, WorkspaceStatusView, WorkspaceSummary } from './workspace.service';
 import { ExportJobView, WorkspaceExportService } from './workspace-export.service';
+import { PurgeResult, WorkspacePurgeService } from './workspace-purge.service';
+import { PurgeWorkspaceDto } from './dto/workspace-purge.dto';
 
 class CreateWorkspaceDto {
   @IsString()
@@ -47,6 +49,7 @@ export class WorkspaceController {
   constructor(
     private readonly workspacesService: WorkspaceService,
     private readonly exportService: WorkspaceExportService,
+    private readonly purgeService: WorkspacePurgeService,
   ) {}
 
   @Get()
@@ -106,6 +109,35 @@ export class WorkspaceController {
   @Post(':id/restore')
   restore(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user?: AuthUser): Promise<WorkspaceStatusView> {
     return this.workspacesService.restoreWorkspace(id, user?.id ?? '', toActor(user));
+  }
+
+  // ---------- 永久清除（B0.4 第 4 步，不可逆） ----------
+
+  /** 清除前的预估影响面（逐表行数 + 文件数），确认框里可展示。 */
+  @Capability('workspace.purge')
+  @WorkspaceLifecycle()
+  @Get(':id/purge-preview')
+  purgePreview(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user?: AuthUser,
+  ): Promise<{ rows: Record<string, number>; files: number }> {
+    return this.purgeService.preview(id, user?.id ?? '');
+  }
+
+  /**
+   * 永久清除工作区数据（不可逆）：要求已软删且保留期已过、名称 + 固定串二次确认、无进行中的导出；
+   * 执行前先做独立备份，**备份失败即中止且不删除任何数据**；审计与成本账本永久保留。
+   */
+  @Capability('workspace.purge')
+  @WorkspaceLifecycle()
+  @HttpCode(200)
+  @Delete(':id/data')
+  purge(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: PurgeWorkspaceDto,
+    @CurrentUser() user?: AuthUser,
+  ): Promise<PurgeResult> {
+    return this.purgeService.purgeWorkspace(id, user?.id ?? '', dto, toActor(user));
   }
 
   @Capability('workspace.manage')

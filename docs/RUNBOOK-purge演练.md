@@ -56,3 +56,69 @@
 
 演练使用 1 天保留期与进程级配置覆盖；生产为 30 天且配置来自数据库。
 **演练通过 ≠ 可以直接对生产数据 purge**：真实工作区 purge 仍需用户逐次确认，且遵守 `DESIGN-多租户生命周期.md` §7 的全部前置校验。
+
+## 六、演练实测补充（2026-09-21）
+
+### 6.1 备份是"仅数据"，恢复必须先建表结构（重要）
+
+`backupWorkspace()` 生成的是 **data-only** 备份：每张表一段
+`COPY "表名" (列…) FROM STDIN WITH CSV HEADER;` + CSV + `\.`，外层 gzip。
+**它不含建表语句**，因此恢复时必须先把 schema 准备好，否则 psql 会报
+`relation "contents" does not exist` 而**静默恢复 0 行**（本轮演练第一次就是这么失败的）。
+
+正确恢复步骤：
+```bash
+# ① 先建表结构（用生产库的 schema-only 导出，或对空库跑 pnpm migrate）
+pg_dump -h 127.0.0.1 -U mediaflow -d mediaflow --schema-only --no-owner --no-privileges \
+  -t contents -t content_variants -t content_revisions -t content_reviews -t publish_tasks \
+  -t brand_knowledge -t content_templates -t media_assets -t social_accounts -t platforms \
+  -t notifications -t analytics -t track_events -t workspace_members -t workspaces \
+  | psql -X -q -h 127.0.0.1 -U mediaflow -d <恢复目标库>
+
+# ② 再重放数据
+gunzip -c <备份文件> | psql -X -q -h 127.0.0.1 -U mediaflow -d <恢复目标库>
+
+# ③ 校验行数（应与清除前一致）
+psql -h 127.0.0.1 -U mediaflow -d <恢复目标库> -c "SELECT count(*) FROM contents WHERE workspace_id='<原工作区 id>'"
+```
+
+### 6.2 保留期最小值是 7 天
+
+配置项 `WORKSPACE_SOFT_DELETE_RETENTION_DAYS` 允许范围 **7–365 天**（设计如此）。
+演练时把实例配置设为 1 会被夹到 7 天——这本身是正确的，**模拟"保留期结束"请改写 `purge_after`**：
+```sql
+UPDATE workspaces SET purge_after = now() - interval '1 hour', deleted_at = now() - interval '2 days' WHERE id = '<演练工作区>';
+```
+
+### 6.3 清除完成通报只走外部渠道
+
+purge 完成后**不写站内通知**（只走邮件/群机器人，若已配置）。原因：站内通知属于 A 类业务数据，
+而通知产生时工作区已经不存在，写下去会落进一个刚被清除的工作区里（实测导致"A 类表清空后仍残留 1 条通知"）。
+责任人留痕由 `workspace_purge_batches` 账本 + `workspace.purge_*` 审计承担。
+
+### 6.4 备份的独立校验清单（每次 purge 前后都应核对）
+
+| 检查项 | 期望 | 取值方式 |
+| --- | --- | --- |
+| 文件存在与权限 | 存在且 600 | `stat -c '%A %n' <备份>` |
+| 压缩完整 | `gzip -t` 退出码 0 | `gzip -t <备份>` |
+| 校验和一致 | 与账本 `backup_sha256` 相同 | `sha256sum <备份>` vs `SELECT backup_sha256 FROM workspace_purge_batches WHERE …` |
+| 内容确含该工作区 | `zgrep` 命中工作区 id | `zgrep -c "<workspace_id>" <备份>` |
+| 可恢复 | 建表结构后重放，行数与清除前一致 | 见 6.1 |
+| 保留期 | 默认 180 天（`WORKSPACE_PURGE_BACKUP_RETENTION_DAYS`） | 账本 `backup_expires_at` |
+
+### 6.5 备份表顺序：恢复顺序与删除顺序**相反**（2026-09-21 实测踩坑）
+
+- **删除**必须"子表先删"（`track_events → … → contents`），否则外键挡着删不掉；
+- **备份/恢复**必须"父表先插"（`workspaces → contents → 子表 → 其余`），否则 `content_variants.content_id` 找不到父行 → 外键冲突 → **整个事务回滚、恢复 0 行**。
+两套顺序都在 `workspace-purge.service.ts` 里各有清单（`BUSINESS_TABLES` / `BACKUP_TABLES`），并有单测防回归。改动任何一处都要同时想清楚另一处。
+
+### 6.6 演练发现的运维细节
+
+1. **消费者残留与预检自锁**：`XINFO CONSUMERS` 里的记录会随进程退出残留（pending=0 无害），应用启动时自行清理；
+   若预检把残留也算作"并发消费者"，就会拦住"重启"这个清理手段。预检现按"在跑的消费者"（pending>0 或 idle<120s）判定。
+2. **演练必须用独立实例 + 独立备份目录**：`PURGE_BACKUP_ROOT` 可指向临时目录（演练已清理时更省事），保留期用进程级覆盖，
+   生产配置不受影响（演练后核对 `system_settings` 中无该键、`.env` 未变）。
+3. **killed 进程会留下挂起命令**：演练脚本里所有 psql/pg_dump 都要带 `-w`（不提示口令）+ `PGPASSWORD` 环境变量（**流水线两侧都要带**，
+   否则 `pg_dump` 会等口令而卡死）。
+4. **建库/删库用应用角色即可**：给 `mediaflow` 角色 `CREATEDB` 权限后无需 `su postgres`（后者在非交互环境容易挂起）。
