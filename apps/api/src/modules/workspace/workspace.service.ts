@@ -9,9 +9,23 @@ import { User } from './entities/user.entity';
 import { AuthSessionService } from '../auth/auth-session.service';
 import { Workspace, WorkspaceStatus } from './entities/workspace.entity';
 import { WorkspaceExportJob } from './entities/workspace-export-job.entity';
+import { DataDeletionRequest, DataDeletionRequestStatus } from './entities/data-deletion-request.entity';
 import { PublishTask } from '../publish/entities/publish-task.entity';
 import { NotificationService } from '../notification/notification.service';
 import { runtime } from '../settings/runtime-config';
+
+/** 合规删除请求的状态视图（B0.6）：前端/合规人员据此看"承诺何时前清除、是否已完成"。 */
+export interface DeletionRequestView {
+  id: string;
+  status: DataDeletionRequestStatus;
+  requestedAt: string;
+  dueAt: string;
+  /** 距离承诺期限还有几天（负数表示已逾期） */
+  daysUntilDue: number;
+  completedAt: string | null;
+  purgeBatchId: string | null;
+  reason: string | null;
+}
 
 export interface WorkspaceSummary {
   id: string;
@@ -56,6 +70,8 @@ export interface WorkspaceMemberView {
 @Injectable()
 export class WorkspaceService {
   private readonly logger = new Logger(WorkspaceService.name);
+  /** 合规删除承诺期限（天）：收到请求后必须在此期限内完成永久清除 */
+  private static readonly COMPLIANCE_DELETION_DAYS = 30;
 
   constructor(
     @InjectRepository(Workspace) private readonly workspaces: Repository<Workspace>,
@@ -63,6 +79,7 @@ export class WorkspaceService {
     @InjectRepository(User) private readonly users: Repository<User>,
     @InjectRepository(PublishTask) private readonly tasks: Repository<PublishTask>,
     @InjectRepository(WorkspaceExportJob) private readonly exportJobs: Repository<WorkspaceExportJob>,
+    @InjectRepository(DataDeletionRequest) private readonly deletionRequests: Repository<DataDeletionRequest>,
     private readonly notifications: NotificationService,
     private readonly workspaceContext: WorkspaceContextService,
     private readonly audit: AuditService,
@@ -280,6 +297,141 @@ export class WorkspaceService {
   }
 
   /** 恢复：仅在保留期内可恢复；过期返回 410（明确告知不可恢复，而不是含糊的 400）。 */
+  /**
+   * B0.6：登记一条**合规删除请求**，并把它变成"30 天内必然完成清除"的承诺。
+   *
+   * 做法：① 建请求行（due_at = 现在 + 30 天）；② 走既有的软删（可恢复、有审计、有通知）；
+   * ③ 把工作区的 `purge_after` **收紧**到 `min(现在 + 保留期, due_at)`——这样 04:00 的到期清除任务
+   * 一定会在承诺期限内把它清掉；④ 写审计 `compliance.deletion_requested`。
+   *
+   * 清除本身仍是 B0.4 那条路（独立备份 + 单事务 + 账本 + 审计），本接口不新增不可逆动作。
+   */
+  async requestComplianceDeletion(
+    workspaceId: string,
+    userId: string,
+    actor: WorkspaceActor,
+    dto: { confirmName: string; reason?: string },
+  ): Promise<{ request: DeletionRequestView; workspace: WorkspaceStatusView }> {
+    const { workspace } = await this.requireWorkspaceRole(workspaceId, userId, ['owner']);
+    if (dto.confirmName.trim() !== workspace.name) {
+      throw new BadRequestException('工作区名称不匹配：请输入完整名称以确认删除');
+    }
+
+    const requestedAt = new Date();
+    const dueAt = new Date(requestedAt.getTime() + WorkspaceService.COMPLIANCE_DELETION_DAYS * 24 * 60 * 60 * 1000);
+
+    // 已有未完成的请求：不重复建，但同样保证期限承诺生效
+    const existing = await this.deletionRequests.findOne({
+      where: { tenantId: workspace.tenantId, workspaceId, status: 'pending' },
+    });
+    const request =
+      existing ??
+      (await this.deletionRequests.save(
+        this.deletionRequests.create({
+          tenantId: workspace.tenantId,
+          workspaceId,
+          requestedBy: actor.id ?? null,
+          requestedByName: actor.name ?? null,
+          reason: dto.reason?.trim() || null,
+          status: 'pending',
+          requestedAt,
+          dueAt,
+        }),
+      ));
+
+    // 软删（若已软删则跳过），随后收紧 purge_after
+    let status: WorkspaceStatusView;
+    if (workspace.status === 'soft_deleted') {
+      status = this.statusView(workspace);
+    } else {
+      status = await this.softDeleteWorkspace(workspace.id, userId, dto.confirmName, actor, dto.reason);
+    }
+
+    const retentionDays = runtime().workspace.softDeleteRetentionDays;
+    const capped = new Date(Math.min(Date.now() + retentionDays * 24 * 60 * 60 * 1000, request.dueAt.getTime()));
+    await this.workspaces.update({ id: workspaceId }, { purgeAfter: capped });
+    await this.sessions.invalidateWorkspace(workspaceId);
+
+    await this.audit.record({
+      action: 'compliance.deletion_requested',
+      resourceType: 'workspace',
+      resourceId: workspaceId,
+      tenantId: workspace.tenantId,
+      workspaceId,
+      actorId: actor.id ?? null,
+      actorName: actor.name ?? null,
+      payload: {
+        requestId: request.id,
+        dueAt: request.dueAt.toISOString(),
+        retentionDays,
+        purgeAfter: capped.toISOString(),
+        reason: request.reason,
+        note: `${WorkspaceService.COMPLIANCE_DELETION_DAYS} 天内完成永久清除（走 purge：备份 + 审计 + 账本）`,
+      },
+    });
+
+    this.logger.warn(
+      `合规删除请求已登记：${workspace.name}｜承诺清除期限 ${request.dueAt.toISOString()}｜purge_after 收紧为 ${capped.toISOString()}`,
+    );
+    return { request: this.deletionRequestView(request), workspace: status };
+  }
+
+  /** 查询当前生效的合规删除请求（无则返回 null）。 */
+  async deletionRequestStatus(workspaceId: string, userId: string): Promise<DeletionRequestView | null> {
+    const { workspace } = await this.requireWorkspaceRole(workspaceId, userId);
+    const request = await this.deletionRequests.findOne({
+      where: { tenantId: workspace.tenantId, workspaceId, status: 'pending' },
+    });
+    return request ? this.deletionRequestView(request) : null;
+  }
+
+  /** 工作区被永久清除后调用：把请求标记为已完成并关联 purge 账本。 */
+  async completeDeletionRequest(workspaceId: string, purgeBatchId: string): Promise<void> {
+    const pending = await this.deletionRequests.find({ where: { workspaceId, status: 'pending' } });
+    for (const request of pending) {
+      await this.deletionRequests.update(
+        { id: request.id },
+        { status: 'completed', completedAt: new Date(), purgeBatchId },
+      );
+    }
+  }
+
+  /** 工作区被恢复时调用：合规请求随之作废（并留痕，避免"请求了却悄悄恢复"）。 */
+  async cancelDeletionRequest(workspaceId: string, actor: WorkspaceActor): Promise<number> {
+    const pending = await this.deletionRequests.find({ where: { workspaceId, status: 'pending' } });
+    for (const request of pending) {
+      await this.deletionRequests.update({ id: request.id }, { status: 'cancelled' });
+    }
+    if (pending.length > 0) {
+      const workspace = await this.workspaces.findOne({ where: { id: workspaceId } });
+      await this.audit.record({
+        action: 'compliance.deletion_cancelled',
+        resourceType: 'workspace',
+        resourceId: workspaceId,
+        tenantId: workspace?.tenantId ?? '',
+        workspaceId,
+        actorId: actor.id ?? null,
+        actorName: actor.name ?? null,
+        payload: { count: pending.length },
+      });
+    }
+    return pending.length;
+  }
+
+  private deletionRequestView(request: DataDeletionRequest): DeletionRequestView {
+    const daysUntilDue = Math.ceil((request.dueAt.getTime() - Date.now()) / (24 * 60 * 60 * 1000));
+    return {
+      id: request.id,
+      status: request.status,
+      requestedAt: request.requestedAt.toISOString(),
+      dueAt: request.dueAt.toISOString(),
+      daysUntilDue,
+      completedAt: request.completedAt?.toISOString() ?? null,
+      purgeBatchId: request.purgeBatchId,
+      reason: request.reason,
+    };
+  }
+
   async restoreWorkspace(workspaceId: string, userId: string, actor: WorkspaceActor): Promise<WorkspaceStatusView> {
     const { workspace } = await this.requireWorkspaceRole(workspaceId, userId);
     if (workspace.status !== 'soft_deleted') throw new ConflictException('该工作区当前不需要恢复');
@@ -292,6 +444,8 @@ export class WorkspaceService {
     await this.workspaces.update({ id: workspace.id }, { status: 'active', deletedAt: null, purgeAfter: null });
     await this.sessions.invalidateWorkspace(workspace.id);
     await this.recordLifecycle('workspace.restore', workspace, actor, { deletedAt: workspace.deletedAt?.toISOString() ?? null });
+    // 若此前登记过合规删除请求，恢复即视为撤回请求（并留痕）
+    await this.cancelDeletionRequest(workspaceId, actor);
     this.logger.log(`工作区已恢复：${workspace.name}`);
     return this.statusView(await this.workspaces.findOneOrFail({ where: { id: workspace.id } }));
   }

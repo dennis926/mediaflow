@@ -53,6 +53,72 @@ export class ContentService {
     private readonly dataSource: DataSource,
   ) {}
 
+  /**
+   * B0.6：AI 标识一致性校验（法定要求）。
+   *
+   * 判定依据不是"用户填了什么"，而是**系统自己的证据**：`ai_generations` 里是否有这条内容的生成记录。
+   * 若有记录却把标识填成 `none`，只有两条路：
+   *   ① 没填理由 → **强制回填标识**（改成 assisted + 追加显式标识文案），并写审计 `content.ai_flag.backfilled`；
+   *   ② 填了理由 → 保留 none，但理由必须留痕（审计 `content.ai_flag.exempted` 带理由与证据条数）。
+   *
+   * 调用点：内容创建/更新后，以及**审核通过前**（发布闸门的最后一道）。
+   */
+  async assertAiFlagConsistency(
+    contentId: string,
+    actor: ContentActor,
+  ): Promise<{ flagged: boolean; evidence: number; aiFlagType: AiFlagType }> {
+    const scope = await this.workspaceContext.current();
+    const content = await this.contents.findOne({
+      where: { id: contentId, tenantId: scope.tenantId, workspaceId: scope.workspaceId },
+    });
+    if (!content) throw new NotFoundException('内容不存在');
+    if (content.aiFlagType !== AiFlagType.None) {
+      return { flagged: false, evidence: 0, aiFlagType: content.aiFlagType };
+    }
+
+    // 证据：这条内容是否有 AI 生成记录（来自 ai_generations，不依赖人工填写）
+    const evidenceRows = await this.dataSource.query(
+      'SELECT count(*)::int AS n FROM ai_generations WHERE content_id = $1 AND workspace_id = $2',
+      [contentId, scope.workspaceId],
+    );
+    const evidence = Number(evidenceRows[0]?.n ?? 0);
+    if (evidence === 0) return { flagged: false, evidence: 0, aiFlagType: AiFlagType.None };
+
+    const reason = content.aiFlagExemptReason?.trim();
+    if (reason) {
+      await this.audit.record({
+        action: 'content.ai_flag.exempted',
+        resourceType: 'content',
+        resourceId: content.id,
+        tenantId: scope.tenantId,
+        workspaceId: scope.workspaceId,
+        actorId: actor.id ?? null,
+        actorName: actor.name ?? null,
+        payload: { evidence, reason, aiFlagType: AiFlagType.None },
+      });
+      return { flagged: false, evidence, aiFlagType: AiFlagType.None };
+    }
+
+    // 强制回填：标识改成 assisted，并把显式标识文案并入正文（法定显式标识）
+    const body = appendAiDisclosure(content.body, AiFlagType.Assisted, runtime().site.aiDisclosureSuffix);
+    await this.contents.update(
+      { id: content.id },
+      { aiFlagType: AiFlagType.Assisted, aiGenerated: true, body },
+    );
+    await this.audit.record({
+      action: 'content.ai_flag.backfilled',
+      resourceType: 'content',
+      resourceId: content.id,
+      tenantId: scope.tenantId,
+      workspaceId: scope.workspaceId,
+      actorId: actor.id ?? null,
+      actorName: actor.name ?? null,
+      payload: { evidence, from: AiFlagType.None, to: AiFlagType.Assisted },
+    });
+    this.logger.warn(`内容缺少 AI 标识但存在 ${evidence} 条 AI 生成记录，已强制回填：${content.id}`);
+    return { flagged: true, evidence, aiFlagType: AiFlagType.Assisted };
+  }
+
   async create(dto: CreateContentDto, actor: ContentActor): Promise<Content> {
     const scope = await this.workspaceContext.current();
     const aiFlagType = dto.aiFlagType ?? AiFlagType.None;
@@ -71,6 +137,7 @@ export class ContentService {
       status: ContentStatus.Draft,
       aiGenerated: aiFlagType !== AiFlagType.None,
       aiFlagType,
+      aiFlagExemptReason: dto.aiFlagExemptReason?.trim() || null,
       aiFlagChecked: false,
       brandKnowledgeId: dto.brandKnowledgeId ?? null,
       authorId: actor.id ?? null,

@@ -14,6 +14,7 @@ import { MediaModule } from './modules/media/media.module';
 import { NotificationModule } from './modules/notification/notification.module';
 import { PlatformModule } from './modules/platform/platform.module';
 import { WorkspaceModule } from './modules/workspace/workspace.module';
+import { MeModule } from './modules/me/me.module';
 import { OpsModule } from './modules/ops/ops.module';
 import { SettingsModule } from './modules/settings/settings.module';
 import { CommonModule } from './common/common.module';
@@ -52,6 +53,7 @@ import { RedisModule } from './redis/redis.module';
     AnalyticsModule,
     PlatformModule,
     WorkspaceModule,
+    MeModule,
     OpsModule,
   ],
   controllers: [HealthController],

@@ -226,6 +226,8 @@ export class WorkspacePurgeService {
       await this.sessions.invalidateWorkspace(workspaceId);
       // B0.5：同时丢弃该工作区的运行时配置快照，避免内存里长期留着已清除租户的配置
       this.settings.forgetWorkspace(workspaceId);
+      // B0.6：若这条清除对应一次合规删除请求，标记请求完成并关联账本
+      await this.workspaces.completeDeletionRequest(workspaceId, batch.id);
       await this.audit
         .record({
           action: 'workspace.purge_completed',

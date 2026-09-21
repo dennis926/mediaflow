@@ -24,6 +24,13 @@ export class ContentReview extends BaseEntity {
   @Column({ type: 'uuid', nullable: true })
   reviewerId!: string | null;
 
+  /** 审核人来源 IP 与客户端（B0.6 合规留痕；审核放行是必须可追溯的动作） */
+  @Column({ type: 'varchar', length: 64, nullable: true })
+  operatorIp!: string | null;
+
+  @Column({ type: 'varchar', length: 256, nullable: true })
+  operatorUa!: string | null;
+
   @Column({ type: 'varchar', length: 80, nullable: true })
   reviewerName!: string | null;
 

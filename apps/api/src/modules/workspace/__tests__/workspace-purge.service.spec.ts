@@ -42,8 +42,11 @@ function build(options: {
   deletedRows?: Record<string, number>;
 } = {}) {
   const ws = options.workspace === undefined ? workspace() : options.workspace;
+  const completeDeletionRequest = vi.fn(async () => undefined);
   const workspaces = {
     requireWorkspaceRole: vi.fn(async () => ({ workspace: ws, roleCodes: ['owner'] })),
+    // B0.6：清除成功后把对应的合规删除请求标记为完成
+    completeDeletionRequest,
   } as unknown as WorkspaceService;
 
   const batchRow = { id: 'batch-1' };

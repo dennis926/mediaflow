@@ -11,6 +11,7 @@ import { WorkspacePurgeTask } from './workspace-purge.task';
 import { PublishTask } from '../publish/entities/publish-task.entity';
 import { NotificationModule } from '../notification/notification.module';
 import { SettingsModule } from '../settings/settings.module';
+import { DataDeletionRequest } from './entities/data-deletion-request.entity';
 import { CryptoService } from '../../common/crypto.service';
 import { NotificationChannelService } from '../notification/notification-channel.service';
 import { UserController } from './user.controller';
@@ -21,7 +22,7 @@ import { WorkspaceExportCleanupTask } from './workspace-export.task';
 import { UserService } from './user.service';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([User, Role, Workspace, WorkspaceMember, WorkspaceExportJob, WorkspacePurgeBatch, PublishTask]), NotificationModule, SettingsModule],
+  imports: [TypeOrmModule.forFeature([User, Role, Workspace, WorkspaceMember, WorkspaceExportJob, WorkspacePurgeBatch, PublishTask, DataDeletionRequest]), NotificationModule, SettingsModule],
   controllers: [UserController, WorkspaceController],
   // CryptoService 是无状态服务，这里直接提供（SettingsModule 未导出它）；导出下载令牌的 HMAC 签名要用它
   providers: [

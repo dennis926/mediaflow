@@ -98,13 +98,14 @@
 
 | 项目 | 数值 / 说明 |
 | --- | --- |
-| 迁移总数 | **38**（`typeorm_migrations`；其中 16 个来自 B0.4 第 5 步） |
+| 迁移总数 | **41**（`typeorm_migrations`；其中 16 个来自 B0.4 第 5 步，3 个来自 B0.6） |
 | 指向 `workspaces(id)` 的外键总数 | **16**：14 张业务/结构表 `ON DELETE CASCADE` + `workspace_export_jobs` `SET NULL` + `users` `SET NULL`（M8） |
 | 刻意不加外键的表 | `audit_logs`、`ai_generations`、`workspace_purge_batches`、`system_settings`、`roles`（理由见 `DESIGN-外键补全-第5步.md` §2.3） |
 | `workspaces` 自引用列 | 存在 **`workspaces.workspace_id` NOT NULL** 列（值为自身 id；工作区行的历史结构，建行时必须填） |
 | `platforms.code` | **全局唯一索引**（`IDX_f2dfc2261c3cb3322162a3b061`）——不是按工作区唯一；写种子/测试数据时必须保证 code 全局不重复 |
 | 账本新列 | `workspace_purge_batches.retained_export_jobs`（purge 时保留的导出任务数） |
 | 例行巡检 | 跨工作区引用（`social_accounts` ↔ `platforms`）必须 = **0**（SQL 见 `RUNBOOK-purge演练.md` §7.4） |
+| B0.6 新增 | `contents.ai_flag_exempt_reason`、`content_reviews.operator_ip`/`operator_ua`、表 `data_deletion_requests`（合规删除台账） |
 
 ## 九、变更纪律
 

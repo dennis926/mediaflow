@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { AuditService } from '../../../audit/audit.service';
 import { WorkspaceContextService } from '../../../common/workspace-context.service';
 import { NotificationService } from '../../notification/notification.service';
+import type { ContentService } from '../content.service';
 import { ContentReviewService } from '../content-review.service';
 import { ContentReview } from '../entities/content-review.entity';
 import { Content } from '../entities/content.entity';
@@ -60,8 +61,11 @@ function buildService(options: { content?: Partial<Content> | null; pending?: Pa
   const dataSource = {
     transaction: async (work: (m: typeof manager) => Promise<unknown>) => work(manager),
   } as unknown as import('typeorm').DataSource;
+  const contentService = {
+    assertAiFlagConsistency: vi.fn(async () => ({ flagged: false, evidence: 0, aiFlagType: 'none' })),
+  } as unknown as ContentService;
   return {
-    service: new ContentReviewService(contents, reviews, audit, notifications, workspaceContext, dataSource),
+    service: new ContentReviewService(contents, reviews, audit, notifications, workspaceContext, dataSource, contentService),
     contents,
     reviews,
     audit,

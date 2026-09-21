@@ -38,6 +38,13 @@ export class Content extends BaseEntity {
   @Column({ type: 'boolean', default: false })
   aiFlagChecked!: boolean;
 
+  /**
+   * 走"豁免"路径的理由（B0.6）：内容有 AI 生成记录却标记为 none 时，
+   * 必须填这个理由留痕；为空则系统会**强制回填**标识（见 ContentService.assertAiFlagConsistency）。
+   */
+  @Column({ type: 'varchar', length: 200, nullable: true })
+  aiFlagExemptReason!: string | null;
+
   @Column({ type: 'uuid', nullable: true })
   brandKnowledgeId!: string | null;
 

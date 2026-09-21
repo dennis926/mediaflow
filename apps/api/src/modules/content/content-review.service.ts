@@ -6,12 +6,19 @@ import { AuditService } from '../../audit/audit.service';
 import { WorkspaceContextService } from '../../common/workspace-context.service';
 import { NotificationService } from '../notification/notification.service';
 import { Content } from './entities/content.entity';
+import { ContentService } from './content.service';
 import { ContentReview, ReviewStatus } from './entities/content-review.entity';
 import { QueryReviewDto, ReviewDecisionDto, SubmitReviewDto } from './dto/review.dto';
 
 export interface ReviewActor {
   id?: string | null;
   name?: string | null;
+}
+
+/** B0.6 合规留痕：审核动作的来源信息（IP 与客户端），随审核记录一起落库。 */
+export interface ReviewOperatorTrail {
+  ip?: string | null;
+  userAgent?: string | null;
 }
 
 export interface ReviewView extends ContentReview {
@@ -44,10 +51,11 @@ export class ContentReviewService {
     private readonly notifications: NotificationService,
     private readonly workspaceContext: WorkspaceContextService,
     private readonly dataSource: DataSource,
+    private readonly contentService: ContentService,
   ) {}
 
   /** 提交审核：内容必须非空；同一内容不允许存在多条待审核记录。 */
-  async submit(dto: SubmitReviewDto, actor: ReviewActor): Promise<ContentReview> {
+  async submit(dto: SubmitReviewDto, actor: ReviewActor, trail: ReviewOperatorTrail = {}): Promise<ContentReview> {
     const scope = await this.workspaceContext.current();
     const content = await this.contents.findOne({ where: { id: dto.contentId, workspaceId: scope.workspaceId } });
     if (!content) throw new NotFoundException('内容不存在');
@@ -70,6 +78,9 @@ export class ContentReviewService {
         contentId: content.id,
         submittedBy: actor.id ?? null,
         submittedByName: actor.name ?? null,
+        // 提交人来源同样留痕（合规审计要能回答"谁在什么时候从哪里提交送审"）
+        operatorIp: trail.ip?.slice(0, 64) ?? null,
+        operatorUa: trail.userAgent?.slice(0, 256) ?? null,
         reviewerId: null,
         reviewerName: null,
         round: Number(maxRound?.max ?? 0) + 1,
@@ -155,7 +166,7 @@ export class ContentReviewService {
    * 2. 不能审核自己提交的内容（职责分离）；
    * 3. 驳回/要求修改必须写明原因，否则提交人无从修改。
    */
-  async decide(id: string, dto: ReviewDecisionDto, actor: ReviewActor): Promise<ReviewView> {
+  async decide(id: string, dto: ReviewDecisionDto, actor: ReviewActor, trail: ReviewOperatorTrail = {}): Promise<ReviewView> {
     const scope = await this.workspaceContext.current();
     const review = await this.reviews.findOne({ where: { id, workspaceId: scope.workspaceId } });
     if (!review) throw new NotFoundException('审核记录不存在');
@@ -171,6 +182,9 @@ export class ContentReviewService {
     review.comments = dto.comments?.trim() ?? review.comments;
     review.reviewerId = actor.id ?? null;
     review.reviewerName = actor.name ?? null;
+    // 审核放行必须可追溯到"谁、从哪、用什么客户端"（B0.6）
+    review.operatorIp = trail.ip?.slice(0, 64) ?? review.operatorIp ?? null;
+    review.operatorUa = trail.userAgent?.slice(0, 256) ?? review.operatorUa ?? null;
     review.checklist = (dto.checklist ?? review.checklist ?? {}) as Record<string, boolean>;
     review.decidedAt = new Date();
 
@@ -179,6 +193,21 @@ export class ContentReviewService {
 
     const before = await this.contents.findOne({ where: { id: review.contentId, workspaceId: scope.workspaceId } });
     const previousStatus = before?.status ?? ContentStatus.Draft;
+
+    /**
+     * B0.6：审核通过前先做 AI 标识一致性校验——
+     * 内容有 AI 生成记录却标成 none 时，这里会强制回填标识（或按已填理由留痕豁免）。
+     * 放在 approve 这一步，保证"通过审核"的内容一定是标识合规的。
+     */
+    if (dto.decision === 'approved') {
+      const flag = await this.contentService.assertAiFlagConsistency(review.contentId, {
+        id: actor.id ?? null,
+        name: actor.name ?? null,
+      });
+      if (flag.flagged) {
+        this.logger.log(`审核通过前已强制回填 AI 标识（证据 ${flag.evidence} 条）：${review.contentId}`);
+      }
+    }
 
     // 审核记录与内容状态必须同时生效，否则会出现"审核已通过但内容仍是草稿"这类不一致。
     const saved = await this.dataSource.transaction(async (manager) => {

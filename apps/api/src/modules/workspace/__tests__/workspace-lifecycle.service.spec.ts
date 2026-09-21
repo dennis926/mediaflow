@@ -1,3 +1,4 @@
+import type { DataDeletionRequest } from '../entities/data-deletion-request.entity';
 import { describe, expect, it, vi, afterEach } from 'vitest';
 import type { Repository } from 'typeorm';
 import type { AuditService } from '../../../audit/audit.service';
@@ -82,12 +83,22 @@ function build(options: {
   const notify = vi.fn(async (_input: unknown) => undefined);
   const notifications = { notify } as unknown as NotificationService;
 
+  // B0.6：合规删除请求台账（默认没有未完成请求）
+  const deletionRequests = {
+    findOne: vi.fn(async () => null),
+    find: vi.fn(async () => []),
+    create: vi.fn((value: unknown) => value),
+    save: vi.fn(async (value: unknown) => value),
+    update: vi.fn(async () => ({ affected: 1 })),
+  } as unknown as Repository<DataDeletionRequest>;
+
   const service = new WorkspaceService(
     workspaces,
     members,
     users,
     tasks,
     exportJobs,
+    deletionRequests,
     notifications,
     workspaceContext,
     audit,

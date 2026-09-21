@@ -1,19 +1,6 @@
 import { PartialType } from '@nestjs/mapped-types';
 import { Type } from 'class-transformer';
-import {
-  ArrayMaxSize,
-  ArrayMinSize,
-  IsArray,
-  IsBoolean,
-  IsIn,
-  IsInt,
-  IsOptional,
-  IsString,
-  IsUUID,
-  Length,
-  Max,
-  Min,
-} from 'class-validator';
+import { ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsIn, IsInt, IsOptional, IsString, IsUUID, Length, Max, MaxLength, Min } from 'class-validator';
 import { AiFlagType, ContentStatus, PlatformCode } from '@mediaflow/shared';
 
 export class CreateContentDto {
@@ -56,6 +43,12 @@ export class CreateContentDto {
   @IsOptional()
   @IsIn(Object.values(AiFlagType))
   aiFlagType?: AiFlagType;
+
+  /** 走"豁免"路径的理由（B0.6）：内容有 AI 生成记录却标记为 none 时必填，否则会被强制回填标识 */
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  aiFlagExemptReason?: string;
 
   @IsOptional()
   @IsUUID('4')

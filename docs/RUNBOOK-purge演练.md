@@ -185,3 +185,28 @@ SELECT count(*) AS cross_workspace_refs
 若非 0：① 先查明来源（正常流程不会产生，通常是手工 SQL 或历史遗留）；② 修正引用（把账号指向本工作区的同 code 平台），
 不要删数据；③ 修正后再执行 purge，否则 purge 会在删 `platforms` 时被 RESTRICT 挡住并整体回滚（数据不会损坏）。
 本项已列入 B0.9 的自动化巡检（CI 或监控）。
+
+## 8. 合规删除请求（B0.6）
+
+收到"删除我的数据"这类合规请求时，**不要**直接删库，按下面三步走：
+
+```bash
+# ① 登记合规删除请求（owner 令牌；会同时软删工作区，并把 purge_after 收紧到 30 天内）
+curl -s -X POST "$BASE/api/workspaces/<工作区 id>/deletion-request" \
+     -H "Authorization: Bearer <owner 令牌>" -H 'Content-Type: application/json' \
+     -d '{"confirmName":"<工作区完整名称>","reason":"客户行使删除权（合规请求）"}'
+
+# ② 查承诺期限与剩余天数（返回 pending / dueAt / daysUntilDue）
+curl -s "$BASE/api/workspaces/<工作区 id>/deletion-request" -H "Authorization: Bearer <owner 令牌>"
+
+# ③ 到期后由 04:00 的定时任务完成永久清除（也可手工 purge，见第 1–6 步）
+```
+
+规则与留痕：
+
+- 台账表 `data_deletion_requests`：`status` = `pending` → `completed`（清除完成，关联 purge 账本）或
+  `cancelled`（工作区被恢复 = 撤回请求）；
+- 审计：`compliance.deletion_requested`、`compliance.deletion_cancelled`，
+  清除本身的 `workspace.purge_started/completed` 照旧；
+- 清除路径与手工 purge **完全相同**（备份失败即中止、单事务、账本、外部通报）；
+- 恢复工作区即视为撤回请求，`purge_after` 一并清空——若客户随后再次要求删除，重新登记即可。

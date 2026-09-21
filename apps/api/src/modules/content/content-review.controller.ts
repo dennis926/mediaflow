@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Put, Query } from '@nestjs/common';
+import { Body, Controller, Get, Headers, Ip, Param, ParseUUIDPipe, Post, Put, Query } from '@nestjs/common';
 import { toActor } from '../auth/actor.util';
 import { AuthUser } from '../auth/auth.types';
 import { CurrentUser } from '../auth/current-user.decorator';
@@ -14,8 +14,13 @@ export class ContentReviewController {
   /** 提交内容进入审核（内容运营/管理员均可） */
   @Capability('content.write')
   @Post('submit')
-  submit(@Body() dto: SubmitReviewDto, @CurrentUser() user?: AuthUser) {
-    return this.reviewService.submit(dto, toActor(user));
+  submit(
+    @Body() dto: SubmitReviewDto,
+    @CurrentUser() user?: AuthUser,
+    @Ip() ip?: string,
+    @Headers('user-agent') userAgent?: string,
+  ) {
+    return this.reviewService.submit(dto, toActor(user), { ip: ip ?? null, userAgent: userAgent ?? null });
   }
 
   /** 审核列表（审核人/管理员/超管可见） */
@@ -45,7 +50,13 @@ export class ContentReviewController {
 
   @Capability('content.review')
   @Put(':id')
-  decide(@Param('id', ParseUUIDPipe) id: string, @Body() dto: ReviewDecisionDto, @CurrentUser() user?: AuthUser): Promise<ReviewView> {
-    return this.reviewService.decide(id, dto, toActor(user));
+  decide(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ReviewDecisionDto,
+    @CurrentUser() user?: AuthUser,
+    @Ip() ip?: string,
+    @Headers('user-agent') userAgent?: string,
+  ): Promise<ReviewView> {
+    return this.reviewService.decide(id, dto, toActor(user), { ip: ip ?? null, userAgent: userAgent ?? null });
   }
 }

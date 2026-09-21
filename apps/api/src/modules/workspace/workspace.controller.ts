@@ -122,6 +122,35 @@ export class WorkspaceController {
   // ---------- 永久清除（B0.4 第 4 步，不可逆） ----------
 
   /** 清除前的预估影响面（逐表行数 + 文件数），确认框里可展示。 */
+  // ---------- 合规删除请求（B0.6：收到请求后 30 天内完成清除） ----------
+
+  /**
+   * 登记合规删除请求：建台账（due_at = 现在 + 30 天）→ 软删 → 把 purge_after 收紧到不晚于 due_at。
+   * 实际清除仍走 purge（备份 + 审计 + 账本），本接口只是"承诺 + 留痕"。
+   */
+  @Capability('workspace.delete')
+  @WorkspaceLifecycle()
+  @HttpCode(200)
+  @Post(':id/deletion-request')
+  requestDeletion(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: DeleteWorkspaceDto,
+    @CurrentUser() user?: AuthUser,
+  ) {
+    return this.workspacesService.requestComplianceDeletion(id, user?.id ?? '', toActor(user), {
+      confirmName: dto.confirmName,
+      reason: dto.reason,
+    });
+  }
+
+  /** 查询当前生效的合规删除请求（无则返回 null）。 */
+  @Capability('workspace.manage')
+  @WorkspaceLifecycle()
+  @Get(':id/deletion-request')
+  deletionRequest(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user?: AuthUser) {
+    return this.workspacesService.deletionRequestStatus(id, user?.id ?? '');
+  }
+
   @Capability('workspace.purge')
   @WorkspaceLifecycle()
   @Get(':id/purge-preview')
