@@ -82,6 +82,44 @@ PC 端由 `mediaflow-web` 进程直接跑源码构建产物，回滚同 4.1。
 
 ### 4.4 数据库回滚
 
+#### 4.4.0 B0.4 第 5 步的 16 个迁移（外键补全）——顺序与逆序回滚
+
+| 顺序 | 迁移 | 内容 |
+| --- | --- | --- |
+| 1–14 | `1789701500000`–`1789701511000`、`1789701513000`、`1789701514000` | 14 张表 `workspace_id → workspaces(id) ON DELETE CASCADE`（contents / content_variants / content_revisions / content_reviews / publish_tasks / analytics / track_events / media_assets / social_accounts / brand_knowledge / content_templates / platforms / workspace_members / notifications） |
+| 15 | `1789701512000-FkWorkspaceExportJobsWorkspace` | `workspace_export_jobs`：`DROP NOT NULL` + `ON DELETE SET NULL`（产物在硬删后仍可下载） |
+| 16 | `1789701515000-PurgeBatchRetainedExportJobs` | 账本补列 `workspace_purge_batches.retained_export_jobs` |
+
+**部署顺序**：按时间戳升序（`pnpm migrate` 自动按序），且**必须在重启 API 之前**完成——新代码依赖
+`workspace_export_jobs.workspace_id` 可空与账本新列。`scripts/deploy.sh --with-migrate` 已把顺序固化（迁移失败即中止，不重启）。
+
+**逆序回滚到"第 5 步之前"**：
+
+```bash
+cd /www/wwwroot/mediaflow
+# ① 先回滚代码到第 5 步之前的提交（否则新代码会读已经消失的列）
+git checkout <第 5 步之前的提交>
+# ② 逐个回滚这 16 个迁移（每个迁移一条命令，从最后一个往回）
+for i in $(seq 1 16); do NODE_ENV=development pnpm migrate:revert; done
+# ③ 核验：外键应只剩 users 的 SET NULL 一条；导出列恢复 NOT NULL；账本列已删除
+psql -X -w -h 127.0.0.1 -U mediaflow -d mediaflow -c \
+  "SELECT count(*) FROM pg_constraint WHERE contype='f' AND confrelid='public.workspaces'::regclass"
+psql -X -w -h 127.0.0.1 -U mediaflow -d mediaflow -c \
+  "SELECT is_nullable FROM information_schema.columns WHERE table_name='workspace_export_jobs' AND column_name='workspace_id'"
+# ④ 重启服务 + 健康校验
+systemctl restart mediaflow-api mediaflow-web
+curl -s -o /dev/null -w '%{http_code}\n' https://auto.liangyijianye.cn/api/health
+```
+
+**注意**：`down()` 只解除约束/删列，**不删除任何业务数据**；唯一有数据影响的是账本列 `retained_export_jobs`
+（纯新增列，回滚即丢失该列数值）。若届时已存在 `workspace_id IS NULL` 的导出任务行，
+`1789701512000` 的 `down()` 会**保持可空**而不强行恢复 `NOT NULL`（避免回滚失败）——这是刻意的幂等设计。
+
+**回滚的副作用**：回到第 5 步之前后，"删工作区"会重新留下孤儿行（这正是第 5 步修掉的问题），
+因此回滚应视为临时措施，尽快回到含外键的版本。
+
+#### 4.4.1 通用做法
+
 ```bash
 ls -lt /www/backup/mediaflow/*.sql.gz                       # 选最近的备份
 pg_dump -h 127.0.0.1 -U mediaflow mediaflow | gzip > /www/backup/mediaflow/failed-attempt-$(date +%Y%m%d_%H%M).sql.gz   # 先留现场

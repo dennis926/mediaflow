@@ -482,7 +482,7 @@ purge 是唯一不可逆的操作，**必须先在演练工作区上跑通**，�
 | 交付 | 内容 |
 | --- | --- |
 | 迁移 M1 | `1789701100000-WorkspaceArchiveFields.ts`：`workspaces` 增 `archived_at`/`deleted_at`/`purge_after` + 复合索引 `(status, purge_after)`；历史 `suspended` → `archived` 并写审计 |
-| 迁移 M2 | `1789701200000-WorkspaceExportJobs.ts`：`workspace_export_jobs`（17 列，无外键） |
+| 迁移 M2 | `1789701200000-WorkspaceExportJobs.ts`：`workspace_export_jobs`（17 列，**当时**无外键；**已被第 5 步取代** → 可空 + `ON DELETE SET NULL`，见 §12.9） |
 | 迁移 M3 | `1789701300000-WorkspacePurgeBatches.ts`：`workspace_purge_batches`（20 列，含 `backup_sha256`/`social_accounts_destroyed`，无外键） |
 | 状态机 | `WorkspaceStatus = 'active' \| 'archived' \| 'soft_deleted'`（`suspended` 废弃）；实体新增三个时间列 |
 | 配置 | 新设置分组「工作区与租户」：`WORKSPACE_SOFT_DELETE_RETENTION_DAYS`(30, 7–365)、`WORKSPACE_PURGE_BACKUP_RETENTION_DAYS`(180, 30–3650)，均进入 `runtime().workspace` |
@@ -594,7 +594,35 @@ purge 是唯一不可逆的操作，**必须先在演练工作区上跑通**，�
 | 约束 4 生产验证 | 默认工作区 active、基线（1 内容 / 2 用户 / 1 工作区 / 0 任务）不变、无演练残留 |
 | 约束 5 配置隔离 | 演练实例 1 天（被夹到最小值 7 天，符合设计）；生产仍为未配置（默认 30 天） |
 
-## 12.9 第 5 步实施记录：外键补全（2026-09-21）
+## 12.9 第 5 步逐表外键清单（生产实测值，2026-09-21）
+
+生产库实际存在的 **16 条**指向 `workspaces(id)` 的外键（`conname` 可用于核查与回滚）：
+
+| # | 表 | ON DELETE | 约束名 |
+| --- | --- | --- | --- |
+| 1 | `contents` | CASCADE | `FK_contents_workspace` |
+| 2 | `content_variants` | CASCADE | `FK_content_variants_workspace` |
+| 3 | `content_revisions` | CASCADE | `FK_content_revisions_workspace` |
+| 4 | `content_reviews` | CASCADE | `FK_content_reviews_workspace` |
+| 5 | `publish_tasks` | CASCADE | `FK_publish_tasks_workspace` |
+| 6 | `analytics` | CASCADE | `FK_analytics_workspace` |
+| 7 | `track_events` | CASCADE | `FK_track_events_workspace` |
+| 8 | `media_assets` | CASCADE | `FK_media_assets_workspace` |
+| 9 | `social_accounts` | CASCADE | `FK_social_accounts_workspace` |
+| 10 | `brand_knowledge` | CASCADE | `FK_brand_knowledge_workspace` |
+| 11 | `content_templates` | CASCADE | `FK_content_templates_workspace` |
+| 12 | `platforms` | CASCADE | `FK_platforms_workspace` |
+| 13 | `workspace_members` | CASCADE | `FK_workspace_members_workspace` |
+| 14 | `notifications` | CASCADE | `FK_notifications_workspace` |
+| 15 | `workspace_export_jobs` | **SET NULL**（列可空） | `FK_workspace_export_jobs_workspace` |
+| 16 | `users` | **SET NULL**（M8 既有） | `FK_users_workspace_set_null` |
+
+**刻意不加外键**：`audit_logs`、`ai_generations`、`workspace_purge_batches`、`system_settings`、`roles`
+（逐表理由与"误加会怎样"见 `DESIGN-外键补全-第5步.md` §2.6；该清单已写进 `schema-integrity.e2e.spec.ts` 的断言）。
+
+**账本补列**：`workspace_purge_batches.retained_export_jobs`。
+
+## 12.10 第 5 步实施记录：外键补全（2026-09-21）
 
 | 交付 | 内容 |
 | --- | --- |
@@ -603,3 +631,13 @@ purge 是唯一不可逆的操作，**必须先在演练工作区上跑通**，�
 | 矛盾 1（导出任务） | 定稿 **SET NULL + 行保留**：purge 不再删任务行（改为账本记 `retainedExportJobs`）；`resolveDownload` 改为按 jobId 查（令牌已 HMAC 绑定）；**原申请人**可在有效期内重新申请链接（审计 `workspace.export.link_issued_after_purge`）；过期清理时删除已失去归属的行 |
 | 矛盾 2（RESTRICT × CASCADE） | 实测：正常数据（含 50 账号引用同一平台）删工作区**成功 10/10**（与约束创建顺序无关）；跨工作区引用（异常形态）会硬失败并整体回滚，这是 RESTRICT 的保护语义 → **保持 V1（不改 CASCADE 绕过）**；生产库此类引用 0 条；运维仍应走 purge 的显式删除顺序（账号先、平台后），不依赖 PG 的级联顺序 |
 | 验证 | 单元 12 条（导出链路新行为）；E2E：外键规则 4 条 + 级联实测 1 条（14 表级联清空、导出任务保留并置空、3 张账本表原样留下、旁观工作区不受影响）；迁移上下行各 16 次往返成功（`typeorm_migrations` 22 → 38）；purge 演练复跑通过（A 类全 0 / B 类保留 / C 类不变 / 备份可恢复 / 备份失败中止 / 无残留）；**专项实测**：清除后 pre-purge 链接与重新申请链接均可下载（200 + ZIP 魔数），外部人 403（`/root/.hermes/workspace/b0_4_step5_post_purge_download.log`） |
+
+## 13. 运维交接要点（B0.4 收尾）
+
+1. **删除工作区一律走 API**：`DELETE /api/workspaces/:id`（软删）→ 保留期内 `POST :id/restore`（恢复）→ 到期或手工
+   `DELETE /api/workspaces/:id/data`（永久清除）。**永远不要直接 `DELETE FROM workspaces`**（详见 `RUNBOOK-purge演练.md` §7.1）。
+2. **清除前备份**：`PURGE_BACKUP_ROOT`（默认 `/www/backup/mediaflow/purge`）保留 180 天，备份失败即中止且零删除。
+3. **产物取回**：清除后 7 天内，原申请人本人可重新申请一次性下载链接（步骤见 `RUNBOOK-purge演练.md` §7.3）。
+4. **巡检**：跨工作区引用必须为 0（§7.4）。
+5. **回滚**：16 个迁移的逆序回滚步骤见 `RUNBOOK-部署与回滚.md` §4.4.0。
+

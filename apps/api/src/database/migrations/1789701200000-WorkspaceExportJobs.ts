@@ -3,6 +3,8 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
 /**
  * B0.4 M2：租户数据导出任务表。
  *
+ * 【已被第 5 步取代】workspace_id 现为「可空 + ON DELETE SET NULL」（见 1789701512000-FkWorkspaceExportJobsWorkspace.ts）：
+ * 行保留以支持硬删后下载，但不再留悬空引用。以下为第 1 步当时的决定，保留作历史记录：
  * workspace_id **刻意不加外键**：导出产物要在工作区硬删后仍可下载到有效期结束，
  * 若加了 CASCADE，删工作区会把导出任务与下载入口一起删掉。
  *

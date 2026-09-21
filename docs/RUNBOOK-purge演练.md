@@ -166,3 +166,22 @@ purge 内部按"子表先删"的显式顺序执行（`social_accounts` 在 `plat
    账本与审计保留取证：`workspace_purge_batches.retained_export_jobs` 记录了清除时保留了多少个导出任务。
 
 **注意**：取回仅限"原申请人本人"，非申请人一律 403 —— 清除后的产物不会变成公开资源。
+
+### 7.4 例行巡检：跨工作区引用必须为 0
+
+`social_accounts.platform_id → platforms(id)` 是 `RESTRICT`，而 `platforms.workspace_id → workspaces(id)` 是 `CASCADE`。
+**同一工作区内的引用**删工作区一定成功（实测 10/10，含 50 个账号引用同一平台的放大场景）；
+**跨工作区引用**（B 工作区的账号指向 A 工作区的平台）会让删除**整体失败并回滚**——这是 RESTRICT 的保护语义
+（避免误删别人的平台字典），属于"响亮失败"，但必须能提前发现。建议每周或纳入监控跑一次，结果必须为 0：
+
+```bash
+export PGPASSWORD=$(grep -m1 '^DB_PASSWORD=' /www/wwwroot/mediaflow/.env | cut -d= -f2-)
+psql -X -w -h 127.0.0.1 -U mediaflow -d mediaflow -c "
+SELECT count(*) AS cross_workspace_refs
+  FROM social_accounts a JOIN platforms p ON p.id = a.platform_id
+ WHERE a.workspace_id <> p.workspace_id"
+```
+
+若非 0：① 先查明来源（正常流程不会产生，通常是手工 SQL 或历史遗留）；② 修正引用（把账号指向本工作区的同 code 平台），
+不要删数据；③ 修正后再执行 purge，否则 purge 会在删 `platforms` 时被 RESTRICT 挡住并整体回滚（数据不会损坏）。
+本项已列入 B0.9 的自动化巡检（CI 或监控）。

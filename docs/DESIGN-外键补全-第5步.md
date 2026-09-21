@@ -119,6 +119,50 @@
 
 **结论**：保持 V1（`platforms` CASCADE + `platform_id` RESTRICT），**不为了「让它不报错」而改成 CASCADE**——RESTRICT 是「平台字典被引用时不能删」的保护，跨工作区引用本就是不该出现的数据形态；真出现时**响亮失败并整体回滚**远好于静默删掉别人的凭据。同时立两条纪律：① purge 内部保持显式删除顺序（账号先、平台后），不依赖 PostgreSQL 的级联顺序；② 生产库加巡检断言「跨工作区引用 = 0」（本次核查为 0）。
 
+### 2.6 上线后的实际约束清单（逐表核对用）
+
+以下为生产库中**实际存在**的 16 条指向 `workspaces(id)` 的外键（`conname` 可直接用于核查与回滚）：
+
+| # | 表 | 列 | ON DELETE | 约束名 |
+| --- | --- | --- | --- | --- |
+| 1 | `contents` | `workspace_id` | CASCADE | `FK_contents_workspace` |
+| 2 | `content_variants` | `workspace_id` | CASCADE | `FK_content_variants_workspace` |
+| 3 | `content_revisions` | `workspace_id` | CASCADE | `FK_content_revisions_workspace` |
+| 4 | `content_reviews` | `workspace_id` | CASCADE | `FK_content_reviews_workspace` |
+| 5 | `publish_tasks` | `workspace_id` | CASCADE | `FK_publish_tasks_workspace` |
+| 6 | `analytics` | `workspace_id` | CASCADE | `FK_analytics_workspace` |
+| 7 | `track_events` | `workspace_id` | CASCADE | `FK_track_events_workspace` |
+| 8 | `media_assets` | `workspace_id` | CASCADE | `FK_media_assets_workspace` |
+| 9 | `social_accounts` | `workspace_id` | CASCADE | `FK_social_accounts_workspace` |
+| 10 | `brand_knowledge` | `workspace_id` | CASCADE | `FK_brand_knowledge_workspace` |
+| 11 | `content_templates` | `workspace_id` | CASCADE | `FK_content_templates_workspace` |
+| 12 | `platforms` | `workspace_id` | CASCADE | `FK_platforms_workspace` |
+| 13 | `workspace_members` | `workspace_id` | CASCADE | `FK_workspace_members_workspace` |
+| 14 | `notifications` | `workspace_id` | CASCADE | `FK_notifications_workspace` |
+| 15 | `workspace_export_jobs` | `workspace_id`（可空） | **SET NULL** | `FK_workspace_export_jobs_workspace` |
+| 16 | `users` | `workspace_id`（可空，M8 既有） | **SET NULL** | `FK_users_workspace_set_null` |
+
+核查 SQL（结果应与上表逐行一致）：
+
+```sql
+SELECT c.conrelid::regclass::text AS table_name, c.conname,
+       CASE c.confdeltype WHEN 'c' THEN 'CASCADE' WHEN 'n' THEN 'SET NULL'
+            WHEN 'r' THEN 'RESTRICT' WHEN 'a' THEN 'NO ACTION' END AS on_delete
+  FROM pg_constraint c
+ WHERE c.contype = 'f' AND c.confrelid = 'public.workspaces'::regclass
+ ORDER BY 1;
+```
+
+**刻意不加外键的 5 张表**（写死在 `schema-integrity.e2e.spec.ts` 里，加了会红）：
+
+| 表 | 为什么不加 | 若误加会怎样 |
+| --- | --- | --- |
+| `audit_logs` | 合规留痕：工作区被清除后审计仍须长期可查 | 加 CASCADE → 清除工作区时**连证据一起删** |
+| `ai_generations` | AI 成本账本（B0.7 计费同口径），`content_id` 已是 SET NULL 保留行 | 同上，成本/用量无法追溯 |
+| `workspace_purge_batches` | 清除账本本身记录"哪个工作区何时被谁清除"，父行当然不存在 | 加外键 → 账本永远写不进去（或写进去就被级联删） |
+| `system_settings` | 名义全局却带 `workspace_id`，语义待澄清（B0.5 处理） | 过早锁定语义，B0.5 迁移成本更高 |
+| `roles` | 全局角色字典，被 `user_roles` 引用；`workspace_id` 是历史遗留列 | 全局字典被工作区删除牵连 |
+
 ## 3. 迁移与回滚方案
 
 **一表一迁移，互不依赖**（失败可单独回滚，不影响其他表）：
