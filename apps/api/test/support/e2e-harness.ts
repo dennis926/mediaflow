@@ -1,5 +1,5 @@
 import { INestApplication, ValidationPipe } from '@nestjs/common';
-import { existsSync, rmSync, unlinkSync } from 'node:fs';
+import { existsSync, readdirSync, rmSync, statSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { Test } from '@nestjs/testing';
 import cookieParser from 'cookie-parser';
@@ -82,6 +82,44 @@ export async function assertDefaultWorkspaceIsActive(): Promise<void> {
   }
 }
 
+export const TEST_ARTIFACT_PATTERNS = ['e2e-%', 'E2E%', 'concurrent-%', 'ok.png'] as const;
+
+/**
+ * Sweep residue left behind by an earlier run that crashed or was killed (teardown never ran).
+ * Only touches rows that look like this test-suite's own artifacts AND whose file is missing —
+ * never a real upload. Runs before each suite so residue cannot accumulate unnoticed.
+ */
+export async function sweepStaleTestResidue(dataSource: DataSource, log: (message: string) => void): Promise<void> {
+  const rows: Array<{ id: string; stored_name: string; original_name: string }> = await dataSource.query(
+    `SELECT id, stored_name, original_name FROM media_assets
+      WHERE original_name LIKE 'e2e-%' OR original_name IN ('ok.png') OR original_name LIKE 'concurrent-%'
+         OR group_name LIKE 'E2E%'`,
+  );
+  const mediaDir = join(process.cwd(), '../../uploads/media');
+  const orphanIds: string[] = [];
+  for (const row of rows) {
+    if (!existsSync(join(mediaDir, row.stored_name))) orphanIds.push(row.id);
+  }
+  if (orphanIds.length > 0) {
+    await dataSource.query('DELETE FROM media_assets WHERE id = ANY($1)', [orphanIds]);
+  }
+  const tmpDir = join(process.cwd(), '../../uploads/tmp');
+  let removedTmp = 0;
+  if (existsSync(tmpDir)) {
+    for (const file of readdirSync(tmpDir)) {
+      const full = join(tmpDir, file);
+      const stat = statSync(full);
+      if (Date.now() - stat.mtimeMs > 3600_000) {
+        unlinkSync(full);
+        removedTmp += 1;
+      }
+    }
+  }
+  if (orphanIds.length > 0 || removedTmp > 0) {
+    log(`[E2E] 已清扫上一次运行的残留：素材孤儿行 ${orphanIds.length} 条、临时文件 ${removedTmp} 个`);
+  }
+}
+
 export async function createHarness(titlePrefix: string, options: { requireApproval?: boolean } = {}): Promise<E2eHarness> {
   // 任何套件在启动应用之前都先过这道闸门
   await assertDefaultWorkspaceIsActive();
@@ -104,6 +142,8 @@ export async function createHarness(titlePrefix: string, options: { requireAppro
   await app.init();
 
   const dataSource = app.get(DataSource);
+  // A crashed or killed run skips teardown, so sweep its leftovers before the suite starts.
+  await sweepStaleTestResidue(dataSource, (message) => console.warn(message));
 
   // 上一次异常退出可能留下测试账号：清掉 10 分钟前的残留（10 分钟内的属于正在运行的套件）。
   await dataSource.query(
