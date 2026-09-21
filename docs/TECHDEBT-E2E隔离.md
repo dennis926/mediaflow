@@ -70,6 +70,6 @@
 **处置**
 1. 已清理全部残留（清单存档 `/root/.hermes/workspace/b0_4_residue_media_rows.txt`），清理后 `media_assets = 0`、`uploads/tmp` 为空、孤儿通知 0；生产基线（工作区 1 / 内容 1 / 用户 2 / 任务 0）未变。
 2. **harness 增加启动前清扫** `sweepStaleTestResidue()`：每个套件启动时，删除"特征名匹配 + 文件确已不存在"的素材孤儿行，以及超过 1 小时的 tmp 残留（只认测试特征名与孤儿状态，绝不动真实上传）。已用"植入假残留 → 跑套件 → 残留被清"验证 ✓。
-3. 新增可复用清理脚本 `scripts/cleanup-test-residue.mjs`（默认干跑，`--apply` 才删除），供任何一次中断运行后手工收尾。
+3. 新增可复用清理脚本 `apps/api/scripts/cleanup-test-residue.mjs`（默认干跑，`--apply` 才删除），供任何一次中断运行后手工收尾。
 
 **技术债状态**：本条不改变 B0.9 的结论——根因仍是"E2E 直接读写生产库与 Redis"，彻底方案仍是临时 PG + Redis（`docker-compose.e2e.yml`）。本次新增的清扫只是把"残留看不见"变成"残留会被看见并自动收拾"，不替代隔离。

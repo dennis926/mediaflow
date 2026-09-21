@@ -16,7 +16,7 @@ import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 
 const APPLY = process.argv.includes('--apply');
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '../..');
 const MEDIA_DIR = join(ROOT, 'uploads/media');
 const TMP_DIR = join(ROOT, 'uploads/tmp');
 const TMP_AGE_MS = 60 * 60 * 1000;
