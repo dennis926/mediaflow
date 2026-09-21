@@ -1,3 +1,4 @@
+import type { QuotaService } from '../../billing/quota.service';
 import { HttpException, HttpStatus } from '@nestjs/common';
 import { ObjectLiteral, Repository } from 'typeorm';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -53,8 +54,17 @@ function buildService(overrides: { recentCount?: number; dailyTokens?: number } 
   } as unknown as AiProviderFactory;
 
   const workspaceContext = { current: vi.fn(async () => ({ tenantId: 't', workspaceId: WORKSPACE_ID })) } as unknown as WorkspaceContextService;
-  return new AiService(generations, providers, workspaceContext, pricing);
+  return new AiService(generations, providers, workspaceContext, pricing, quotaStub);
 }
+
+/** B0.7：配额服务替身（默认放行、记录用量） */
+const quotaStub = {
+  assertQuota: vi.fn(async () => undefined),
+  recordUsage: vi.fn(async () => undefined),
+  status: vi.fn(async () => null),
+  statusAll: vi.fn(async () => []),
+  effectivePlan: vi.fn(async () => ({ code: 'test', name: '测试计划' })),
+} as unknown as QuotaService;
 
 describe('AI 额度保护（可配置）', () => {
   afterEach(() => applyRuntimeConfig({}));

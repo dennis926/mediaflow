@@ -1,3 +1,4 @@
+import type { QuotaService } from '../../billing/quota.service';
 import type { DataDeletionRequest } from '../entities/data-deletion-request.entity';
 import { describe, expect, it, vi, afterEach } from 'vitest';
 import type { Repository } from 'typeorm';
@@ -92,6 +93,10 @@ function build(options: {
     update: vi.fn(async () => ({ affected: 1 })),
   } as unknown as Repository<DataDeletionRequest>;
 
+  const quotaStub = {
+    assertQuota: vi.fn(async () => undefined),
+    recordUsage: vi.fn(async () => undefined),
+  } as unknown as QuotaService;
   const service = new WorkspaceService(
     workspaces,
     members,
@@ -103,6 +108,7 @@ function build(options: {
     workspaceContext,
     audit,
     sessions,
+    quotaStub,
   );
   return { service, auditRecord, invalidateWorkspace, tasks, exportJobs, notify, store };
 }

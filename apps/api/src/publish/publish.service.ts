@@ -20,6 +20,7 @@ import {
   buildAiMetadata,
 } from '@mediaflow/shared';
 import { In, IsNull, Repository } from 'typeorm';
+import { QuotaService } from '../modules/billing/quota.service';
 import { AuditService } from '../audit/audit.service';
 import { runtime } from '../modules/settings/runtime-config';
 import { WorkspaceContextService } from '../common/workspace-context.service';
@@ -72,6 +73,7 @@ export class PublishService {
     private readonly audit: AuditService,
     private readonly workspaceContext: WorkspaceContextService,
     private readonly settings: SettingsService,
+    private readonly quota: QuotaService,
   ) {}
 
   /** Retry spacing is configurable at runtime so local verification does not wait five minutes. */
@@ -102,6 +104,8 @@ export class PublishService {
   }
 
   async createTasks(dto: CreatePublishTaskDto, actor: PublishActor): Promise<PublishTask[]> {
+    // B0.7：发布次数配额（计划里为 0 表示不限制）
+    await this.quota.assertQuota('publish', 1);
     const scope = await this.workspaceContext.current();
     const content = await this.contents.findOne({ where: { id: dto.contentId, workspaceId: scope.workspaceId } });
     if (!content) throw new NotFoundException('内容不存在或无权访问');
@@ -208,6 +212,10 @@ export class PublishService {
       created.push(saved);
     }
 
+    // B0.7：用量流水（每个任务记一次；计数器同月累加）
+    for (const task of created) {
+      await this.quota.recordUsage('publish', 1, { sourceType: 'publish_task', sourceId: task.id });
+    }
     this.logger.log(`已创建 ${created.length} 个发布任务（内容：${content.title}）`);
     return created;
   }

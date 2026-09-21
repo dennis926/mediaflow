@@ -1,3 +1,4 @@
+import type { QuotaService } from '../../modules/billing/quota.service';
 import { BadRequestException } from '@nestjs/common';
 import { AiFlagType, ContentStatus, PlatformCode, PublishTaskStatus } from '@mediaflow/shared';
 import { ObjectLiteral, Repository } from 'typeorm';
@@ -79,9 +80,19 @@ function buildService(options: {
     audit,
     workspaceContext,
     settings,
+    quotaStub,
   );
   return { service, queue, tasks, reviews, settings };
 }
+
+/** B0.7：配额服务替身（默认放行、记录用量） */
+const quotaStub = {
+  assertQuota: vi.fn(async () => undefined),
+  recordUsage: vi.fn(async () => undefined),
+  status: vi.fn(async () => null),
+  statusAll: vi.fn(async () => []),
+  effectivePlan: vi.fn(async () => ({ code: 'test', name: '测试计划' })),
+} as unknown as QuotaService;
 
 describe('PublishService AI disclosure', () => {
   it('appends the mandatory suffix for AI generated bodies', async () => {

@@ -12,6 +12,7 @@ import { WorkspaceExportJob } from './entities/workspace-export-job.entity';
 import { DataDeletionRequest, DataDeletionRequestStatus } from './entities/data-deletion-request.entity';
 import { PublishTask } from '../publish/entities/publish-task.entity';
 import { NotificationService } from '../notification/notification.service';
+import { QuotaService } from '../billing/quota.service';
 import { runtime } from '../settings/runtime-config';
 
 /** 合规删除请求的状态视图（B0.6）：前端/合规人员据此看"承诺何时前清除、是否已完成"。 */
@@ -84,6 +85,7 @@ export class WorkspaceService {
     private readonly workspaceContext: WorkspaceContextService,
     private readonly audit: AuditService,
     private readonly sessions: AuthSessionService,
+    private readonly quota: QuotaService,
   ) {}
 
   /** 当前用户能看到/切换的工作区列表。 */
@@ -594,6 +596,8 @@ export class WorkspaceService {
     if (existing) {
       await this.members.update({ id: existing.id }, { roleCodes: input.roleCodes });
     } else {
+      // B0.7：成员数配额（瞬时口径：按当前成员数算）。只有"新增成员"才消耗配额，改角色不消耗。
+      await this.quota.assertQuota('member', 1);
       await this.members.save(
         this.members.create({
           tenantId: scope.tenantId,
@@ -603,6 +607,11 @@ export class WorkspaceService {
           invitedBy: actor.id ?? null,
         }),
       );
+      await this.quota.recordUsage('member', 1, {
+        sourceType: 'workspace_member',
+        sourceId: input.userId,
+        meta: { workspaceId },
+      });
     }
     await this.audit.record({
       action: existing ? 'workspace.member_update' : 'workspace.member_add',

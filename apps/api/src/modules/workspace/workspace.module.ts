@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { BillingModule } from '../billing/billing.module';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Role } from './entities/role.entity';
 import { User } from './entities/user.entity';
@@ -22,7 +23,7 @@ import { WorkspaceExportCleanupTask } from './workspace-export.task';
 import { UserService } from './user.service';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([User, Role, Workspace, WorkspaceMember, WorkspaceExportJob, WorkspacePurgeBatch, PublishTask, DataDeletionRequest]), NotificationModule, SettingsModule],
+  imports: [TypeOrmModule.forFeature([User, Role, Workspace, WorkspaceMember, WorkspaceExportJob, WorkspacePurgeBatch, PublishTask, DataDeletionRequest]), NotificationModule, SettingsModule, BillingModule],
   controllers: [UserController, WorkspaceController],
   // CryptoService 是无状态服务，这里直接提供（SettingsModule 未导出它）；导出下载令牌的 HMAC 签名要用它
   providers: [

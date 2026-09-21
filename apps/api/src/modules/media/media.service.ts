@@ -18,6 +18,7 @@ import { extname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { Readable } from 'node:stream';
 import { IsNull, Like, Repository } from 'typeorm';
+import { QuotaService } from '../billing/quota.service';
 import { AuditService } from '../../audit/audit.service';
 import { WorkspaceContextService } from '../../common/workspace-context.service';
 import { runtime } from '../settings/runtime-config';
@@ -120,6 +121,7 @@ export class MediaService {
     @InjectRepository(MediaAsset) private readonly assets: Repository<MediaAsset>,
     private readonly workspaceContext: WorkspaceContextService,
     private readonly audit: AuditService,
+    private readonly quota: QuotaService,
   ) {}
 
   /** 素材目录：可用 MEDIA_STORAGE_DIR 指到挂载盘或对象存储的本地挂载点。 */
@@ -224,6 +226,10 @@ export class MediaService {
         actorName: actor.name ?? null,
         payload: { originalName: file.originalname, mimeType: detected, declaredType: file.mimetype, size: file.size, mode: 'disk' },
       });
+      await this.quota.recordUsage('upload_mb', Math.round((file.size / (1024 * 1024)) * 100) / 100, {
+        sourceType: 'media_asset',
+        sourceId: saved.id,
+      });
       this.logger.log(`素材已上传（磁盘暂存）：${file.originalname}（${(file.size / 1024).toFixed(0)}KB）`);
       return saved;
     } catch (error) {
@@ -240,6 +246,9 @@ export class MediaService {
     groupName?: string,
   ): Promise<MediaAsset> {
     this.assertAllowed(file.mimetype, file.size, file.buffer);
+    // B0.7：素材存储配额（瞬时口径：按当前总占用计算）
+    const megabytes = Math.round((file.size / (1024 * 1024)) * 100) / 100;
+    await this.quota.assertQuota('upload_mb', megabytes);
     const scope = await this.workspaceContext.current();
     const dir = this.storageDir();
     mkdirSync(dir, { recursive: true });

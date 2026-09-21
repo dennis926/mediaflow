@@ -1,3 +1,4 @@
+import type { QuotaService } from '../../billing/quota.service';
 import { BadRequestException, HttpException } from '@nestjs/common';
 import { existsSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -42,7 +43,7 @@ function buildService(options: { saveFails?: boolean } = {}) {
   const workspaceContext = {
     current: vi.fn(async () => ({ tenantId: 't-1', workspaceId: 'w-1' })),
   } as unknown as WorkspaceContextService;
-  const service = new MediaService(assets, workspaceContext, audit);
+  const service = new MediaService(assets, workspaceContext, audit, quotaStub);
   applyRuntimeConfig({ MEDIA_STORAGE_DIR: workDir, MEDIA_MAX_FILE_MB: '1', MEDIA_ALLOWED_TYPES: 'image/png,image/jpeg' });
   return { service, workDir, incomingDir, assets, audit };
 }
@@ -54,6 +55,15 @@ function tempFile(dir: string, name: string, content: Buffer): string {
 }
 
 afterEach(() => applyRuntimeConfig({}));
+
+/** B0.7：配额服务替身（默认放行、记录用量） */
+const quotaStub = {
+  assertQuota: vi.fn(async () => undefined),
+  recordUsage: vi.fn(async () => undefined),
+  status: vi.fn(async () => null),
+  statusAll: vi.fn(async () => []),
+  effectivePlan: vi.fn(async () => ({ code: 'test', name: '测试计划' })),
+} as unknown as QuotaService;
 
 describe('素材上传：磁盘暂存 + 校验 + 原子移动（任务 4 / 审计 P2-3）', () => {
   it('合法 PNG：移动成功、临时文件消失、入库类型以文件头为准', async () => {

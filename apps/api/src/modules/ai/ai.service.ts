@@ -20,6 +20,7 @@ import { salvageJson } from './json-salvage';
 const STRICT_JSON_HINT = '\n\n【重要】只输出一个 JSON 对象，不要代码块（```）、不要解释文字、不要前后缀，第一个字符必须是 {，最后一个字符必须是 }。';
 import { AiProviderFactory } from './ai-provider.factory';
 import { estimateCost as estimateLegacyCost, runtime } from '../settings/runtime-config';
+import { QuotaService } from '../billing/quota.service';
 import { ModelPricingService } from './model-pricing.service';
 
 export interface AiInvocationMeta {
@@ -65,6 +66,7 @@ export class AiService {
     private readonly aiProviders: AiProviderFactory,
     private readonly workspaceContext: WorkspaceContextService,
     private readonly pricing: ModelPricingService,
+    private readonly quota: QuotaService,
   ) {}
 
   /** Reads the effective provider from the runtime settings (database over .env). */
@@ -610,6 +612,9 @@ export class AiService {
    * 关闭限流（填 0）时不做任何查询，不增加正常开销。
    */
   private async assertWithinQuota(workspaceId: string): Promise<void> {
+    // B0.7：先过"订阅计划"的配额闸门（额度 0 = 不限制；超限抛 403 并写审计 quota.exceeded）
+    await this.quota.assertQuota('ai_tokens', 1);
+
     const { rateLimitPerMinute, dailyTokenQuota } = runtime().ai;
 
     if (rateLimitPerMinute > 0) {

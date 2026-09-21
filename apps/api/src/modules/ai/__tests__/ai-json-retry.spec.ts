@@ -1,3 +1,4 @@
+import type { QuotaService } from '../../billing/quota.service';
 import { ObjectLiteral, Repository } from 'typeorm';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AiFlagType, PlatformCode } from '@mediaflow/shared';
@@ -45,7 +46,7 @@ function buildService(replies: string[]): { service: AiService; complete: Return
     current: vi.fn(async () => ({ tenantId: '11111111-1111-4111-8111-111111111111', workspaceId: WORKSPACE_ID })),
   } as unknown as WorkspaceContextService;
 
-  return { service: new AiService(generations, providers, workspaceContext, pricing), complete };
+  return { service: new AiService(generations, providers, workspaceContext, pricing, quotaStub), complete };
 }
 
 const adaptInput: AdaptInput = {
@@ -55,6 +56,15 @@ const adaptInput: AdaptInput = {
   platforms: [PlatformCode.WechatMp],
   aiFlagType: AiFlagType.None,
 };
+
+/** B0.7：配额服务替身（默认放行、记录用量） */
+const quotaStub = {
+  assertQuota: vi.fn(async () => undefined),
+  recordUsage: vi.fn(async () => undefined),
+  status: vi.fn(async () => null),
+  statusAll: vi.fn(async () => []),
+  effectivePlan: vi.fn(async () => ({ code: 'test', name: '测试计划' })),
+} as unknown as QuotaService;
 
 describe('AI JSON 容错与重试', () => {
   afterEach(() => applyRuntimeConfig({}));
@@ -109,7 +119,7 @@ describe('AI JSON 容错与重试', () => {
     const workspaceContext = {
       current: vi.fn(async () => ({ tenantId: 't', workspaceId: WORKSPACE_ID })),
     } as unknown as WorkspaceContextService;
-    const service = new AiService(generations, providers, workspaceContext, pricing);
+    const service = new AiService(generations, providers, workspaceContext, pricing, quotaStub);
 
     await expect(service.adapt(adaptInput, {})).rejects.toThrow(/最大长度截断/);
   });

@@ -1,5 +1,6 @@
+import type { QuotaService } from '../../billing/quota.service';
 import { BadRequestException } from '@nestjs/common';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { MediaService, detectMimeType } from '../media.service';
 import { applyRuntimeConfig, runtime } from '../../settings/runtime-config';
 
@@ -8,8 +9,17 @@ const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0, 0, 0]);
 const MP4 = Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from('ftypisom'), Buffer.alloc(8)]);
 const GIF = Buffer.from('GIF89a\x01\x00\x01\x00', 'latin1');
 
+/** B0.7：配额服务替身（默认放行、记录用量） */
+const quotaStub = {
+  assertQuota: vi.fn(async () => undefined),
+  recordUsage: vi.fn(async () => undefined),
+  status: vi.fn(async () => null),
+  statusAll: vi.fn(async () => []),
+  effectivePlan: vi.fn(async () => ({ code: 'test', name: '测试计划' })),
+} as unknown as QuotaService;
+
 describe('素材库文件类型校验', () => {
-  const service = new MediaService({} as never, {} as never, {} as never);
+  const service = new MediaService({} as never, {} as never, {} as never, quotaStub);
 
   it('按文件头识别真实类型', () => {
     expect(detectMimeType(PNG)).toBe('image/png');
