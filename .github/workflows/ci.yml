@@ -3,10 +3,13 @@
 # 目标：让"坏代码进不了 main"。CI 失败即视为不可合并（需要在 GitHub 仓库设置里开启分支保护，
 # 见 docs/RUNBOOK-部署与回滚.md 第六节——那一步只能由仓库管理员在网页上点）。
 #
-# 为什么拆成两个 job：全流程串行约 4.5-5 分钟，接近 5 分钟上限；
-# 拆成「静态检查」与「单元测试」并行执行，墙钟时间减半，任一失败都会让整个 CI 变红。
+# 四个 job 并行执行，墙钟时间约等于最慢的那个：
+#   static  静态检查（类型/规范/凭据/依赖漏洞/部署断言）
+#   test    单元测试（全部包）
+#   docker  容器镜像构建（B0.8 交付物；有 registry 凭据时才推送）
+#   e2e     端到端测试（B0.9：**自带临时 PG + Redis 容器**，绝不用生产依赖）
 #
-# 明确不做的事：不跑 E2E（需要真实数据库/Redis 与管理员凭据）、不降级 audit 等级、不跳过任何步骤。
+# 明确不做的事：不降级 audit 等级、不跳过任何步骤、不在没有凭据时伪造 E2E 通过。
 
 name: CI
 
@@ -70,3 +73,81 @@ jobs:
         run: pnpm build:packages
       - name: 运行单元测试
         run: pnpm -r test
+
+  docker:
+    name: 容器镜像构建（不推送）
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: pnpm
+      - name: 安装依赖（构建镜像所需的 workspace 清单/锁文件已在仓库里）
+        run: pnpm install --frozen-lockfile
+      - name: 准备容器环境文件（CI 用占位密钥，仅用于构建期校验）
+        run: |
+          cp .env.docker.example .env.docker
+          sed -i 's/^JWT_SECRET=.*/JWT_SECRET=ci-only-'"$(head -c 36 /dev/urandom | base64 | tr -d '=+/' | head -c 48)"'/' .env.docker
+          sed -i 's/^SETTINGS_ENCRYPTION_KEY=.*/SETTINGS_ENCRYPTION_KEY=ci-only-'"$(head -c 24 /dev/urandom | base64 | tr -d '=+/' | head -c 32)"'/' .env.docker
+          sed -i 's/^DB_PASSWORD=.*/DB_PASSWORD=ci-only-db-password/' .env.docker
+          chmod 600 .env.docker
+      - name: 校验 compose 配置
+        run: docker compose --env-file .env.docker config --quiet
+      - name: 构建 API / Web 镜像
+        run: docker compose --env-file .env.docker build api web
+      - name: 镜像自检（非 root 运行 + 健康检查指令存在）
+        run: |
+          test "$(docker run --rm --entrypoint id mediaflow-api:local -u)" -ne 0
+          docker image inspect mediaflow-api:local --format '{{json .Config.Healthcheck.Test}}' | grep -q health
+          docker image inspect mediaflow-web:local --format '{{json .Config.Healthcheck.Test}}' | grep -q curl
+      - name: 推送镜像（仅当配置了 registry 凭据）
+        if: ${{ secrets.REGISTRY_URL != '' && secrets.REGISTRY_USERNAME != '' }}
+        run: |
+          echo "${{ secrets.REGISTRY_PASSWORD }}" | docker login "${{ secrets.REGISTRY_URL }}" -u "${{ secrets.REGISTRY_USERNAME }}" --password-stdin
+          TAG="${GITHUB_SHA::7}"
+          for image in mediaflow-api mediaflow-web; do
+            docker tag "$image:local" "${{ secrets.REGISTRY_URL }}/$image:$TAG"
+            docker tag "$image:local" "${{ secrets.REGISTRY_URL }}/$image:latest"
+            docker push "${{ secrets.REGISTRY_URL }}/$image:$TAG"
+            docker push "${{ secrets.REGISTRY_URL }}/$image:latest"
+          done
+      - name: 未配置 registry（记录为跳过）
+        if: ${{ secrets.REGISTRY_URL == '' }}
+        run: echo "未配置 REGISTRY_URL/REGISTRY_USERNAME/REGISTRY_PASSWORD —— 本次只做本地构建验证（推送留待用户提供 registry 凭据）"
+
+  e2e:
+    name: 端到端（隔离临时 PG + Redis）
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # 需要在仓库 secrets 里配置 E2E_ADMIN_EMAIL / E2E_ADMIN_PASSWORD（临时库里的测试账号）
+    if: ${{ secrets.E2E_ADMIN_PASSWORD != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: pnpm
+      - name: 安装依赖
+        run: pnpm install --frozen-lockfile
+      - name: 构建共享包
+        run: pnpm build:packages
+      - name: 写 E2E 凭据（只写账号，容器与库由 runner 自己拉起）
+        env:
+          E2E_ADMIN_EMAIL: ${{ secrets.E2E_ADMIN_EMAIL }}
+          E2E_ADMIN_PASSWORD: ${{ secrets.E2E_ADMIN_PASSWORD }}
+        run: |
+          printf 'E2E_ADMIN_EMAIL=%s\nE2E_ADMIN_PASSWORD=%s\n' "$E2E_ADMIN_EMAIL" "$E2E_ADMIN_PASSWORD" > .env.e2e
+          chmod 600 .env.e2e
+      - name: 端到端（自带临时 Postgres + Redis，跑完销毁；生产库哨兵必须零命中）
+        run: node scripts/run-e2e.mjs
+      - name: 未配置 E2E 凭据（记录为跳过）
+        if: ${{ secrets.E2E_ADMIN_PASSWORD == '' }}
+        run: echo "未配置 E2E_ADMIN_PASSWORD —— 跳过 E2E（不伪造通过）"

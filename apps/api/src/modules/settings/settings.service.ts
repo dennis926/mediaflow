@@ -80,8 +80,17 @@ export class SettingsService implements OnModuleInit {
   async flat(): Promise<Record<string, string | undefined>> {
     const values: Record<string, string | undefined> = {};
     for (const definition of SETTING_DEFINITIONS) {
-      const value = await this.get(definition.key);
-      if (value !== null && value !== undefined && value !== '') values[definition.key] = value;
+      try {
+        const value = await this.get(definition.key);
+        if (value !== null && value !== undefined && value !== '') values[definition.key] = value;
+      } catch (error) {
+        /**
+         * 单个键读取失败（典型场景：数据库还没跑迁移/种子）不能让整份运行时配置退回代码默认值——
+         * 那样会连**环境变量**提供的兜底值一起丢掉（B0.8 实测：容器里 API 因此误启动了队列消费者）。
+         * 这里逐键容错，环境的兜底仍然会通过 get() 生效。
+         */
+        this.logger.debug(`配置项 ${definition.key} 读取失败，已跳过：${error instanceof Error ? error.message : String(error)}`);
+      }
     }
     return values;
   }

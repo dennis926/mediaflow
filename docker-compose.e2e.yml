@@ -1,0 +1,46 @@
+# MediaFlow E2E 专用临时依赖（B0.9 硬要求）
+#
+# 目的：让端到端测试**完全不碰生产数据库与 Redis**。
+#   - 临时 Postgres / Redis：无持久卷（tmpfs 加速，容器删掉即全部消失）
+#   - 只映射到高位端口（55432 / 56379），与生产的 5432 / 6379 互不干扰
+#   - 库名固定为 mediaflow_e2e：runner 会在启动前断言"目标库名不是生产库名"，否则拒绝运行
+#
+# 用法（由 scripts/run-e2e.mjs 自动管理，一般不用手工执行）：
+#   docker compose -f docker-compose.e2e.yml up -d --wait
+#   docker compose -f docker-compose.e2e.yml down -v
+
+name: mediaflow-e2e
+
+services:
+  postgres-e2e:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: mediaflow_e2e
+      POSTGRES_USER: mediaflow_e2e
+      POSTGRES_PASSWORD: mediaflow_e2e
+      # 关闭 fsync，让建库与迁移快很多（数据本来就要丢）
+      POSTGRES_INITDB_ARGS: '--no-sync'
+    command: ['postgres', '-c', 'fsync=off', '-c', 'synchronous_commit=off', '-c', 'full_page_writes=off', '-c', 'max_connections=100']
+    ports:
+      - '127.0.0.1:55432:5432'
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U mediaflow_e2e -d mediaflow_e2e']
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+
+  redis-e2e:
+    image: redis:7-alpine
+    command: ['redis-server', '--appendonly', 'no', '--save', '']
+    ports:
+      - '127.0.0.1:56379:6379'
+    tmpfs:
+      - /data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 3s
+      timeout: 3s
+      retries: 20

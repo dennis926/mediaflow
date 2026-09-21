@@ -1,0 +1,50 @@
+# MediaFlow Web（Next.js）镜像（多阶段构建，非 root 运行）
+#
+# 构建：docker build -f Dockerfile.web -t mediaflow-web:local .
+# 运行：见 docker-compose.yml（web 容器只跑 Next 服务器，静态资源由它自己提供；对外仍建议走 nginx/反代）
+
+# ---------- 1. 依赖 ----------
+FROM node:20-alpine AS deps
+ENV PNPM_HOME=/pnpm PATH=/pnpm:$PATH
+# CI=true：pnpm 在非交互环境不要弹确认（实测构建时弹过 "modules directories will be removed… Proceed?"）
+ENV CI=true
+# corepack 会按 package.json 的 packageManager 字段自动选版本，避免手动 pin 漂移
+RUN corepack enable
+WORKDIR /repo
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
+COPY apps/web/package.json apps/web/
+COPY packages/shared/package.json packages/shared/
+COPY packages/design-tokens/package.json packages/design-tokens/
+RUN NODE_ENV=development pnpm install --frozen-lockfile --filter @mediaflow/web... --filter @mediaflow/shared --filter @mediaflow/design-tokens
+
+# ---------- 2. 构建 ----------
+FROM deps AS build
+WORKDIR /repo
+COPY tsconfig.base.json ./
+COPY packages ./packages
+COPY apps/web ./apps/web
+# Next 构建必须在 NODE_ENV=production 下跑（否则产物是 dev 模式的）
+RUN NODE_ENV=development pnpm build:packages \
+ && NODE_ENV=production pnpm --filter @mediaflow/web run build \
+ && NODE_ENV=production pnpm install --prod --frozen-lockfile --filter @mediaflow/web...
+
+# ---------- 3. 运行 ----------
+FROM node:20-alpine AS runtime
+RUN apk add --no-cache tini curl \
+ && addgroup -S mediaflow && adduser -S -G mediaflow -h /app mediaflow
+WORKDIR /app
+ENV NODE_ENV=production PORT=3000 HOSTNAME=0.0.0.0
+COPY --from=build --chown=mediaflow:mediaflow /repo/node_modules ./node_modules
+COPY --from=build --chown=mediaflow:mediaflow /repo/apps/web/node_modules ./apps/web/node_modules
+COPY --from=build --chown=mediaflow:mediaflow /repo/apps/web/.next ./apps/web/.next
+COPY --from=build --chown=mediaflow:mediaflow /repo/apps/web/public ./apps/web/public
+COPY --from=build --chown=mediaflow:mediaflow /repo/apps/web/package.json ./apps/web/package.json
+COPY --from=build --chown=mediaflow:mediaflow /repo/apps/web/next.config.mjs ./apps/web/next.config.mjs
+COPY --from=build --chown=mediaflow:mediaflow /repo/packages ./packages
+USER mediaflow
+WORKDIR /app/apps/web
+EXPOSE 3000
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+  CMD curl -fsS http://127.0.0.1:3000/ > /dev/null || exit 1
+ENTRYPOINT ["/sbin/tini", "--"]
+CMD ["node", "node_modules/next/dist/bin/next", "start", "-p", "3000", "-H", "0.0.0.0"]

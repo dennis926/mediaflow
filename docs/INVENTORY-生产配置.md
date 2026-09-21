@@ -108,6 +108,18 @@
 | B0.7 新增 | 表 `plans`（平台级字典，无 workspace_id）/ `subscriptions` / `usage_records` / `invoices`（三张 B 类账本，刻意不加外键）/ `quotas`（随工作区 CASCADE）；默认计划 `internal`（四类配额 0 = 不限制） |
 | B0.6 新增 | `contents.ai_flag_exempt_reason`、`content_reviews.operator_ip`/`operator_ua`、表 `data_deletion_requests`（合规删除台账） |
 
+## 八之三、容器化与 E2E 隔离（B0.8 / B0.9，2026-09-21）
+
+| 项目 | 现状 |
+| --- | --- |
+| Docker | **29.1.3（本机新装，为 B0.8 构建与容器实测）**；`docker compose` v2 |
+| 容器栈（可选部署路径） | `docker-compose.yml`：postgres / redis / api / worker / web；宿主端口 **api 4300**、**web 3300**；数据库与 Redis **不发布端口** |
+| 与生产的关系 | 生产仍由 **systemd** 提供服务（4000/3000）；容器栈用独立端口并存，切换步骤见 `RUNBOOK-容器化部署.md` §5 |
+| 镜像 tag | `.deploy/last-good-tag`（当前）与 `.deploy/previous-tag`（回滚目标）；`scripts/deploy-docker.sh` / `rollback-docker.sh` |
+| 容器内迁移入口 | `node dist/database/cli.js migrate|migrate:revert|seed`（运行时镜像没有 ts-node/src） |
+| E2E 隔离 | `docker-compose.e2e.yml`（临时 PG 55432 / Redis 56379，tmpfs，跑完销毁）；runner 带生产库哨兵与 Redis run_id 断言 |
+| 跨工作区引用巡检 | 已进运行监控（第 7 项 `cross_workspace_refs`）+ CI |
+
 ## 九、变更纪律
 
 1. 任何配置/代码变更走 `bash scripts/deploy.sh`（断言失败即拒绝启动）。

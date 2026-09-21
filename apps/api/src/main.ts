@@ -32,6 +32,11 @@ async function bootstrap(): Promise<void> {
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true, forbidNonWhitelisted: false }));
   app.useGlobalInterceptors(new ResponseInterceptor());
   app.useGlobalFilters(new AllExceptionsFilter());
+  /**
+   * 优雅关闭（B0.8 容器化必需）：收到 SIGTERM 时先关 HTTP 服务、再释放 Redis/DB 连接。
+   * 没有它，`docker stop` 会让进行中的请求被硬断，队列消费者也可能留下未确认消息。
+   */
+  app.enableShutdownHooks();
 
   const port = Number(config.get<string>('APP_PORT') ?? 4000);
   // In production the API sits behind nginx and must not be reachable from the internet.

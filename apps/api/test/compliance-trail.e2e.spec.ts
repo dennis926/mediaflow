@@ -35,7 +35,7 @@ describe.skipIf(!e2eCredentialsReady)(`${PREFIX}：AI 标识 / 审核留痕 / �
       );
     const explicit: Record<string, string> = {
       tenant_id: `'${TENANT}'`,
-      workspace_id: `'22222222-2222-2222-2222-222222222222'`,
+      workspace_id: `'${await h.defaultWorkspaceId()}'`,
       content_id: `'${contentId}'`,
       provider: `'deepseek'`,
       model: `'deepseek-v4-flash'`,
@@ -117,7 +117,7 @@ describe.skipIf(!e2eCredentialsReady)(`${PREFIX}：AI 标识 / 审核留痕 / �
   }, 120_000);
 
   it('① 有 AI 生成记录却标成 none：审核通过前被强制回填标识并留痕', async () => {
-    const contentId = await createContent(`合规-强制回填-${Date.now()}`);
+    const contentId = await createContent(`${PREFIX}-强制回填-${Date.now()}`);
     await insertAiGeneration(contentId);
     const evidenceCheck = await h.dataSource.query('SELECT count(*)::int AS n FROM ai_generations WHERE content_id = $1', [contentId]);
     expect(Number(evidenceCheck[0].n), 'AI 生成记录（证据行）必须已落库，否则这条用例是空转').toBeGreaterThan(0);
@@ -142,7 +142,7 @@ describe.skipIf(!e2eCredentialsReady)(`${PREFIX}：AI 标识 / 审核留痕 / �
   }, 120_000);
 
   it('①b 填了豁免理由：保留 none，但理由与证据条数必须留痕', async () => {
-    const contentId = await createContent(`合规-豁免留痕-${Date.now()}`, {
+    const contentId = await createContent(`${PREFIX}-豁免留痕-${Date.now()}`, {
       aiFlagExemptReason: '仅用 AI 做错别字检查，未生成内容',
     });
     // 通过更新接口再写一次，确保理由落库（创建时也可传）
@@ -171,7 +171,7 @@ describe.skipIf(!e2eCredentialsReady)(`${PREFIX}：AI 标识 / 审核留痕 / �
   }, 120_000);
 
   it('② 审核留痕：审核记录带 operator_ip 与 operator_ua', async () => {
-    const contentId = await createContent(`合规-审核留痕-${Date.now()}`);
+    const contentId = await createContent(`${PREFIX}-审核留痕-${Date.now()}`);
     expect(await approveAs(contentId)).toBe(200);
 
     const rows = await h.dataSource.query(

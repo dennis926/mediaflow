@@ -3,7 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { statfsSync } from 'node:fs';
 import { join } from 'node:path';
 import Redis from 'ioredis';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { REDIS_CLIENT } from '../../redis/redis.constants';
 import { PublishQueueService } from '../../publish/publish.queue';
 import { AuditService } from '../../audit/audit.service';
@@ -19,7 +19,9 @@ export type MonitorCheckKey =
   | 'publish_failure_rate'
   | 'login_failures'
   | 'upload_disk'
-  | 'ai_token_quota';
+  | 'ai_token_quota'
+  // B0.4 第 5 步遗留的巡检项：跨工作区引用必须为 0（见 RUNBOOK-purge演练.md §7.4）
+  | 'cross_workspace_refs';
 
 export interface MonitorCheck {
   key: MonitorCheckKey;
@@ -64,6 +66,8 @@ export class OpsMonitorService {
     private readonly notifications: NotificationService,
     private readonly audit: AuditService,
     private readonly workspaceContext: WorkspaceContextService,
+    // B0.9：跨工作区引用巡检需要直接查库
+    private readonly dataSource: DataSource,
   ) {}
 
   private now(): string {
@@ -284,6 +288,40 @@ export class OpsMonitorService {
   }
 
   /** 跑全部检查；emit=false 只观察不告警（用于后台预演与测试断言）。 */
+  /**
+   * 7. 跨工作区引用（B0.4 第 5 步遗留巡检项，B0.9 自动化）。
+   *
+   * `social_accounts.platform_id → platforms(id)` 是 RESTRICT，而 `platforms.workspace_id → workspaces(id)` 是 CASCADE。
+   * 同工作区内的引用删工作区一定成功；跨工作区引用会让删除整体失败并回滚（RESTRICT 的保护语义）。
+   * 正常流程不会产生这种数据，所以一旦非 0 就必须人工介入：先修正引用，再执行 purge。
+   * 阈值固定为 0（不是"可调阈值"——这类脏数据的正确值只能是 0）。
+   */
+  async checkCrossWorkspaceRefs(): Promise<MonitorCheck> {
+    const threshold = 0;
+    const rows = await this.dataSource.query(
+      `SELECT count(*)::int AS n
+         FROM social_accounts a JOIN platforms p ON p.id = a.platform_id
+        WHERE a.workspace_id <> p.workspace_id`,
+    );
+    const current = Number(rows[0]?.n ?? 0);
+    return {
+      key: 'cross_workspace_refs',
+      label: '跨工作区引用',
+      current,
+      threshold,
+      unit: '条',
+      triggered: current > threshold,
+      level: 'error',
+      detail:
+        current > threshold
+          ? `发现 ${current} 条跨工作区引用（平台账号指向别的工作区的平台字典）：purge 会被 RESTRICT 拦住并整体回滚。` +
+            '请按 docs/RUNBOOK-purge演练.md §7.4 修正引用（把账号指向本工作区的同 code 平台），不要删数据。'
+          : '跨工作区引用 0 条（符合预期）。',
+      link: this.link('/settings'),
+      checkedAt: this.now(),
+    };
+  }
+
   async runAll(options: { emit?: boolean } = {}): Promise<MonitorRunResult> {
     const runners: Array<() => Promise<MonitorCheck>> = [
       () => this.checkQueueLength(),
@@ -292,6 +330,7 @@ export class OpsMonitorService {
       () => this.checkLoginFailures(),
       () => this.checkUploadDisk(),
       () => this.checkAiQuota(),
+      () => this.checkCrossWorkspaceRefs(),
     ];
     const checks: MonitorCheck[] = [];
     for (const runner of runners) {

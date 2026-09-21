@@ -130,7 +130,12 @@ describe.skipIf(!e2eCredentialsReady)('第 6 项：监控告警真实触发', ()
 
   it('1-6. 六类信号全部命中（真实条件，非模拟）', () => {
     const byKey = new Map(runResult.checks.map((check) => [check.key, check]));
-    expect(runResult.checks).toHaveLength(6);
+    // B0.9 起多了一项"跨工作区引用"巡检（B0.4 第 5 步遗留项自动化），共 7 项
+    expect(runResult.checks).toHaveLength(7);
+    expect(byKey.has('cross_workspace_refs')).toBe(true);
+    // 干净的库上跨工作区引用必须为 0（阈值固定 0，不是可调阈值）
+    expect(byKey.get('cross_workspace_refs')?.current).toBe(0);
+    expect(byKey.get('cross_workspace_refs')?.triggered).toBe(false);
 
     const queue = byKey.get('queue_length');
     expect(queue?.triggered).toBe(true);

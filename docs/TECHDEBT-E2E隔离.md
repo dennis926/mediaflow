@@ -73,3 +73,26 @@
 3. 新增可复用清理脚本 `apps/api/scripts/cleanup-test-residue.mjs`（默认干跑，`--apply` 才删除），供任何一次中断运行后手工收尾。
 
 **技术债状态**：本条不改变 B0.9 的结论——根因仍是"E2E 直接读写生产库与 Redis"，彻底方案仍是临时 PG + Redis（`docker-compose.e2e.yml`）。本次新增的清扫只是把"残留看不见"变成"残留会被看见并自动收拾"，不替代隔离。
+
+## 9. 已解决（B0.9，2026-09-21）
+
+**这条技术债已闭环**：E2E 不再读写生产数据库与 Redis。
+
+| 要求 | 实现 | 证据 |
+| --- | --- | --- |
+| 临时 PG + Redis，跑完销毁 | `docker-compose.e2e.yml`（tmpfs 无持久卷，端口 55432/56379，不发布到公网） | 每轮结束都执行 `down -v`；日志明确"临时依赖已销毁" |
+| E2E 不再读生产 DB 配置 | runner 显式设置 `DB_HOST/DB_PORT/DB_NAME/DB_USER/DB_PASSWORD` 指向临时库 | `E2E 库：mediaflow_e2e@55432` |
+| 断言库名 | runner **第 0 步**：目标库名/端口与生产相同就直接退出（不跑任何测试） | 代码内 `if (E2E_DB === productionDbName) fail(...)` |
+| 生产库在 E2E 期间无测试连接 | 哨兵每 3 秒采样生产库，累计两件事：① 生产库里出现 E2E 特征数据；② 生产库的 `pg_stat_activity` 里出现 E2E 专用账号（`mediaflow_e2e`）的连接 | 三轮运行：采样 49/53/64 次，**命中 0** |
+| Redis 实例隔离 | 对比两个 Redis 的 `run_id`，相同即失败 | `d1730a3d07a2…` vs `91d6d091ebf8…` |
+| 失败也能清理 | 清理放在 `finally`，测试失败/异常同样销毁容器 | 早期一次失败运行后容器与网络均已删除 |
+| 可重复运行 | 每轮从零建库（迁移 + 种子 + 补 E2E 账号） | 连续 3 轮全绿：113/113（19 文件） |
+
+**顺带修掉的两个真实缺陷**（都由这次隔离暴露）：
+
+1. **种子不建工作区成员行** → 全新安装的管理员登录直接 403「该账号未被加入任何可用工作区」；
+   现 `ensureAdminMembership()` 幂等补齐（存量库同样生效）。
+2. **部署层开关被忽略** → 数据库未初始化时运行时快照退回代码默认值，`PUBLISH_WORKER_ENABLED=false` 失效，
+   导致容器化后 api 与 worker **双消费者**；现 `PublishWorker.enabled()` 把环境变量当硬闸门。
+   同时把 `SettingsService.flat()` 改为逐键容错，单个键读取失败不再让整份配置退回默认值。
+3. 另修：E2E 规格硬编码生产默认工作区 id（种子生成的 UUID 每次不同）→ 统一走 `harness.defaultWorkspaceId()`。

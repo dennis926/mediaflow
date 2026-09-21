@@ -64,6 +64,16 @@ export class PublishWorker implements OnModuleInit, OnModuleDestroy {
   }
 
   private async enabled(): Promise<boolean> {
+    /**
+     * **部署层硬闸门**（B0.8 容器化实测踩到）：
+     * 容器化后 api 与 worker 是两个容器，靠 `PUBLISH_WORKER_ENABLED=false/true` 区分，
+     * 但该键在数据库里是"可配置项"——当数据库还没初始化（或配置读取失败）时，
+     * 运行时快照会退回**代码默认值 true**，于是 api 容器也起了消费者 → **两个消费者抢同一条队列**。
+     * 因此这里把环境变量当作硬开关：部署层关掉就绝不启动，数据库只能再关一次、不能再打开。
+     */
+    if ((process.env.PUBLISH_WORKER_ENABLED ?? '').trim().toLowerCase() === 'false') {
+      return false;
+    }
     return runtime().publish.workerEnabled;
   }
 

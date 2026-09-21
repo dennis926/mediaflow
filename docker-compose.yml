@@ -1,50 +1,166 @@
-# 仅用于**本地开发**的基础设施（数据库 / Redis / 对象存储）。
-# 生产环境不使用 Docker：应用由 systemd 单元 mediaflow-api / mediaflow-web 运行，
-# 反向代理与 TLS 由主机上的 Nginx 负责（详见 docs/DEPLOYMENT.md）。
-version: '3.8'
+# MediaFlow 容器化部署（B0.8）
+#
+# 用法：
+#   cp .env.docker.example .env.docker && chmod 600 .env.docker && ${EDITOR:-vi} .env.docker   # 填密钥
+#   docker compose build
+#   docker compose up -d
+#   docker compose ps           # 看 healthcheck 状态
+#   docker compose logs -f api
+#
+# 端口说明（**刻意避开宿主上 systemd 版服务占用的端口**，便于与现有部署共存/灰度）：
+#   api  宿主 4300 → 容器 4000
+#   web  宿主 3300 → 容器 3000
+#   postgres/redis **不映射到宿主**（只在容器网络内可达），避免与宿主数据库冲突或被外部扫描到
+#
+# 单消费者约束：发布队列只允许一个消费者进程（见 scripts/preflight.sh 的第 3 节断言），
+# 因此 api 容器 `PUBLISH_WORKER_ENABLED=false`，worker 容器 `true`。
 
-networks:
-  mediaflow:
-    driver: bridge
+name: mediaflow
 
-volumes:
-  postgres-data:
-  redis-data:
-  minio-data:
+# ⚠️ **所有 compose 命令都必须带 `--env-file .env.docker`**：
+#   docker compose --env-file .env.docker up -d
+# 原因：compose 默认会读项目目录下的 `.env`，而本仓库的 `.env` 是**生产环境**文件——
+# 不带 --env-file 会出现"postgres 用生产口令、api 用容器口令"的认证失败（实测踩过），
+# 更糟的是可能把生产密钥插值进容器配置。scripts/deploy-docker.sh / rollback-docker.sh 已固化该参数。
+
+# api 与 worker 共用同一个镜像：**只有 api 声明 build**，worker 直接复用它的镜像名。
+# （两个服务都写 build 会让 compose 并行构建同一 tag，实测报 "image ... already exists"）
+x-api-common: &api-common
+  image: mediaflow-api:${MEDIAFLOW_TAG:-local}
+  env_file:
+    - .env.docker
+  restart: unless-stopped
 
 services:
   postgres:
     image: postgres:16-alpine
+    restart: unless-stopped
     environment:
-      POSTGRES_DB: mediaflow
-      POSTGRES_USER: mediaflow
-      POSTGRES_PASSWORD: mediaflow_dev
-    ports:
-      - "5432:5432"
+      POSTGRES_DB: ${DB_NAME:-mediaflow}
+      POSTGRES_USER: ${DB_USER:-mediaflow}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?请在 .env.docker 中设置 DB_PASSWORD}
     volumes:
       - postgres-data:/var/lib/postgresql/data
-    networks:
-      - mediaflow
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${DB_USER:-mediaflow} -d ${DB_NAME:-mediaflow}']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1g
 
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis-data:/data
-    networks:
-      - mediaflow
+    restart: unless-stopped
+    command: ['redis-server', '--appendonly', 'no', '--maxmemory', '256mb', '--maxmemory-policy', 'noeviction']
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 320m
 
-  minio:
-    image: minio/minio
-    command: server /data --console-address ":9001"
+  api:
+    <<: *api-common
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    command: ['node', 'dist/main.js']
     environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
+      NODE_ENV: production
+      APP_HOST: 0.0.0.0
+      APP_PORT: '4000'
+      DB_HOST: postgres
+      REDIS_HOST: redis
+      # 消费者只跑在 worker 容器里（避免重复消费）
+      PUBLISH_WORKER_ENABLED: 'false'
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - '4300:4000'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     volumes:
-      - minio-data:/data
-    networks:
-      - mediaflow
+      - api-uploads:/app/uploads
+      - api-backups:/app/backups
+    healthcheck:
+      test: ['CMD', 'curl', '-fsS', 'http://127.0.0.1:4000/api/health']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2g
+
+  worker:
+    <<: *api-common
+    command: ['node', 'dist/worker.js']
+    environment:
+      NODE_ENV: production
+      DB_HOST: postgres
+      REDIS_HOST: redis
+      PUBLISH_WORKER_ENABLED: 'true'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - api-uploads:/app/uploads
+    # 没有 HTTP 端口 → 用进程存活即视为健康
+    healthcheck:
+      test: ['CMD-SHELL', "node -e \"process.exit(0)\""]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1g
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    image: mediaflow-web:${MEDIAFLOW_TAG:-local}
+    restart: unless-stopped
+    env_file:
+      - .env.docker
+    environment:
+      NODE_ENV: production
+      PORT: '3000'
+      NEXT_PUBLIC_API_BASE: ${NEXT_PUBLIC_API_BASE:-http://localhost:4300/api}
+    ports:
+      - '3300:3000'
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -fsS http://127.0.0.1:3000/ > /dev/null']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1g
+
+volumes:
+  postgres-data:
+  api-uploads:
+  api-backups:

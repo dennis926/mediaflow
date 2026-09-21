@@ -62,11 +62,15 @@ function build(options: {
   const audit = { record: auditRecord } as unknown as AuditService;
   const workspaceContext = { current: async () => ({ tenantId: 't1', workspaceId: 'w1' }) } as unknown as WorkspaceContextService;
 
-  const service = new OpsMonitorService(queue, redis, tasksRepo, generationsRepo, notifications, audit, workspaceContext);
+  const service = new OpsMonitorService(queue, redis, tasksRepo, generationsRepo, notifications, audit, workspaceContext, dataSourceStub);
   return { service, notify, auditRecord, redis, queue };
 }
 
 afterEach(() => applyRuntimeConfig({}));
+
+const dataSourceStub = {
+  query: vi.fn(async () => [{ n: 0 }]),
+} as unknown as import('typeorm').DataSource;
 
 describe('运行监控：六类阈值（第 6 项）', () => {
   it('1. 队列积压：超过阈值命中，等于阈值不命中', async () => {

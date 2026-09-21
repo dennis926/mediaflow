@@ -37,6 +37,12 @@ export interface E2eHarness {
   login(email: string, password: string): Promise<string>;
   createUser(input: { roleCodes: string[]; displayName?: string }): Promise<{ id: string; email: string; password: string; token: string }>;
   createWorkspace(name: string): Promise<string>;
+  /**
+   * 默认工作区 id。
+   * **测试里绝不能硬编码它**：种子用随机 UUID 建默认工作区，每次安装都不同
+   * （生产是 2222…，而隔离的临时库是别的值）。需要引用默认工作区时一律走这个方法。
+   */
+  defaultWorkspaceId(): Promise<string>;
   /** 用某个令牌切到指定工作区，返回该工作区的令牌。 */
   switchWorkspace(token: string, workspaceId: string): Promise<string>;
   cleanup(): Promise<void>;
@@ -187,6 +193,12 @@ export async function createHarness(titlePrefix: string, options: { requireAppro
       if (!id) throw new Error(`创建测试账号失败：响应中没有用户 id（${JSON.stringify(created.body).slice(0, 200)}）`);
       harness.createdUserIds.push(id);
       return { id, email, password, token: await harness.login(email, password) };
+    },
+
+    async defaultWorkspaceId(): Promise<string> {
+      const rows = await dataSource.query("SELECT id FROM workspaces WHERE slug = 'default' ORDER BY created_at LIMIT 1");
+      if (!rows[0]?.id) throw new Error('默认工作区不存在（种子未跑？）');
+      return rows[0].id as string;
     },
 
     async createWorkspace(name: string): Promise<string> {

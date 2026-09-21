@@ -148,6 +148,24 @@ async function seedPlatforms(dataSource: DataSource, scope: DefaultScope): Promi
   }
 }
 
+/**
+ * 保障默认管理员在默认工作区里有成员行（幂等）。
+ *
+ * 为什么无条件执行：登录按 `workspace_members` 解析可用工作区，缺了它就会
+ * 「该账号未被加入任何可用工作区」——**存量库同样需要修**（早于本次修复建的管理员没有这行）。
+ */
+async function ensureAdminMembership(dataSource: DataSource, scope: DefaultScope, email: string): Promise<void> {
+  const rows = await dataSource.query('SELECT id FROM users WHERE email = $1 LIMIT 1', [email]);
+  const userId = rows[0]?.id as string | undefined;
+  if (!userId) return;
+  await dataSource.query(
+    `INSERT INTO workspace_members (id, tenant_id, workspace_id, created_at, updated_at, user_id, role_codes, invited_by)
+     VALUES (gen_random_uuid(), $1, $2, now(), now(), $3, '["owner"]'::jsonb, NULL)
+     ON CONFLICT (workspace_id, user_id) DO UPDATE SET role_codes = '["owner"]'::jsonb`,
+    [scope.tenantId, scope.workspaceId, userId],
+  );
+}
+
 async function seedAdmin(dataSource: DataSource, scope: DefaultScope): Promise<string | null> {
   const userRepository = dataSource.getRepository(User);
   // 按邮箱判重：老安装的管理员 ID 与常量不同。
@@ -175,6 +193,18 @@ async function seedAdmin(dataSource: DataSource, scope: DefaultScope): Promise<s
     lastLoginAt: null,
   });
 
+  /**
+   * 工作区成员行**必须建**：登录时按 `workspace_members` 解析可用工作区（B0.4/M8 之后
+   * `users.workspace_id` 只是历史列），缺了它新装实例的管理员会直接得到
+   * 「该账号未被加入任何可用工作区」——实测在容器化全新部署时踩到。
+   */
+  await dataSource.query(
+    `INSERT INTO workspace_members (id, tenant_id, workspace_id, created_at, updated_at, user_id, role_codes, invited_by)
+     VALUES (gen_random_uuid(), $1, $2, now(), now(), $3, '["owner"]'::jsonb, NULL)
+     ON CONFLICT (workspace_id, user_id) DO UPDATE SET role_codes = '["owner"]'::jsonb`,
+    [scope.tenantId, scope.workspaceId, DEFAULT_ADMIN_ID],
+  );
+
   const role = await dataSource.getRepository(Role).findOne({ where: { code: 'owner', tenantId: scope.tenantId } });
   if (role) {
     await dataSource.query('INSERT INTO user_roles (users_id, roles_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [
@@ -194,6 +224,8 @@ export async function runSeed(dataSource: DataSource): Promise<void> {
   await seedRoles(dataSource, scope);
   await seedPlatforms(dataSource, scope);
   const password = await seedAdmin(dataSource, scope);
+  // 无论管理员是本次新建还是早已存在，都保证它有默认工作区成员行
+  await ensureAdminMembership(dataSource, scope, DEFAULT_ADMIN_EMAIL);
 
   process.stdout.write('\n================ 初始登录信息 ================\n');
   process.stdout.write(`用户名：${DEFAULT_ADMIN_EMAIL}\n`);

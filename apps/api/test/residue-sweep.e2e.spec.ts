@@ -27,7 +27,8 @@ describe.skipIf(!e2eCredentialsReady)(`${PREFIX}：清扫只删"测试特征名 
   let h: E2eHarness;
   const plantedIds: string[] = [];
   const plantedFiles: string[] = [];
-  const workspaceId = '22222222-2222-2222-2222-222222222222'; // 默认工作区（只读取，不修改它的其他数据）
+  // 默认工作区（每次安装的 UUID 不同，必须解析而不是硬编码）
+  let workspaceId = '';
 
   async function plant(input: {
     originalName: string;
@@ -61,6 +62,7 @@ describe.skipIf(!e2eCredentialsReady)(`${PREFIX}：清扫只删"测试特征名 
 
   beforeAll(async () => {
     h = await createHarness(PREFIX, { requireApproval: false });
+    workspaceId = await h.defaultWorkspaceId();
   }, 120_000);
 
   afterAll(async () => {

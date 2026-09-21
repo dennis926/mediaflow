@@ -26,13 +26,17 @@ function build() {
   const notifications = { notify: vi.fn(async () => undefined) } as unknown as NotificationService;
   const audit = { record: vi.fn(async () => undefined) } as unknown as AuditService;
   const workspaceContext = { current: async () => ({ tenantId: 't1', workspaceId: 'w1' }) } as unknown as WorkspaceContextService;
-  return new OpsMonitorService(queue, redis, repo, generations, notifications, audit, workspaceContext);
+  return new OpsMonitorService(queue, redis, repo, generations, notifications, audit, workspaceContext, dataSourceStub);
 }
 
 afterEach(() => {
   applyRuntimeConfig({});
   statfsSync.mockReset();
 });
+
+const dataSourceStub = {
+  query: vi.fn(async () => [{ n: 0 }]),
+} as unknown as import('typeorm').DataSource;
 
 describe('监控磁盘口径与 df 对齐（B0.2）', () => {
   it('用 bavail 计算（与 df 一致），而不是含保留块的 bfree', async () => {

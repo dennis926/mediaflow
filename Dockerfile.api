@@ -1,0 +1,61 @@
+# MediaFlow API / Worker 镜像（多阶段构建，非 root 运行）
+#
+# 构建：docker build -f Dockerfile.api -t mediaflow-api:local .
+# 运行：见 docker-compose.yml（api 与 worker 共用本镜像，只是启动命令不同）
+#
+# 说明：本仓库是 pnpm workspace（apps/* + packages/*），因此构建阶段必须在根目录进行，
+# 不能把 context 缩到 apps/api —— API 依赖 @mediaflow/shared / channel-adapters / design-tokens。
+
+# ---------- 1. 依赖 ----------
+FROM node:20-alpine AS deps
+ENV PNPM_HOME=/pnpm PATH=/pnpm:$PATH
+# CI=true：pnpm 在非交互环境不要弹确认（实测构建时弹过 "modules directories will be removed… Proceed?"）
+ENV CI=true
+# corepack 会按 package.json 的 packageManager 字段自动选版本，避免手动 pin 漂移
+RUN corepack enable
+WORKDIR /repo
+# 只拷贝清单文件，最大化利用层缓存
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
+COPY apps/api/package.json apps/api/
+COPY apps/web/package.json apps/web/
+COPY apps/h5/package.json apps/h5/
+COPY apps/plugin/package.json apps/plugin/
+COPY packages/shared/package.json packages/shared/
+COPY packages/channel-adapters/package.json packages/channel-adapters/
+COPY packages/design-tokens/package.json packages/design-tokens/
+# NODE_ENV=production 会让 pnpm 跳过 devDependencies（构建需要 typescript），必须显式覆盖
+RUN NODE_ENV=development pnpm install --frozen-lockfile --filter @mediaflow/api... --filter @mediaflow/shared --filter @mediaflow/channel-adapters --filter @mediaflow/design-tokens
+
+# ---------- 2. 构建 ----------
+FROM deps AS build
+WORKDIR /repo
+COPY tsconfig.base.json ./
+COPY packages ./packages
+COPY apps/api ./apps/api
+RUN NODE_ENV=development pnpm build:packages \
+ && NODE_ENV=production pnpm --filter @mediaflow/api run build \
+ && NODE_ENV=production pnpm install --prod --frozen-lockfile --filter @mediaflow/api... \
+ && rm -rf apps/api/src apps/api/test apps/api/scripts/*.ts
+
+# ---------- 3. 运行 ----------
+FROM node:20-alpine AS runtime
+# tini：PID 1 转发信号，容器里 signals 才能到达 node（优雅关闭依赖它）
+RUN apk add --no-cache tini curl \
+ && addgroup -S mediaflow && adduser -S -G mediaflow -h /app mediaflow
+WORKDIR /app
+ENV NODE_ENV=production APP_HOST=0.0.0.0 APP_PORT=4000
+COPY --from=build --chown=mediaflow:mediaflow /repo/node_modules ./node_modules
+COPY --from=build --chown=mediaflow:mediaflow /repo/apps/api/node_modules ./apps/api/node_modules
+COPY --from=build --chown=mediaflow:mediaflow /repo/apps/api/dist ./apps/api/dist
+COPY --from=build --chown=mediaflow:mediaflow /repo/apps/api/package.json ./apps/api/package.json
+COPY --from=build --chown=mediaflow:mediaflow /repo/packages ./packages
+# 上传目录：生产用 volume 挂载，权限归 mediaflow（非 root 才能写）
+RUN mkdir -p /app/uploads/media /app/uploads/exports /app/uploads/knowledge /app/uploads/tmp \
+ && chown -R mediaflow:mediaflow /app/uploads
+USER mediaflow
+WORKDIR /app/apps/api
+EXPOSE 4000
+HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
+  CMD curl -fsS http://127.0.0.1:4000/api/health || exit 1
+ENTRYPOINT ["/sbin/tini", "--"]
+CMD ["node", "dist/main.js"]

@@ -60,7 +60,7 @@ describe.skipIf(!e2eCredentialsReady)(`${PREFIX}：设置读取的租户 / 工�
     // 数据库层面也是两行（各带自己的租户与工作区）
     const rows = await h.dataSource.query(
       "SELECT workspace_id, tenant_id, value FROM system_settings WHERE key = 'SITE_NAME' AND workspace_id IN ($1, $2) ORDER BY value",
-      [workspaceB, '22222222-2222-2222-2222-222222222222'],
+      [workspaceB, await h.defaultWorkspaceId()],
     );
     expect(rows.length).toBe(2);
     for (const row of rows as Array<{ tenant_id: string; workspace_id: string }>) {
@@ -70,7 +70,7 @@ describe.skipIf(!e2eCredentialsReady)(`${PREFIX}：设置读取的租户 / 工�
   }, 90_000);
 
   it('同工作区重复键被唯一索引挡住；别的租户/工作区的行读不到（双层防线）', async () => {
-    const workspaceA = '22222222-2222-2222-2222-222222222222';
+    const workspaceA = await h.defaultWorkspaceId();
 
     // 防线 1（数据库）：system_settings 上有 UNIQUE(workspace_id, key)，
     // 所以"同一个工作区里塞一行别家租户的同名配置"这种脏数据**根本插不进去**。
