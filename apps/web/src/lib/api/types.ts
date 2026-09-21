@@ -539,3 +539,44 @@ export interface ImportResult {
   chunks: ImportChunkPreview[];
   created: Array<{ id: string; title: string; isActive: boolean }>;
 }
+
+/** 当前用户在当前工作区生效的能力点（GET /auth/capabilities，只读自己） */
+export interface CapabilitiesView {
+  workspaceId: string;
+  role: string | null;
+  roles: string[];
+  capabilities: string[];
+  workspaceStatus: string;
+  isSuperAdmin: boolean;
+}
+
+/** 工作区生命周期状态（归档 → 软删 → 恢复；daysUntilPurge 由后端算好） */
+export interface WorkspaceStatusView {
+  id: string;
+  name: string;
+  slug: string;
+  status: 'active' | 'archived' | 'soft_deleted';
+  archivedAt: string | null;
+  deletedAt: string | null;
+  purgeAfter: string | null;
+  daysUntilPurge: number | null;
+}
+
+/** 永久清除前的影响面预估（逐表行数 + 文件数） */
+export interface WorkspacePurgePreview {
+  rows: Record<string, number>;
+  files: number;
+}
+
+/** 导出任务（ZIP 产物保留 7 天；下载需另申请 15 分钟一次性链接） */
+export interface WorkspaceExportJobItem {
+  id: string;
+  status: string;
+  progress: number;
+  sizeBytes: number | null;
+  checksum: string | null;
+  expiresAt: string | null;
+  error: string | null;
+  createdAt: string;
+  downloadEndpoint?: string;
+}

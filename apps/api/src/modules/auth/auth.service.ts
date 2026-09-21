@@ -14,7 +14,8 @@ import { User } from '../workspace/entities/user.entity';
 import { runtime } from '../settings/runtime-config';
 import { WorkspaceService } from '../workspace/workspace.service';
 import { AuthSessionService } from './auth-session.service';
-import { AuthUser, LoginResult, RefreshTokenPayload } from './auth.types';
+import { AuthUser, CapabilitiesView, LoginResult, RefreshTokenPayload } from './auth.types';
+import { capabilitiesForRoles, primaryRole } from './capabilities';
 
 @Injectable()
 export class AuthService {
@@ -300,6 +301,44 @@ export class AuthService {
     });
     await this.sessions.invalidate(user.id);
     return { ...tokens, user: authUser };
+  }
+
+  /**
+   * 当前用户在自己所在工作区生效的能力点（只读自己，任何登录用户都可调用）。
+   *
+   * 两个容易做错的地方：
+   *  1. 角色必须读**数据库当前值**（走会话快照的 30s 缓存），不能用令牌里的角色——
+   *     否则管理员刚调整完权限矩阵/角色，前端按钮还是旧的。
+   *  2. 当前工作区已被软删时，非生命周期接口一律 404，前端就再也拿不到任何能力点、
+   *     连"恢复"按钮都显示不出来。因此这里改按"该用户为 owner 的软删工作区"来算，
+   *     并由控制器把本接口标记为生命周期豁免（能穿过状态闸门）。
+   */
+  async capabilities(user: AuthUser): Promise<CapabilitiesView> {
+    const snapshot = await this.sessions.resolve(user.id, user.workspaceId);
+    if (!snapshot) throw new UnauthorizedException('账号不存在，请重新登录');
+
+    let workspaceId = user.workspaceId;
+    let roleCodes = snapshot.roles;
+    let workspaceStatus = snapshot.workspaceStatus;
+
+    if (workspaceStatus === 'soft_deleted' || !snapshot.member) {
+      // 已被软删的工作区：owner 仍需要看到"恢复"入口；非 owner 只看到状态说明
+      const owned = await this.workspaces.resolveLoginWorkspace(user.id, user.workspaceId);
+      if (owned && owned.workspace.status === 'soft_deleted') {
+        workspaceId = owned.workspace.id;
+        roleCodes = owned.roleCodes;
+        workspaceStatus = 'soft_deleted';
+      }
+    }
+
+    return {
+      workspaceId,
+      role: primaryRole(roleCodes),
+      roles: roleCodes,
+      capabilities: capabilitiesForRoles(roleCodes, user.isSuperAdmin),
+      workspaceStatus,
+      isSuperAdmin: user.isSuperAdmin,
+    };
   }
 
   async profile(userId: string): Promise<AuthUser> {

@@ -12,6 +12,7 @@ import type {
   AuditLogItem,
   AuthUser,
   CalendarDay,
+  CapabilitiesView,
   CommitImportResult,
   ComplianceReport,
   Content,
@@ -35,11 +36,11 @@ import type {
   NotificationPage,
   OverviewData,
   Paged,
-  QueueHealth,
   ParseResult,
   ProviderConfigItem,
   ProviderPricingView,
   PublishTask,
+  QueueHealth,
   QueueStats,
   ReviewItem,
   RoleItem,
@@ -47,7 +48,10 @@ import type {
   SiteConfigView,
   TrendPointData,
   UserItem,
+  WorkspaceExportJobItem,
   WorkspaceMemberItem,
+  WorkspacePurgePreview,
+  WorkspaceStatusView,
   WorkspaceSummaryItem,
 } from './types';
 
@@ -91,6 +95,8 @@ export const authApi = {
     api.post<{ success: true }>('/auth/change-password', { currentPassword, newPassword }),
   /** 登出：服务端把刷新令牌加入黑名单（幂等）；失败也不影响本地清除登录态 */
   logout: (refreshToken?: string) => api.post<{ ok: true }>('/auth/logout', { refreshToken }),
+  /** 自己的能力点（前端据此显示/隐藏按钮，不硬编码角色） */
+  capabilities: () => api.get<CapabilitiesView>('/auth/capabilities'),
 };
 
 export interface ContentQuery {
@@ -249,6 +255,21 @@ export const workspacesApi = {
   upsertMember: (id: string, payload: { userId: string; roleCodes: string[] }) =>
     api.put<WorkspaceMemberItem>(`/workspaces/${id}/members`, payload),
   removeMember: (id: string, userId: string) => api.delete<{ userId: string }>(`/workspaces/${id}/members/${userId}`),
+
+  // ---------- 生命周期（归档 → 软删 → 恢复）与导出（B0.4） ----------
+  status: (id: string) => api.get<WorkspaceStatusView>(`/workspaces/${id}/status`),
+  archive: (id: string) => api.post<WorkspaceStatusView>(`/workspaces/${id}/archive`, {}),
+  unarchive: (id: string) => api.post<WorkspaceStatusView>(`/workspaces/${id}/unarchive`, {}),
+  /** 删除是软删除：保留期内可恢复；confirmName 必须是工作区完整名称 */
+  softDelete: (id: string, payload: { confirmName: string; confirmLastWorkspace?: boolean; reason?: string }) =>
+    api.deleteWithBody<WorkspaceStatusView>(`/workspaces/${id}`, payload),
+  restore: (id: string) => api.post<WorkspaceStatusView>(`/workspaces/${id}/restore`, {}),
+  /** 永久清除前的影响面（清除动作本身不在界面提供，只走运维手册） */
+  purgePreview: (id: string) => api.get<WorkspacePurgePreview>(`/workspaces/${id}/purge-preview`),
+  requestExport: (id: string) => api.post<WorkspaceExportJobItem>(`/workspaces/${id}/export`, {}),
+  exportJob: (id: string, jobId: string) => api.get<WorkspaceExportJobItem>(`/workspaces/${id}/export/${jobId}`),
+  exportLink: (id: string, jobId: string) =>
+    api.post<{ url: string; expiresAt: string }>(`/workspaces/${id}/export/${jobId}/link`, {}),
 };
 
 /** 审计日志：谁在什么时候改了什么 */

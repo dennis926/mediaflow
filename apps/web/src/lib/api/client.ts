@@ -167,4 +167,6 @@ export const api = {
   put: <T>(path: string, body?: unknown) => apiRequest<T>(path, { method: 'PUT', body }),
   patch: <T>(path: string, body?: unknown) => apiRequest<T>(path, { method: 'PATCH', body }),
   delete: <T>(path: string, query?: RequestOptions['query']) => apiRequest<T>(path, { method: 'DELETE', query }),
+  /** DELETE 也要带请求体时用它（例如删除工作区需要名称二次确认） */
+  deleteWithBody: <T>(path: string, body?: unknown) => apiRequest<T>(path, { method: 'DELETE', body }),
 };

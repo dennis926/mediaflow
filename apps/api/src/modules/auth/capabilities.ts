@@ -107,6 +107,31 @@ export function roleLabel(code: string, fallback?: string): string {
   return runtime().permissions.roleLabels[code] ?? fallback ?? DEFAULT_ROLE_LABELS[code] ?? code;
 }
 
+/** 多角色时的展示优先级（前端只展示一个"主角色"）。 */
+const PRIMARY_ROLE_ORDER: RoleCode[] = ['owner', 'admin', 'editor', 'reviewer', 'viewer'];
+
+export function primaryRole(roles: RoleCode[]): RoleCode | null {
+  return PRIMARY_ROLE_ORDER.find((role) => roles.includes(role)) ?? roles[0] ?? null;
+}
+
+/**
+ * 算某个身份真正生效的能力点集合（供 /auth/capabilities 与前端按钮显隐使用）。
+ *
+ * 判定必须与 CapabilityGuard 逐条一致，否则前端会显示一个后端并不放行的按钮，
+ * 或反过来把本可用的按钮藏起来（用户就再也找不到入口）：
+ * - 超级管理员：全部能力
+ * - 矩阵中该能力未配置任何角色（长度为 0）：守卫视为"不限制"，这里同样视为生效
+ * - 其余：角色集合与矩阵有交集即生效
+ */
+export function capabilitiesForRoles(roles: RoleCode[], isSuperAdmin = false): Capability[] {
+  return CAPABILITIES.filter((capability) => {
+    if (isSuperAdmin) return true;
+    const allowed = rolesForCapability(capability);
+    if (allowed.length === 0) return true;
+    return roles.some((role) => allowed.includes(role));
+  });
+}
+
 /** Restricts a route to the roles allowed by the configurable permission matrix. */
 export const Capability = (...capabilities: Capability[]): MethodDecorator & ClassDecorator =>
   SetMetadata(CAPABILITY_KEY, capabilities);

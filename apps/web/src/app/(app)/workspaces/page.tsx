@@ -3,6 +3,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
+import { ArchiveWorkspaceDialog } from '../../../components/workspace/ArchiveWorkspaceDialog';
+import { DeleteWorkspaceDialog } from '../../../components/workspace/DeleteWorkspaceDialog';
+import { WorkspaceExportPanel } from '../../../components/workspace/WorkspaceExportPanel';
+import { WorkspaceLifecycleCard } from '../../../components/workspace/WorkspaceLifecycleCard';
 import { Banner } from '../../../components/ui/Banner';
 import { Button } from '../../../components/ui/Button';
 import { Card } from '../../../components/ui/Card';
@@ -14,8 +18,10 @@ import { SkeletonRows } from '../../../components/ui/Skeleton';
 import { Tag } from '../../../components/ui/Tag';
 import { ApiError, setToken } from '../../../lib/api/client';
 import { authApi, usersApi, workspacesApi } from '../../../lib/api/endpoints';
-import type { UserItem, WorkspaceMemberItem, WorkspaceSummaryItem } from '../../../lib/api/types';
+import type { UserItem, WorkspaceExportJobItem, WorkspaceMemberItem, WorkspaceSummaryItem } from '../../../lib/api/types';
+import { hasCapability, useCapabilities } from '../../../lib/capabilities';
 import { formatDateTime } from '../../../lib/format';
+import { describeLifecycleError } from '../../../lib/workspace-lifecycle';
 import { AccountIcon, PlusIcon } from '../../../lib/icons';
 import { useSiteConfig } from '../../../lib/knowledge';
 import styles from './page.module.css';
@@ -34,7 +40,7 @@ function roleLabels(codes: string[]): string {
 
 /**
  * 工作区管理：一个实例里可以放多个业务空间（多家公司 / 多个品牌矩阵），数据按工作区隔离。
- * 在这里可以切换、新建工作区，以及维护当前工作区的成员与角色。
+ * 在这里可以切换、新建工作区，维护成员与角色，并管理当前工作区的生命周期（归档 / 删除 / 恢复）与数据导出。
  */
 export default function WorkspacesPage() {
   const router = useRouter();
@@ -43,22 +49,56 @@ export default function WorkspacesPage() {
   const [newName, setNewName] = useState('');
   const [memberForm, setMemberForm] = useState<{ userId: string; roleCodes: string[] }>({ userId: '', roleCodes: ['editor'] });
   const [feedback, setFeedback] = useState<{ tone: 'success' | 'danger' | 'info'; text: string } | null>(null);
+  const [dialog, setDialog] = useState<'archive' | 'unarchive' | 'delete' | null>(null);
+  const [lifecycleError, setLifecycleError] = useState<string | null>(null);
+  const [exportJobId, setExportJobId] = useState<string | null>(null);
+  const [exportLink, setExportLink] = useState<{ url: string; expiresAt: string } | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
 
   const mine = useQuery({ queryKey: ['workspaces', 'mine'], queryFn: () => workspacesApi.mine() });
   const current = mine.data?.find((item) => item.isCurrent) ?? null;
   const users = useQuery({ queryKey: ['users', 'options'], queryFn: () => usersApi.list({ page: 1, pageSize: 100 }) });
+
+  const capabilities = useCapabilities();
+  const capabilityList = capabilities.data?.capabilities ?? [];
+  const canAnyLifecycle =
+    hasCapability(capabilityList, 'workspace.archive')
+    || hasCapability(capabilityList, 'workspace.delete')
+    || hasCapability(capabilityList, 'workspace.restore');
+  const canExport = hasCapability(capabilityList, 'workspace.export');
+
+  const status = useQuery({
+    queryKey: ['workspaces', current?.id, 'status'],
+    queryFn: () => workspacesApi.status(current!.id),
+    enabled: Boolean(current?.id) && canAnyLifecycle,
+    refetchInterval: 30_000,
+  });
+
+  const exportJob = useQuery({
+    queryKey: ['workspaces', current?.id, 'export', exportJobId],
+    queryFn: () => workspacesApi.exportJob(current!.id, exportJobId!),
+    enabled: Boolean(current?.id && exportJobId),
+    // 生成中的任务每 2 秒轮询一次，完成/失败后停止
+    refetchInterval: (query) => {
+      const snapshot = query.state.data as WorkspaceExportJobItem | undefined;
+      return snapshot?.status === 'queued' || snapshot?.status === 'running' ? 2000 : false;
+    },
+  });
 
   const switchTo = useMutation({
     mutationFn: (workspaceId: string) => authApi.switchWorkspace(workspaceId),
     onSuccess: (result) => {
       // 服务端已经按新工作区签发了令牌，这里替换后刷新即可
       setToken(result.accessToken, result.refreshToken);
-      setFeedback({ tone: 'success', text: `已切换到「${result.user.workspaceId === current?.id ? current?.name : '新工作区'}」` });
       queryClient.clear();
       router.refresh();
       window.location.reload();
     },
-    onError: (error: unknown) => setFeedback({ tone: 'danger', text: error instanceof ApiError ? error.message : '切换失败' }),
+    onError: (error: unknown) =>
+      setFeedback({
+        tone: 'danger',
+        text: error instanceof ApiError ? error.message : '切换工作区失败，请刷新页面后重试',
+      }),
   });
 
   const createWorkspace = useMutation({
@@ -96,6 +136,83 @@ export default function WorkspacesPage() {
     onError: (error: unknown) => setFeedback({ tone: 'danger', text: error instanceof ApiError ? error.message : '移除失败' }),
   });
 
+  const refreshLifecycle = (): void => {
+    void queryClient.invalidateQueries({ queryKey: ['workspaces'] });
+    void capabilities.refetch();
+  };
+
+  const archive = useMutation({
+    mutationFn: () => workspacesApi.archive(current!.id),
+    onSuccess: () => {
+      setDialog(null);
+      setLifecycleError(null);
+      setFeedback({ tone: 'info', text: `工作区「${current?.name ?? ''}」已归档（只读），随时可以取消归档` });
+      refreshLifecycle();
+    },
+    onError: (error: unknown) => setLifecycleError(describeLifecycleError(error, 'archive')),
+  });
+
+  const unarchive = useMutation({
+    mutationFn: () => workspacesApi.unarchive(current!.id),
+    onSuccess: () => {
+      setDialog(null);
+      setLifecycleError(null);
+      setFeedback({ tone: 'success', text: `工作区「${current?.name ?? ''}」已恢复为可读写` });
+      refreshLifecycle();
+    },
+    onError: (error: unknown) => setLifecycleError(describeLifecycleError(error, 'unarchive')),
+  });
+
+  const softDelete = useMutation({
+    mutationFn: (payload: { confirmName: string; confirmLastWorkspace: boolean }) =>
+      workspacesApi.softDelete(current!.id, payload),
+    onSuccess: () => {
+      setDialog(null);
+      setLifecycleError(null);
+      const deletedId = current?.id;
+      const next = (mine.data ?? []).find((item) => item.id !== deletedId);
+      setFeedback({
+        tone: 'info',
+        text: next
+          ? `工作区「${current?.name ?? ''}」已删除，正在切换到「${next.name}」`
+          : `工作区「${current?.name ?? ''}」已删除。当前没有其他工作区，可由所有者在本页恢复`,
+      });
+      refreshLifecycle();
+      if (next && deletedId) switchTo.mutate(next.id);
+    },
+    onError: (error: unknown) => setLifecycleError(describeLifecycleError(error, 'delete')),
+  });
+
+  const restore = useMutation({
+    mutationFn: () => workspacesApi.restore(current!.id),
+    onSuccess: () => {
+      setLifecycleError(null);
+      setFeedback({ tone: 'success', text: `工作区「${current?.name ?? ''}」已恢复，数据完整找回` });
+      refreshLifecycle();
+    },
+    onError: (error: unknown) => setLifecycleError(describeLifecycleError(error, 'restore')),
+  });
+
+  const requestExport = useMutation({
+    mutationFn: () => workspacesApi.requestExport(current!.id),
+    onSuccess: (job) => {
+      setExportError(null);
+      setExportLink(null);
+      setExportJobId(job.id);
+      setFeedback({ tone: 'success', text: '导出任务已创建，生成完成后可申请一次性下载链接（15 分钟内有效）' });
+    },
+    onError: (error: unknown) => setExportError(describeLifecycleError(error, 'export')),
+  });
+
+  const getExportLink = useMutation({
+    mutationFn: () => workspacesApi.exportLink(current!.id, exportJobId!),
+    onSuccess: (link) => {
+      setExportError(null);
+      setExportLink(link);
+    },
+    onError: (error: unknown) => setExportError(describeLifecycleError(error, 'export')),
+  });
+
   const workspaceColumns: Array<Column<WorkspaceSummaryItem>> = [
     {
       key: 'name',
@@ -105,6 +222,8 @@ export default function WorkspacesPage() {
           <span className={styles.titleStrong}>
             {row.name}
             {row.isCurrent ? <Tag tone="success">当前</Tag> : null}
+            {row.status === 'archived' ? <Tag tone="warning">已归档</Tag> : null}
+            {row.status === 'soft_deleted' ? <Tag tone="danger">已删除</Tag> : null}
           </span>
           <span className={styles.meta}>标识 {row.slug} · 我的角色：{roleLabels(row.roleCodes)}</span>
         </div>
@@ -152,6 +271,18 @@ export default function WorkspacesPage() {
     },
   ];
 
+  const busyAction: 'archive' | 'unarchive' | 'delete' | 'restore' | null = archive.isPending
+    ? 'archive'
+    : unarchive.isPending
+      ? 'unarchive'
+      : softDelete.isPending
+        ? 'delete'
+        : restore.isPending
+          ? 'restore'
+          : null;
+
+  const lastWorkspace = (mine.data ?? []).filter((item) => item.status !== 'soft_deleted').length <= 1;
+
   return (
     <>
       {feedback ? (
@@ -191,6 +322,31 @@ export default function WorkspacesPage() {
         )}
       </Card>
 
+      {canAnyLifecycle ? (
+        <Card title={`「${current?.name ?? '当前工作区'}」的状态与生命周期`}>
+          <WorkspaceLifecycleCard
+            info={status.data ?? null}
+            capabilities={capabilityList}
+            loading={status.isLoading}
+            busy={busyAction}
+            error={lifecycleError}
+            onArchive={() => {
+              setLifecycleError(null);
+              setDialog('archive');
+            }}
+            onUnarchive={() => {
+              setLifecycleError(null);
+              setDialog('unarchive');
+            }}
+            onDelete={() => {
+              setLifecycleError(null);
+              setDialog('delete');
+            }}
+            onRestore={() => restore.mutate()}
+          />
+        </Card>
+      ) : null}
+
       <Card>
         <div className={styles.sectionHead}>
           <span className={styles.titleStrong}>新建工作区</span>
@@ -203,6 +359,21 @@ export default function WorkspacesPage() {
           </Button>
         </div>
       </Card>
+
+      {canExport && current ? (
+        <Card title="数据导出（交接与自备份）">
+          <WorkspaceExportPanel
+            capabilities={capabilityList}
+            job={exportJob.data ?? null}
+            link={exportLink}
+            busy={requestExport.isPending ? 'request' : exportJob.isFetching ? 'refresh' : getExportLink.isPending ? 'link' : null}
+            error={exportError}
+            onStart={() => requestExport.mutate()}
+            onRefresh={() => void exportJob.refetch()}
+            onGetLink={() => getExportLink.mutate()}
+          />
+        </Card>
+      ) : null}
 
       <Card flush>
         <div className={styles.sectionHead}>
@@ -246,6 +417,32 @@ export default function WorkspacesPage() {
           />
         )}
       </Card>
+
+      <ArchiveWorkspaceDialog
+        open={dialog === 'archive' || dialog === 'unarchive'}
+        mode={dialog === 'unarchive' ? 'unarchive' : 'archive'}
+        workspaceName={current?.name ?? ''}
+        busy={archive.isPending || unarchive.isPending}
+        error={lifecycleError}
+        onCancel={() => {
+          setDialog(null);
+          setLifecycleError(null);
+        }}
+        onConfirm={() => (dialog === 'unarchive' ? unarchive.mutate() : archive.mutate())}
+      />
+
+      <DeleteWorkspaceDialog
+        open={dialog === 'delete'}
+        workspaceName={current?.name ?? ''}
+        isLastWorkspace={lastWorkspace}
+        busy={softDelete.isPending}
+        error={lifecycleError}
+        onCancel={() => {
+          setDialog(null);
+          setLifecycleError(null);
+        }}
+        onConfirm={(payload) => softDelete.mutate(payload)}
+      />
 
       <span className={styles.meta}>当前站点：{site.name} · 工作区级设置（AI Key、知识库分类、通知渠道等）在各工作区内独立维护。</span>
     </>

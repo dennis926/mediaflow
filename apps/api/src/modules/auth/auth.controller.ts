@@ -4,10 +4,11 @@ import { UUID_SHAPE } from '../../common/validators/id-shape';
 import { ChangePasswordDto } from '../workspace/dto/user.dto';
 import { UserService } from '../workspace/user.service';
 import { AuthService } from './auth.service';
-import { AuthUser, LoginResult } from './auth.types';
+import { AuthUser, CapabilitiesView, LoginResult } from './auth.types';
 import { CurrentUser } from './current-user.decorator';
 import { LoginDto } from './dto/login.dto';
 import { Public } from './public.decorator';
+import { WorkspaceLifecycle } from './workspace-lifecycle.decorator';
 
 class SwitchWorkspaceDto {
   /**
@@ -46,7 +47,13 @@ export class AuthController {
     return this.authService.login(dto.email, dto.password, { ip, userAgent: userAgent ?? null });
   }
 
-  /** 切换工作区：重新签发令牌，前端刷新即可（不需要重新登录） */
+  /**
+   * 切换工作区：重新签发令牌，前端刷新即可（不需要重新登录）。
+   *
+   * 豁免状态闸门的原因同 GET /workspaces：当前工作区被软删后，用户必须还能切到别的
+   * 工作区继续工作（否则只能靠"恢复"脱身）。目标工作区的可用性在服务层重新校验。
+   */
+  @WorkspaceLifecycle()
   @Post('switch-workspace')
   switchWorkspace(
     @Body() dto: SwitchWorkspaceDto,
@@ -80,6 +87,16 @@ export class AuthController {
   @Post('change-password')
   changePassword(@Body() dto: ChangePasswordDto, @CurrentUser() user: AuthUser): Promise<{ success: true }> {
     return this.userService.changeOwnPassword(user.id, dto);
+  }
+
+  /**
+   * 当前用户生效的能力点（只读自己）。前端按能力点显示/隐藏按钮，避免把角色名写死在组件里。
+   * 标记为生命周期豁免：当前工作区已被软删时也必须能读到（否则显示不出"恢复"入口）。
+   */
+  @Get('capabilities')
+  @WorkspaceLifecycle()
+  capabilities(@CurrentUser() user: AuthUser): Promise<CapabilitiesView> {
+    return this.authService.capabilities(user);
   }
 
   @Get('me')

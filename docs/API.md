@@ -290,3 +290,42 @@ scheduled ──(到点，由扫描器入队)──> pending
 
 > 这 9 个路由均标注 `@WorkspaceLifecycle()`：即便调用者当前所在的工作区已被归档/软删，也允许调用（否则用户无法恢复自己的工作区）。
 > 权限一律按**目标工作区**判定（非成员 404、成员非 owner 403）。
+
+## 当前用户能力点（B0.4 UI 用）
+
+`GET /api/auth/capabilities` —— 读取调用者**自己**在当前工作区生效的能力点，任何登录用户都可调用。
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "workspaceId": "22222222-2222-2222-2222-222222222222",
+    "role": "owner",
+    "roles": ["owner"],
+    "capabilities": ["settings.write", "users.manage", "workspace.manage", "workspace.archive", "workspace.delete", "workspace.restore", "workspace.export", "workspace.purge"],
+    "workspaceStatus": "active",
+    "isSuperAdmin": false
+  }
+}
+```
+
+- 判定与 `CapabilityGuard` 逐条一致（含"矩阵里未配置 = 不限制"的语义），前端按钮显隐据此决定，不硬编码角色。
+- 与 `AuthSessionService` 共用 30 秒缓存；权限矩阵/角色变更时缓存主动失效。
+- 当前工作区被软删时仍返回 200（标记为生命周期豁免），`workspaceStatus` 为 `soft_deleted` 且包含 `workspace.restore`，供界面展示"恢复"入口。
+
+### 生命周期与导出接口（B0.4）
+
+| 方法 | 路径 | 能力点 | 说明 |
+| --- | --- | --- | --- |
+| GET | `/api/workspaces/:id/status` | `workspace.manage` | 状态 + 恢复倒计时（`daysUntilPurge` 由后端算） |
+| POST | `/api/workspaces/:id/archive` / `unarchive` | `workspace.archive` | 归档/取消归档（可逆，200） |
+| DELETE | `/api/workspaces/:id` | `workspace.delete` | 软删；body `{confirmName, confirmLastWorkspace?}`；400 名称不符/未确认最后一个，409 有未完成任务 |
+| POST | `/api/workspaces/:id/restore` | `workspace.restore` | 保留期内恢复；410 已超期 |
+| POST | `/api/workspaces/:id/export` | `workspace.export` | 申请导出；409 已有进行中任务，413 超 5GB |
+| GET | `/api/workspaces/:id/export/:jobId` | `workspace.export` | 查询进度/结果 |
+| POST | `/api/workspaces/:id/export/:jobId/link` | `workspace.export` | 一次性下载链接（15 分钟） |
+| GET | `/api/workspaces/:id/purge-preview` | `workspace.purge` | 永久清除的影响面预估（界面不提供清除动作） |
+
+**软删态下的可达性**：`GET /api/workspaces` 与 `POST /api/auth/switch-workspace` 豁免状态闸门（否则用户删掉当前工作区后无法切换），
+其余业务接口一律 404，不暴露该工作区曾经存在。

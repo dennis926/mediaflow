@@ -52,6 +52,14 @@ export class WorkspaceController {
     private readonly purgeService: WorkspacePurgeService,
   ) {}
 
+  /**
+   * 我能切换的工作区列表。
+   *
+   * 为什么必须豁免状态闸门：用户删掉"当前工作区"之后，令牌仍指向那个已软删的工作区，
+   * 若这里也按状态返回 404，界面上连"我参与的其他工作区"都读不到，用户就再也切不走了
+   * ——只剩"恢复"这一条路（非 owner 成员甚至没有这条路）。只返回调用者自己是成员的工作区，不泄露任何信息。
+   */
+  @WorkspaceLifecycle()
   @Get()
   mine(@CurrentUser() user?: AuthUser): Promise<WorkspaceSummary[]> {
     return this.workspacesService.listMine(user?.id ?? '');

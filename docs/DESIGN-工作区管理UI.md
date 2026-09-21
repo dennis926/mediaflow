@@ -183,3 +183,55 @@
 6. 文档：`docs/API.md` 补 `capabilities` 接口；本设计文档追加"实施记录"
 
 预计工作量：后端 0.5 小时、前端 3–4 小时、测试与核验 1–1.5 小时。
+
+## 10. 补充要求（2026-09-21 用户确认时追加）
+
+### 10.1 永久清除（purge）的"出口"必须写在界面上
+
+UI **不提供**永久清除按钮（不可逆、高危，只走 API + `RUNBOOK-purge演练.md`），但必须让用户知道去哪里办，
+否则用户会以为"功能缺失"：
+
+- 删除确认框底部固定一行小字：**"如需永久清除（不可恢复），请联系管理员按运维手册操作。"**
+- 生命周期卡片底部也有一句同样的提示（发现入口：用户即使不点删除也能看到）。
+- 运维侧的对应入口：`DELETE /api/workspaces/:id/data`（需 owner + 名称二次确认），操作步骤见 `RUNBOOK-purge演练.md`。
+
+### 10.2 能力点接口（`GET /api/auth/capabilities`）
+
+- 任何登录用户都能读**自己**在当前工作区生效的能力点；不读他人、不返回全局权限矩阵。
+- 返回 `{ workspaceId, role, roles, capabilities, workspaceStatus, isSuperAdmin }`。
+- 缓存与 `AuthSessionService` 共用（30 秒，权限变更时主动失效），不额外查库。
+- **当前工作区被软删时**：返回"该用户为 owner 的软删工作区"的能力点（含 `workspace.restore`），
+  这样界面才能显示"恢复"入口；为此该接口标记为 `@WorkspaceLifecycle()` 豁免状态闸门。
+
+### 10.3 导出面板的两条时间约定必须显示
+
+- 面板顶部常驻：**"导出产物将在 7 天后自动删除，请及时下载。"**
+- 产物已过期（`expiresAt` 已过）：显示 **"产物已过期"** 并隐藏"获取下载链接"按钮（只能重新申请导出）。
+- 拿到链接时显示：**"此链接 15 分钟内有效且仅能使用一次。"**，并提示下载中断需重新申请（同一链接不能重复用）。
+
+### 10.4 实施中发现并修复的后端缺口（软删后界面无路可走）
+
+前端接完后实测发现：用户删掉"当前工作区"后，令牌仍指向那个已软删的工作区，而**除生命周期接口外的所有接口都返回 404**——
+包括"我参与的工作区列表"与"切换工作区"。结果：界面既列不出别的工作区、也切不走，只剩"恢复"一条路（非 owner 成员连这条路都没有）。
+
+修复（两处豁免，均已加测试）：
+
+| 接口 | 为什么必须豁免 |
+| --- | --- |
+| `GET /api/workspaces` | 删掉当前工作区后仍要能列出自己参与的工作区，界面才有地方点"切换" |
+| `POST /api/auth/switch-workspace` | 才能切到别的工作区继续工作（目标工作区可用性在服务层重新校验） |
+
+豁免只给"逃生+自救"用的这几个接口：`GET /api/contents` 等业务接口在软删态下依旧 404（E2E 用例 3、4 做了双向断言）。
+
+## 11. 实施记录（2026-09-21 完成）
+
+| 步骤 | 交付物 | 验证 |
+| --- | --- | --- |
+| 后端 | `GET /api/auth/capabilities`、`GET /workspaces` 与 `switch-workspace` 状态豁免 | 单元 6 条（含"与守卫逐条一致"不变量测试）、E2E 4 条 |
+| 前端 API 层 | `authApi.capabilities`、`workspacesApi` 生命周期/导出 9 个方法、`api.deleteWithBody` | `tsc` 全绿 |
+| 能力点 | `apps/web/src/lib/capabilities.ts`（`useCapabilities` / `hasCapability`） | 页面按钮显隐全部由它决定 |
+| 组件 | `WorkspaceLifecycleCard`、`ArchiveWorkspaceDialog`、`DeleteWorkspaceDialog`、`WorkspaceExportPanel` + `workspace.module.css` | jsdom 20 条 |
+| 错误文案 | `apps/web/src/lib/workspace-lifecycle.ts`（409/410/413 给出可照做的下一步） | 6 条用例 |
+| 页面接入 | `app/(app)/workspaces/page.tsx`（状态标签、生命周期卡片、导出面板、两个确认框） | `next build` + 截图核验 |
+
+**未做（按设计）**：H5 端不做工作区管理；不做批量操作；不做导出产物在线预览；界面不提供永久清除。
