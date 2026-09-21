@@ -21,6 +21,11 @@ export interface PurgeResult {
   deletedRows: Record<string, number>;
   deletedFiles: number;
   socialAccountsDestroyed: number;
+  /**
+   * 被**保留**（不是删除）的导出任务数：工作区被清除后这些任务行仍存在、workspace_id 被外键置空，
+   * 产物在 7 天有效期内仍可下载（见 §1.2 与实体注释）。
+   */
+  retainedExportJobs: number;
   backup: { path: string; sha256: string; sizeBytes: number; expiresAt: string };
   ledgerRetained: string[];
 }
@@ -196,7 +201,7 @@ export class WorkspacePurgeService {
       // ② 删除文件（先文件后行；失败不阻断，记入 failures）
       const { deletedFiles, failures } = await this.deleteFiles(workspace.id);
       // ③ 单事务删除业务数据 + 工作区自身
-      const { deletedRows, socialAccountsDestroyed } = await this.deleteRows(workspace.id);
+      const { deletedRows, socialAccountsDestroyed, retainedExportJobs } = await this.deleteRows(workspace.id);
 
       const backupExpiresAt = new Date(
         Date.now() + runtime().workspace.purgeBackupRetentionDays * 24 * 60 * 60 * 1000,
@@ -209,6 +214,7 @@ export class WorkspacePurgeService {
           deletedFiles,
           failures,
           socialAccountsDestroyed,
+          retainedExportJobs,
           backupPath: backup.path,
           backupSha256: backup.sha256,
           backupExpiresAt,
@@ -225,7 +231,7 @@ export class WorkspacePurgeService {
           workspaceId,
           actorId: actor.id ?? null,
           actorName: actor.name ?? null,
-          payload: { batchId: batch.id, deletedRows, deletedFiles, backupSha256: backup.sha256, ledgerRetained: LEDGER_TABLES },
+          payload: { batchId: batch.id, deletedRows, deletedFiles, retainedExportJobs, backupSha256: backup.sha256, ledgerRetained: LEDGER_TABLES },
         })
         .catch(() => undefined);
       const destroyed = deletedRows.social_accounts ?? 0;
@@ -252,8 +258,9 @@ export class WorkspacePurgeService {
           title: `工作区「${workspace.name}」已永久清除`,
           text:
             `操作人：${actor.name ?? actor.id ?? '未知'}；删除业务行合计 ${Object.values(deletedRows).reduce((sum, n) => sum + n, 0)} 条、文件 ${deletedFiles} 个；` +
-            `审计与成本流水已保留。清除前备份：${backup.path}（保留 ${runtime().workspace.purgeBackupRetentionDays} 天，sha256 ${backup.sha256.slice(0, 12)}…）。`,
-          context: { batchId: batch.id, deletedRows, backupSha256: backup.sha256 },
+            `审计与成本流水已保留；导出任务 ${retainedExportJobs} 个被保留（产物仍可在有效期内下载）。` +
+            `清除前备份：${backup.path}（保留 ${runtime().workspace.purgeBackupRetentionDays} 天，sha256 ${backup.sha256.slice(0, 12)}…）。`,
+          context: { batchId: batch.id, deletedRows, retainedExportJobs, backupSha256: backup.sha256 },
         };
         await this.channels.dispatch(summary).catch((error: unknown) => {
           this.logger.warn(`清除完成通报发送失败：${error instanceof Error ? error.message : String(error)}`);
@@ -269,6 +276,7 @@ export class WorkspacePurgeService {
         deletedRows,
         deletedFiles,
         socialAccountsDestroyed: destroyed,
+        retainedExportJobs,
         backup: { ...backup, expiresAt: backupExpiresAt.toISOString() },
         ledgerRetained: LEDGER_TABLES,
       };
@@ -474,8 +482,11 @@ export class WorkspacePurgeService {
   }
 
   /** 单事务删除业务数据（先子表后主表），最后删工作区自身；返回逐表行数与销毁的账号数。 */
-  async deleteRows(workspaceId: string): Promise<{ deletedRows: Record<string, number>; socialAccountsDestroyed: number }> {
+  async deleteRows(
+    workspaceId: string,
+  ): Promise<{ deletedRows: Record<string, number>; socialAccountsDestroyed: number; retainedExportJobs: number }> {
     const deletedRows: Record<string, number> = {};
+    let exportCount = 0;
     await this.dataSource.transaction(async (manager) => {
       for (const table of BUSINESS_TABLES) {
         const before = await manager.query(`SELECT count(*)::int AS n FROM ${table} WHERE workspace_id = $1`, [workspaceId]);
@@ -483,15 +494,14 @@ export class WorkspacePurgeService {
         if (count > 0) await manager.query(`DELETE FROM ${table} WHERE workspace_id = $1`, [workspaceId]);
         deletedRows[table] = count;
       }
-      const batchRows = await manager.query('SELECT count(*)::int AS n FROM workspace_export_jobs WHERE workspace_id = $1', [workspaceId]);
-      const exportCount = Number(batchRows[0]?.n ?? 0);
-      if (exportCount > 0) {
-        await manager.query('DELETE FROM workspace_export_jobs WHERE workspace_id = $1', [workspaceId]);
-      }
-      deletedRows.workspace_export_jobs = exportCount;
+      // 导出任务行**刻意不删**：workspace_export_jobs.workspace_id 是 ON DELETE SET NULL（B0.4 第 5 步），
+      // 删工作区行时它会被置空，任务与产物留在原地——这样"关停前先导出、事后仍能下载"才成立（第 1 步的设计意图）。
+      const exportRows = await manager.query('SELECT count(*)::int AS n FROM workspace_export_jobs WHERE workspace_id = $1', [workspaceId]);
+      exportCount = Number(exportRows[0]?.n ?? 0);
+      deletedRows.workspace_export_jobs = 0;
       await manager.query('DELETE FROM workspaces WHERE id = $1', [workspaceId]);
     });
-    return { deletedRows, socialAccountsDestroyed: deletedRows.social_accounts ?? 0 };
+    return { deletedRows, socialAccountsDestroyed: deletedRows.social_accounts ?? 0, retainedExportJobs: exportCount };
   }
 
   private async hashFile(path: string): Promise<string> {

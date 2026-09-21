@@ -1,4 +1,4 @@
-import { ConflictException, Inject, Injectable, Logger, NotFoundException, PayloadTooLargeException, UnauthorizedException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, Inject, Injectable, Logger, NotFoundException, PayloadTooLargeException, UnauthorizedException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream, createWriteStream, existsSync, mkdirSync, statSync, unlinkSync } from 'node:fs';
@@ -11,8 +11,9 @@ import { DataSource, Repository } from 'typeorm';
 import { AuditService } from '../../audit/audit.service';
 import { CryptoService } from '../../common/crypto.service';
 import { REDIS_CLIENT } from '../../redis/redis.constants';
-import { WorkspaceExportJob } from './entities/workspace-export-job.entity';
+import { WorkspaceExportJob, jobWorkspaceId } from './entities/workspace-export-job.entity';
 import { WorkspaceService } from './workspace.service';
+import { WorkspaceContextService } from '../../common/workspace-context.service';
 
 export interface ExportJobView {
   id: string;
@@ -68,6 +69,7 @@ export class WorkspaceExportService {
     @InjectRepository(WorkspaceExportJob) private readonly jobs: Repository<WorkspaceExportJob>,
     private readonly dataSource: DataSource,
     private readonly workspaces: WorkspaceService,
+    private readonly workspaceContext: WorkspaceContextService,
     private readonly crypto: CryptoService,
     private readonly audit: AuditService,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
@@ -89,8 +91,8 @@ export class WorkspaceExportService {
       expiresAt: job.expiresAt?.toISOString() ?? null,
       error: job.errorMessage,
       createdAt: job.createdAt.toISOString(),
-      ...(job.status === 'completed'
-        ? { downloadEndpoint: `/api/workspaces/${job.workspaceId}/export/${job.id}/link` }
+      ...(job.status === 'completed' && jobWorkspaceId(job)
+        ? { downloadEndpoint: `/api/workspaces/${jobWorkspaceId(job)}/export/${job.id}/link` }
         : {}),
     };
   }
@@ -345,9 +347,33 @@ export class WorkspaceExportService {
     jobId: string,
     userId: string,
   ): Promise<{ url: string; expiresAt: string }> {
-    await this.workspaces.requireWorkspaceRole(workspaceId, userId, ['owner', 'admin']);
-    const job = await this.jobs.findOne({ where: { id: jobId, workspaceId } });
+    const job = await this.jobs.findOne({ where: { id: jobId } });
     if (!job) throw new NotFoundException('导出任务不存在');
+    const jobWorkspace = jobWorkspaceId(job);
+    if (jobWorkspace) {
+      // 工作区还在：按目标工作区的角色判定（与请求导出时一致）
+      if (jobWorkspace !== workspaceId) throw new NotFoundException('导出任务不存在');
+      await this.workspaces.requireWorkspaceRole(workspaceId, userId, ['owner', 'admin']);
+    } else {
+      // 工作区已被永久清除：只能由**原始申请人本人**在产物有效期内取回，
+      // 这样"关停前先导出、事后补下载"这个真实场景才成立（见 DESIGN-多租户生命周期.md §1.2）。
+      if (!job.requestedBy || job.requestedBy !== userId) {
+        throw new ForbiddenException('该导出产物属于一个已被永久清除的工作区，只有原申请人可以取回');
+      }
+      // 审计一律记"操作者当前所在工作区"（与工作区生命周期审计的口径一致）；
+      // 目标工作区已被清除这个事实放在 payload 里，避免为此把 audit_logs.workspace_id 改成可空。
+      const scope = await this.workspaceContext.current().catch(() => null);
+      await this.audit
+        .record({
+          action: 'workspace.export.link_issued_after_purge',
+          resourceType: 'workspace_export',
+          resourceId: job.id,
+          tenantId: job.tenantId,
+          workspaceId: scope?.workspaceId ?? workspaceId,
+          payload: { purgedWorkspaceId: workspaceId, requestedBy: job.requestedBy, sizeBytes: Number(job.sizeBytes ?? 0) },
+        })
+        .catch(() => undefined);
+    }
     if (job.status !== 'completed' || !job.filePath) throw new ConflictException('导出尚未完成，暂时无法下载');
     if (job.expiresAt && job.expiresAt.getTime() < Date.now()) throw new NotFoundException('导出产物已过期');
 
@@ -386,8 +412,12 @@ export class WorkspaceExportService {
     const accepted = await this.redis.set(`export:token:${signature}`, '1', 'EX', remaining, 'NX').catch(() => 'OK');
     if (accepted === null) throw new UnauthorizedException('下载链接已被使用（一次性链接，请重新申请）');
 
-    const job = await this.jobs.findOne({ where: { id: jobId, workspaceId } });
-    if (!job || job.status !== 'completed' || !job.filePath) throw new NotFoundException('导出产物不存在');
+    // 令牌已经把 workspaceId 与 jobId 一起做了 HMAC 绑定，这里不必再用 workspace_id 去匹配：
+    // 工作区被永久清除后 job.workspace_id 会被置空，若仍按它匹配，已发出的下载链接会直接失效。
+    const job = await this.jobs.findOne({ where: { id: jobId } });
+    const jobWorkspace = job ? jobWorkspaceId(job) : null;
+    if (!job || (jobWorkspace && jobWorkspace !== workspaceId)) throw new NotFoundException('导出产物不存在');
+    if (job.status !== 'completed' || !job.filePath) throw new NotFoundException('导出产物不存在');
     if (job.expiresAt && job.expiresAt.getTime() < Date.now()) throw new NotFoundException('导出产物已过期');
     if (!existsSync(job.filePath)) throw new NotFoundException('导出文件已被清理');
 
@@ -432,7 +462,13 @@ export class WorkspaceExportService {
           this.logger.warn(`删除过期导出文件失败：${error instanceof Error ? error.message : String(error)}`);
         }
       }
-      await this.jobs.update({ id: job.id }, { status: 'expired' });
+      if (jobWorkspaceId(job) === null) {
+        // 工作区早已被永久清除：产物删掉之后这行没有任何用途（归谁、给谁看都无从谈起），直接删行；
+        // 留痕由审计 workspace.export.expired 与 purge 账本承担。
+        await this.jobs.delete({ id: job.id });
+      } else {
+        await this.jobs.update({ id: job.id }, { status: 'expired' });
+      }
       await this.audit
         .record({
           action: 'workspace.export.expired',

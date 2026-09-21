@@ -122,3 +122,47 @@ purge 完成后**不写站内通知**（只走邮件/群机器人，若已配置
 3. **killed 进程会留下挂起命令**：演练脚本里所有 psql/pg_dump 都要带 `-w`（不提示口令）+ `PGPASSWORD` 环境变量（**流水线两侧都要带**，
    否则 `pg_dump` 会等口令而卡死）。
 4. **建库/删库用应用角色即可**：给 `mediaflow` 角色 `CREATEDB` 权限后无需 `su postgres`（后者在非交互环境容易挂起）。
+
+## 7. 运维铁律（B0.4 第 5 步确立）
+
+### 7.1 禁止绕过 API 直接删 `workspaces` 行
+
+```sql
+-- ❌ 绝对不要这样删工作区：
+DELETE FROM workspaces WHERE id = '<工作区 id>';
+```
+
+即使外键已经是 `ON DELETE CASCADE`，直接删父行依然会带来三个后果：
+
+1. **静默销毁平台授权凭据**（`social_accounts` 随级联消失），且**不写审计**——purge 路径会写
+   `workspace.purge.social_accounts_destroyed` 与清除账本，直接删不会；
+2. **留下孤儿素材文件**：`media_assets` 行会被级联删除，但磁盘上的文件不由外键删除（purge 会逐文件清理）；
+3. **留下孤儿队列消息**：`publish_tasks` 行没了，Redis 流里针对它们的消息还在（purge 会在同一流程清理）。
+
+**正确做法**：`DELETE /api/workspaces/:id/data`（owner + 名称与固定串二次确认），或按本文档第 1–6 步演练流程操作。
+
+### 7.2 删除顺序不要依赖数据库的级联顺序
+
+purge 内部按"子表先删"的显式顺序执行（`social_accounts` 在 `platforms` 之前），这是**刻意**的：
+`social_accounts.platform_id → platforms(id) ON DELETE RESTRICT`，若先删平台字典会被 RESTRICT 拦住。
+数据库自身的级联顺序是"实现相关"的（实测 PostgreSQL 在本库的形态下会先处理引用侧，10/10 成功），
+但**不要把正确性建立在它上面**——改动删除流程时保持显式顺序。
+
+### 7.3 工作区被永久清除后，产物仍可取回（7 天有效期内）
+
+清除**不会**删除导出任务行与产物文件：`workspace_export_jobs.workspace_id` 会被外键置空（`NULL`），
+任务与产物原样保留到 `expires_at`。取回方式：
+
+1. **清除前已发出的链接**：15 分钟内仍可用（一次性）；
+2. **清除后重新申请**（推荐，给"关停前忘了下载"的场景兜底）：
+   ```bash
+   # 用**原申请人本人**的登录令牌（其他人会收到 403），路径里的工作区 id 用被清除的那个
+   curl -s -X POST "$BASE/api/workspaces/<被清除的工作区 id>/export/<任务 id>/link"         -H "Authorization: Bearer <原申请人令牌>" -H 'Content-Type: application/json' -d '{}'
+   # 返回的 url 15 分钟内有效且只能使用一次
+   curl -sO "$BASE<返回的 url>"
+   ```
+   该动作会写审计 `workspace.export.link_issued_after_purge`（含被清除的工作区 id 与申请人）。
+3. 产物过期后（默认 7 天）由 04:00 的清理任务删除文件，并**连行一起删除**（这类行已无归属，留着只会堆积）。
+   账本与审计保留取证：`workspace_purge_batches.retained_export_jobs` 记录了清除时保留了多少个导出任务。
+
+**注意**：取回仅限"原申请人本人"，非申请人一律 403 —— 清除后的产物不会变成公开资源。

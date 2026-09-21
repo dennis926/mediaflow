@@ -50,7 +50,7 @@
 | `invoices`（B0.7 新增） | **保留** | 财务凭据，法律上需长期留存（建议 ≥ 5 年）；即使租户退租也要能出示 |
 | `subscriptions`（B0.7 新增） | **保留**（标记 `canceled_at`，不删） | 订阅历史用于对账与续费纠纷 |
 | `workspace_purge_batches`（B0.4 新增） | **永久保留** | 它本身就是"工作区已不存在"之后的证据：谁在何时删了哪个工作区、逐表删了多少行、保留了什么。删了它就等于毁掉清除记录 |
-| `workspace_export_jobs`（B0.4 新增） | 保留到产物过期（7 天）后再由任务清理 | 导出任务要在工作区硬删后仍能下载，故**不加外键** |
+| `workspace_export_jobs`（B0.4 新增） | 保留到产物过期（7 天）后再由任务清理 | 导出任务要在工作区硬删后仍能下载 → 行保留；**外键 `ON DELETE SET NULL`**（第 5 步定稿：既满足下载，又不留悬空引用。第 1 步的"不加外键"已废弃，见 `DESIGN-外键补全-第5步.md` §2.4） |
 
 **保留方式**：这些表在硬删时**不做任何删除或置空**，只写一条 `purge_batch` 标记（见 §7），用于区分"历史遗留"与"仍在使用的租户"。
 查询侧按 `workspace_id` 过滤即可，成本/审计页面在租户已删除时显示"该工作区已于 X 时间删除"。
@@ -247,6 +247,10 @@ mediaflow-export-{slug}-{YYYYMMDD-HHMMSS}.zip
 
 ### 6.5 任务表（新增）
 
+> **第 5 步修订（2026-09-21）**：本表的 `workspace_id` 由"非空 + 无外键"改为"**可空 + ON DELETE SET NULL**"。
+> 原因：无外键会留下悬空引用（正是第 5 步要消除的孤儿行类型），而 CASCADE 又会违背"硬删后仍可下载"的设计意图。
+> 配套改动见 `DESIGN-外键补全-第5步.md` §2.4（purge 不再删除任务行、改为在账本记 `retainedExportJobs`）。
+
 ```sql
 CREATE TABLE workspace_export_jobs (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -259,7 +263,7 @@ CREATE TABLE workspace_export_jobs (
   expires_at timestamptz
 );
 ```
-（`workspace_id` **不加外键**：导出任务的产物要在工作区硬删后仍可下载至有效期结束。）
+（`workspace_id` 为 **可空** + `ON DELETE SET NULL`：工作区被硬删后行保留、引用置空，产物在有效期内仍可下载至结束——第 5 步定稿。）
 
 ---
 
@@ -316,7 +320,7 @@ CREATE TABLE workspace_purge_batches (
 | 顺序 | 迁移 | 内容 | `ON DELETE` |
 | --- | --- | --- | --- |
 | M1 | `WorkspaceArchiveFields` | `workspaces` 加 `archived_at`/`deleted_at`/`purge_after` 三列（可空）+ 索引 `(status, purge_after)` | — |
-| M2 | `WorkspaceExportJobs` | 建 `workspace_export_jobs` 表 | — |
+| M2 | `WorkspaceExportJobs` | 建 `workspace_export_jobs` 表（当时的 `workspace_id` 非空且无外键；第 5 步改为可空 + SET NULL） | 第 5 步补 SET NULL |
 | M3 | `WorkspacePurgeBatches` | 建 `workspace_purge_batches` 表 | — |
 | M4 | `WorkspaceFkContent` | `contents`、`content_variants`、`content_revisions`、`content_reviews` 的 `workspace_id → workspaces(id)` | CASCADE |
 | M5 | `WorkspaceFkPublishAnalytics` | `publish_tasks`、`analytics`、`track_events` | CASCADE |
@@ -589,3 +593,13 @@ purge 是唯一不可逆的操作，**必须先在演练工作区上跑通**，�
 | 备份失败中止 | 503、**一条数据都没删**、工作区仍 soft_deleted、账本 failed、`purge_failed` 审计 1 条 |
 | 约束 4 生产验证 | 默认工作区 active、基线（1 内容 / 2 用户 / 1 工作区 / 0 任务）不变、无演练残留 |
 | 约束 5 配置隔离 | 演练实例 1 天（被夹到最小值 7 天，符合设计）；生产仍为未配置（默认 30 天） |
+
+## 12.9 第 5 步实施记录：外键补全（2026-09-21）
+
+| 交付 | 内容 |
+| --- | --- |
+| 迁移 | 15 条指向 `workspaces(id)` 的外键（**一表一迁移**，编号 `1789701500000`–`1789701514000`）：14 张私有/结构性表 `CASCADE` + `workspace_export_jobs` `SET NULL`；另有 1 个独立迁移加账本列 `workspace_purge_batches.retained_export_jobs`。每个迁移都带"孤儿行 = 0"前置守卫，`down()` 只解约束不删数据 |
+| 先清孤儿 | 上线前逐表核查：`content_templates` / `platforms` / `notifications` 各 1 条孤儿行（均来自 07:51 的演练残留，父工作区行被演练清理脚本直接删除——正是"没有外键"的后果）。内容留档于 `/root/.hermes/workspace/b0_4_step5_orphan_rows_backup.json` 后清除，15 张表全部 0 空值 0 孤儿 |
+| 矛盾 1（导出任务） | 定稿 **SET NULL + 行保留**：purge 不再删任务行（改为账本记 `retainedExportJobs`）；`resolveDownload` 改为按 jobId 查（令牌已 HMAC 绑定）；**原申请人**可在有效期内重新申请链接（审计 `workspace.export.link_issued_after_purge`）；过期清理时删除已失去归属的行 |
+| 矛盾 2（RESTRICT × CASCADE） | 实测：正常数据（含 50 账号引用同一平台）删工作区**成功 10/10**（与约束创建顺序无关）；跨工作区引用（异常形态）会硬失败并整体回滚，这是 RESTRICT 的保护语义 → **保持 V1（不改 CASCADE 绕过）**；生产库此类引用 0 条；运维仍应走 purge 的显式删除顺序（账号先、平台后），不依赖 PG 的级联顺序 |
+| 验证 | 单元 12 条（导出链路新行为）；E2E：外键规则 4 条 + 级联实测 1 条（14 表级联清空、导出任务保留并置空、3 张账本表原样留下、旁观工作区不受影响）；迁移上下行各 16 次往返成功（`typeorm_migrations` 22 → 38）；purge 演练复跑通过（A 类全 0 / B 类保留 / C 类不变 / 备份可恢复 / 备份失败中止 / 无残留）；**专项实测**：清除后 pre-purge 链接与重新申请链接均可下载（200 + ZIP 魔数），外部人 403（`/root/.hermes/workspace/b0_4_step5_post_purge_download.log`） |

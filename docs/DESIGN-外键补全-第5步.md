@@ -44,7 +44,7 @@
 | 10 | `brand_knowledge` | CASCADE | 品牌知识库（AI 适配的事实依据）是工作区私有资产 | 无 |
 | 11 | `content_templates` | CASCADE | 文案模板属于工作区 | 本次核查发现的孤儿行之一，加外键后不会再出现 |
 | 12 | `platforms` | CASCADE | 当前是"每个工作区一份平台字典"（工作区创建时种子），`social_accounts.platform_id` 指向它 | 若将来改成全局共享字典（B0.5 之后可能），本外键需改为**不加外键**并迁移数据；届时另开决策记录 |
-| 13 | `workspace_export_jobs` | CASCADE | 导出任务与产物都属于工作区（purge 已显式删除其行与产物目录）；加外键后行为与 purge 一致，且不会再留孤儿任务 | 无 |
+| 13 | `workspace_export_jobs` | **SET NULL**（非 CASCADE） | 产物要在工作区硬删后仍能下载到有效期结束（SaaS 用户关停前先导出是真实场景）→ 行必须保留；但也不能留悬空引用 → 置空。见 §2.4 | 该列改为**可空**；purge 不再删任务行（账本记 `retainedExportJobs`）；`resolveDownload` 按 jobId 查；原申请人可在有效期内重新申请链接 |
 
 ### 2.2 两张结构性表
 
@@ -65,6 +65,60 @@
 | `users` | 保持现状 | 已是 `workspace_id → workspaces(id) ON DELETE SET NULL`（M8），语义是"人保留、归属清空" |
 | `user_roles` / `typeorm_migrations` | 不适用 | 无 `workspace_id` 字段 |
 
+### 2.4 矛盾 1 澄清：`workspace_export_jobs` 用 SET NULL（定稿）
+
+**矛盾**：第 1 步建表时写的是「`workspace_id` 刻意不加外键——产物要在工作区硬删后仍可下载」，本方案最初却把它列成 CASCADE。两者不能同时成立。
+
+**事实核查（实现层面）**
+
+| 环节 | 现状 | 说明 |
+| --- | --- | --- |
+| 产物文件 | purge 只删 `uploads/media` 与 `uploads/knowledge`，**不碰** `uploads/exports/{workspaceId}` | 文件本来就能活下来 |
+| 任务行 | purge **删掉**了 `workspace_export_jobs` 行 | 行没了 → 产物在磁盘上却无法下载，第 1 步的承诺**当前是坏的** |
+| `createDownloadLink()` | 先 `requireWorkspaceRole(workspaceId…)`，再按 `{id, workspaceId}` 查任务 | 工作区没了 → 永远发不出新链接 |
+| `resolveDownload()` | 按 `{id: jobId, workspaceId}` 查任务 | `workspace_id` 一旦置空，**连已发出的链接都会失效** |
+
+**定稿（记为 A2′，是选项 A 的加强版）**
+
+1. 外键用 **`ON DELETE SET NULL`**、`workspace_id` 改为可空 → 行保留、引用置空，既满足下载、又没有孤儿行；
+2. `resolveDownload()` 改为按 `jobId` 查（令牌已用 HMAC 绑定 `workspaceId|jobId|exp|nonce`，不必再用列去匹配）；
+3. `createDownloadLink()`：工作区还在时照旧按目标工作区角色判定；工作区已置空时**只允许原申请人 `requested_by` 本人在有效期内取回**，并写审计 `workspace.export.link_issued_after_purge`；
+4. purge **不再删除**任务行，改为在账本记 `retainedExportJobs`（新增列 `workspace_purge_batches.retained_export_jobs`），完成通报文案同步说明；
+5. 04:00 过期清理：产物删除后，**已失去归属（`workspace_id IS NULL`）的行一并删除**，避免永久堆积；仍属于存活工作区的行只标记 `expired`（那是工作区自己的历史）。
+
+**为什么不用「不加外键」（第 1 步原方案）**：那正是本步要消除的孤儿行形态，而且会让「按 `workspace_id` 统计」把死工作区的数据算进来。SET NULL 让「这个产物已无归属」成为数据库里的显式事实。
+
+**为什么不用 CASCADE**：直接违背第 1 步的设计意图（关停后 7 天内仍可取回），对 SaaS 用户是明显的体验倒退。
+
+**真机验证**（临时实例 + 演练工作区，报告 `/root/.hermes/workspace/b0_4_step5_post_purge_download.log`）
+
+| 验证点 | 结果 |
+| --- | --- |
+| purge 返回 `retainedExportJobs` | 1（`deletedRows.workspace_export_jobs=0`） |
+| 任务行 | 仍在，`workspace_id=NULL`，`status=completed` |
+| 产物文件 | 仍在磁盘 |
+| **清除前发出的链接** | 仍可下载：HTTP 200 + ZIP 魔数 ✓ |
+| **原申请人清除后重新申请** | HTTP 200，下载 200 + ZIP 魔数 ✓，审计 1 条 |
+| 非申请人申请 | **403**「只有原申请人可以取回」✓ |
+| 清理 | 任务/工作区/测试账号全清，基线 1 内容 / 2 用户 / 1 工作区 / 0 导出任务，默认工作区 active |
+
+### 2.5 矛盾 2 实测：`platforms` 的 CASCADE 与 `social_accounts.platform_id` 的 RESTRICT 会不会打架
+
+**担心**：删工作区时若先级联删 `platforms`，而 `social_accounts` 还引用着它，RESTRICT 会阻止删除 → 删工作区失败。
+
+**实测方法**：临时库 `mediaflow_fk_probe`（生产 schema 副本）→ 装上 V1 的三条约束 → 造数据 → `DELETE FROM workspaces`。
+
+| 场景 | 结果 |
+| --- | --- |
+| 正常形态：账号与其平台在**同一**工作区（1 账号 / 1 平台） | **成功**，子行全清，其它工作区不受影响 |
+| 正常形态放大：**50 个账号**引用同一平台 | **成功** |
+| 约束创建顺序（先建账号的 CASCADE / 先建平台的 CASCADE）各跑 5 次 | **10/10 成功**，与创建顺序无关 |
+| 异常形态：B 工作区的账号引用 **A 工作区**的平台 | **失败并整体回滚**：`ERROR: update or delete on table "platforms" violates RESTRICT setting of foreign key constraint … on table "social_accounts"`（数据一条没删） |
+| 直接删被引用的平台字典行 | 被 RESTRICT 挡住 ✓（设计意图：字典不能带着账号一起消失） |
+| 生产库跨工作区引用计数 | **0 条** |
+
+**结论**：保持 V1（`platforms` CASCADE + `platform_id` RESTRICT），**不为了「让它不报错」而改成 CASCADE**——RESTRICT 是「平台字典被引用时不能删」的保护，跨工作区引用本就是不该出现的数据形态；真出现时**响亮失败并整体回滚**远好于静默删掉别人的凭据。同时立两条纪律：① purge 内部保持显式删除顺序（账号先、平台后），不依赖 PostgreSQL 的级联顺序；② 生产库加巡检断言「跨工作区引用 = 0」（本次核查为 0）。
+
 ## 3. 迁移与回滚方案
 
 **一表一迁移，互不依赖**（失败可单独回滚，不影响其他表）：
@@ -83,9 +137,12 @@
 | `1789701509000-FkBrandKnowledgeWorkspace` | `brand_knowledge` | 同上 |
 | `1789701510000-FkContentTemplatesWorkspace` | `content_templates` | 同上 |
 | `1789701511000-FkPlatformsWorkspace` | `platforms` | 同上 |
-| `1789701512000-FkWorkspaceExportJobsWorkspace` | `workspace_export_jobs` | 同上 |
+| `1789701512000-FkWorkspaceExportJobsWorkspace` | `workspace_export_jobs`：**DROP NOT NULL + SET NULL**（见 §2.4） | 解除约束；无 NULL 行时恢复 NOT NULL |
+| `1789701515000-PurgeBatchRetainedExportJobs` | 账本补列 `workspace_purge_batches.retained_export_jobs`（不属于外键，独立迁移） | 删除该列 |
 | `1789701513000-FkWorkspaceMembersWorkspace` | `workspace_members` | 同上 |
 | `1789701514000-FkNotificationsWorkspace` | `notifications` | 同上 |
+
+**迁移数量**：15 条外键（14 张 `CASCADE` + `workspace_export_jobs` `SET NULL`）+ 1 条账本补列 = **16 个迁移**，编号 `1789701500000` → `1789701515000`。
 
 实施细节：
 
@@ -100,7 +157,7 @@
 1. `schema-integrity.e2e.spec.ts` 扩展：断言 15 条外键**都存在**且 `delete_rule = CASCADE`；断言被排除的 3 张账本表**确实没有**指向 `workspaces` 的外键。
 2. **级联实测**：新建工作区 → 在 15 张表各造 1 行 → 直接 `DELETE FROM workspaces` → 15 张表的行**全部消失**，而 `audit_logs` / `ai_generations` / `workspace_purge_batches` 的行**仍在**。
 3. **purge 演练复跑**：A 类 14 表仍为 0、B 类保留、C 类不变（外键是"兜底"，不改变 purge 自身行为）。
-4. `pnpm migrate` / `migrate:revert` 全部往返成功；迁移数量 22 → 37。
+4. `pnpm migrate` / `migrate:revert` 全部往返成功；迁移数量 22 → 38。
 5. 单元测试与 E2E 全绿；生产 `/api/health` = 200；基线不变（工作区 1 / 内容 1 / 用户 2）。
 6. **运维禁令写入 `RUNBOOK-`**：**禁止绕过 API 直接 `DELETE FROM workspaces`**（会静默销毁平台凭据与素材文件，且不写审计）；
    需要清除数据一律走 `DELETE /api/workspaces/:id/data`（有二次确认、备份、审计、账本）。
@@ -113,3 +170,16 @@
 | 素材文件不由外键删除 | purge 已逐文件清理（演练验证）；直接删父行会留孤儿文件 → 靠运维禁令 + 定期孤儿文件巡检（可加进运维监控） |
 | `platforms` 将来可能改全局共享 | 已记录：届时去掉该外键并迁移数据（B0.5 之后再评估） |
 | 加外键会让"删除工作区"变慢 | 本库数据量极小，且 `workspace_id` 索引全在；将来量大时用两段式 `NOT VALID` + `VALIDATE` |
+
+## 6. 实施记录（2026-09-21 完成）
+
+| 项目 | 结果 |
+| --- | --- |
+| 迁移 | 16 个全部应用成功（`typeorm_migrations` 22 → 38）；**上下行各 16 次往返**：回滚后外键数回到 1（仅 `users` 的 SET NULL）、`workspace_export_jobs.workspace_id` 恢复 `NOT NULL`、账本列被删除；再应用后全部恢复 |
+| 孤儿行 | 前置核查发现 3 条（`content_templates`/`platforms`/`notifications`，07:51 演练残留），留档后清除；15 张表 0 空值 0 孤儿；迁移内守卫会在有孤儿时直接抛错中止 |
+| 索引 | 15 张表的 `workspace_id` 索引**全部已存在**，无需新建 |
+| 代码改动 | `resolveDownload` / `createDownloadLink` / `pruneExpired` 三处；purge 不再删任务行并回填 `retainedExportJobs`；账本实体加列；实体注释定稿 |
+| 测试 | 新增单元 12 条（`workspace-export.service.spec.ts`）；`schema-integrity` 增 4 条（15 条外键规则 / 5 张排除表无外键 / 列可空 / 账本列）；新增 `workspace-cascade.e2e.spec.ts`（14 表级联清空、导出任务保留并置空、3 张账本表原样留下、旁观工作区不受影响） |
+| purge 演练复跑 | A 类 14 表全 0、B 类保留、C 类不变、备份 600+gzip+sha256 且可重放恢复、备份失败 503 且零删除、生产基线不变、残留 0 |
+| 专项验证 | `b0_4_step5_post_purge_download.py`：清除后 pre-purge 链接与重新申请链接均可下载（200 + ZIP 魔数），外部人 403 |
+| 运维文档 | `RUNBOOK-purge演练.md` §7：禁止直接删 `workspaces` 行（三条后果）、删除顺序不依赖级联顺序、清除后 7 天内取回产物的步骤 |

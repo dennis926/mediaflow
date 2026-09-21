@@ -151,3 +151,93 @@ describe.skipIf(!e2eCredentialsReady)('B0.2/B0.3：外键与唯一索引', () =>
     void randomUUID;
   });
 });
+
+
+/**
+ * B0.4 第 5 步：15 条"指向 workspaces 的外键"必须存在且删除规则正确。
+ *
+ * 为什么把规则也断言出来：`ON DELETE` 选错不会立刻报错，只会在"删工作区"那一天表现成
+ * 静默留孤儿行（CASCADE 写成了 NO ACTION）或静默销毁账本（账本表误加了 CASCADE）。
+ */
+describe.skipIf(!e2eCredentialsReady)('B0.4 第 5 步：workspaces 外键规则', () => {
+  let h: E2eHarness;
+
+  const RULES: Array<[string, string]> = [
+    ['contents', 'CASCADE'],
+    ['content_variants', 'CASCADE'],
+    ['content_revisions', 'CASCADE'],
+    ['content_reviews', 'CASCADE'],
+    ['publish_tasks', 'CASCADE'],
+    ['analytics', 'CASCADE'],
+    ['track_events', 'CASCADE'],
+    ['media_assets', 'CASCADE'],
+    ['social_accounts', 'CASCADE'],
+    ['brand_knowledge', 'CASCADE'],
+    ['content_templates', 'CASCADE'],
+    ['platforms', 'CASCADE'],
+    ['workspace_members', 'CASCADE'],
+    ['notifications', 'CASCADE'],
+    // 导出任务：产物要在工作区被永久清除后仍能下载 → 行保留、引用置空
+    ['workspace_export_jobs', 'SET NULL'],
+    // users 是 M8 的既有决定："人保留、归属清空"
+    ['users', 'SET NULL'],
+  ];
+
+  /** 刻意不加外键的表（B 类账本 + 语义待定）：加错会删掉证据或破坏全局字典。 */
+  const NO_FK_TABLES = ['audit_logs', 'ai_generations', 'workspace_purge_batches', 'system_settings', 'roles'];
+
+  beforeAll(async () => {
+    h = await createHarness('E2E外键规则', { requireApproval: false });
+  }, 90_000);
+
+  afterAll(async () => {
+    await h?.cleanup();
+    await h?.close();
+  });
+
+  it('15 条外键都在，且 ON DELETE 规则与设计一致', async () => {
+    const rows: Array<{ table_name: string; rule: string | null }> = await h.dataSource.query(
+      `SELECT c.conrelid::regclass::text AS table_name,
+              CASE c.confdeltype WHEN 'c' THEN 'CASCADE' WHEN 'n' THEN 'SET NULL'
+                   WHEN 'r' THEN 'RESTRICT' WHEN 'a' THEN 'NO ACTION' WHEN 'd' THEN 'SET DEFAULT' END AS rule
+         FROM pg_constraint c
+        WHERE c.contype = 'f' AND c.confrelid = 'public.workspaces'::regclass`,
+    );
+    const actual = new Map(rows.map((row) => [row.table_name.replace(/^public\./, ''), row.rule ?? '']));
+
+    for (const [table, rule] of RULES) {
+      expect(actual.has(table), `${table} 缺少指向 workspaces 的外键`).toBe(true);
+      expect(actual.get(table), `${table} 的 ON DELETE 规则应为 ${rule}`).toBe(rule);
+    }
+    // 不多不少：15 条业务外键 + users（共 16 条）
+    expect(actual.size).toBe(RULES.length);
+  });
+
+  it('被刻意排除的 5 张表确实没有指向 workspaces 的外键', async () => {
+    for (const table of NO_FK_TABLES) {
+      const rows = await h.dataSource.query(
+        `SELECT count(*)::int AS n FROM pg_constraint
+          WHERE contype = 'f' AND confrelid = 'public.workspaces'::regclass
+            AND conrelid = ('public.' || $1)::regclass`,
+        [table],
+      );
+      expect(Number(rows[0].n), `${table} 不该有指向 workspaces 的外键（会随工作区删除而销毁证据）`).toBe(0);
+    }
+  });
+
+  it('导出任务的 workspace_id 在数据库层可空（SET NULL 的前提）', async () => {
+    const rows = await h.dataSource.query(
+      `SELECT is_nullable FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'workspace_export_jobs' AND column_name = 'workspace_id'`,
+    );
+    expect(rows[0]?.is_nullable).toBe('YES');
+  });
+
+  it('purge 账本新增了 retained_export_jobs 列（如实记录保留了多少导出任务）', async () => {
+    const rows = await h.dataSource.query(
+      `SELECT data_type, column_default FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'workspace_purge_batches' AND column_name = 'retained_export_jobs'`,
+    );
+    expect(rows[0]?.data_type).toBe('integer');
+  });
+});

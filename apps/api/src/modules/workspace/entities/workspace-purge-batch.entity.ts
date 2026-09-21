@@ -54,6 +54,10 @@ export class WorkspacePurgeBatch extends BaseEntity {
   @Column({ type: 'int', default: 0 })
   socialAccountsDestroyed!: number;
 
+  /** 被保留（未删除）的导出任务数：产物在有效期内仍可下载，见 workspace-export-job.entity.ts 的说明。 */
+  @Column({ type: 'int', default: 0 })
+  retainedExportJobs!: number;
+
   @Column({ type: 'text', nullable: true })
   errorMessage!: string | null;
 }
