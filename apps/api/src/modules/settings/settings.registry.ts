@@ -754,6 +754,22 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
     envKey: 'XIAOHONGSHU_API_BASE',
   },
   {
+    key: 'BAIJIAHAO_APP_ID',
+    group: 'platform',
+    label: '百家号 app_id',
+    description: '百家号后台开通「开发者服务」后获取（作者帐号ID）',
+    secret: false,
+    envKey: 'BAIJIAHAO_APP_ID',
+  },
+  {
+    key: 'BAIJIAHAO_APP_TOKEN',
+    group: 'platform',
+    label: '百家号 app_token',
+    description: '开发者服务授权密钥，加密存储，长期有效',
+    secret: true,
+    envKey: 'BAIJIAHAO_APP_TOKEN',
+  },
+  {
     key: 'REQUIRE_CONTENT_APPROVAL',
     group: 'publish',
     label: '发布前必须审核通过',

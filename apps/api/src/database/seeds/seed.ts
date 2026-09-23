@@ -53,12 +53,21 @@ const CAPABILITIES: Record<string, PlatformCapabilities> = {
     supportedMedia: ['video'],
   },
   [PlatformCode.Xiaohongshu]: {
-    canPublish: true,
-    canFetchAnalytics: true,
+    /** 2026-09 实测：小红书开放平台仅剩电商接口，无内容发布 API，降级为插件填充。 */
+    canPublish: false,
+    canFetchAnalytics: false,
     canInteract: false,
-    supportsSchedule: true,
+    supportsSchedule: false,
     maxBodyLength: 1000,
     supportedMedia: ['image', 'video'],
+  },
+  [PlatformCode.Baijiahao]: {
+    canPublish: true,
+    canFetchAnalytics: false,
+    canInteract: false,
+    supportsSchedule: false,
+    maxBodyLength: 20000,
+    supportedMedia: ['image'],
   },
 };
 

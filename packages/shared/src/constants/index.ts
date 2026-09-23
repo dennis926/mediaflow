@@ -33,10 +33,15 @@ export const PUBLISH_MODES: Record<PlatformCode, PublishMode> = {
   [PlatformCode.WechatMp]: PublishMode.Manual,
   [PlatformCode.WechatVideo]: PublishMode.Plugin,
   [PlatformCode.Douyin]: PublishMode.Api,
-  [PlatformCode.Xiaohongshu]: PublishMode.Api,
+  /**
+   * 小红书开放平台已转型为电商开放平台（2026-09 实测：open.xiaohongshu.com 仅提供
+   * ERP/打单/上货等电商接口），无内容发布 API。降级为插件填充模式。
+   */
+  [PlatformCode.Xiaohongshu]: PublishMode.Plugin,
   [PlatformCode.Zhihu]: PublishMode.Plugin,
   [PlatformCode.Toutiao]: PublishMode.Plugin,
-  [PlatformCode.Baijiahao]: PublishMode.Plugin,
+  /** 百家号开发者服务提供官方图文发布接口（builderinner/open/resource/article/publish）。 */
+  [PlatformCode.Baijiahao]: PublishMode.Api,
 };
 
 export const PLATFORM_LABELS: Record<PlatformCode, string> = {

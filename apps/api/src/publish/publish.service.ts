@@ -793,6 +793,8 @@ export class PublishService {
         return { appId: 'DOUYIN_CLIENT_KEY', appSecret: 'DOUYIN_CLIENT_SECRET' };
       case PlatformCode.Xiaohongshu:
         return { appId: 'XIAOHONGSHU_APP_ID', appSecret: 'XIAOHONGSHU_APP_SECRET' };
+      case PlatformCode.Baijiahao:
+        return { appId: 'BAIJIAHAO_APP_ID', appSecret: 'BAIJIAHAO_APP_TOKEN' };
       default:
         return { appId: 'WECHAT_MP_APP_ID', appSecret: 'WECHAT_MP_APP_SECRET' };
     }
