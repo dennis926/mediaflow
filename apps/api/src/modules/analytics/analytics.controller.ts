@@ -4,6 +4,9 @@ import { Type } from 'class-transformer';
 import { PlatformCode } from '@mediaflow/shared';
 import { AnalyticsService, AccountRanking, ContentMetrics, OverviewResult, TrendPoint } from './analytics.service';
 import { Capability } from '../auth/capabilities';
+import { toActor } from '../auth/actor.util';
+import { AuthUser } from '../auth/auth.types';
+import { CurrentUser } from '../auth/current-user.decorator';
 import { PluginMetricsDto } from './plugin-metrics.dto';
 
 class TrendQueryDto {
@@ -52,6 +55,22 @@ class SyncDto {
   limit?: number;
 }
 
+/**
+ * 手动录入平台指标（无平台 API 时的取数路径；另一条是浏览器插件自动回收）。
+ * 复用插件上报的字段集，只多一个采集时间与备注。
+ */
+class ManualMetricsDto extends PluginMetricsDto {
+  @IsOptional()
+  @IsString()
+  @Length(1, 40)
+  capturedAt?: string;
+
+  @IsOptional()
+  @IsString()
+  @Length(1, 200)
+  note?: string;
+}
+
 @Controller('analytics')
 export class AnalyticsController {
   constructor(private readonly analyticsService: AnalyticsService) {}
@@ -80,6 +99,13 @@ export class AnalyticsController {
   @Post('sync')
   sync(@Body() dto: SyncDto): Promise<{ synced: number; failed: number; results: Array<{ taskId: string; platform: PlatformCode; ok: boolean; message: string }> }> {
     return this.analyticsService.sync(dto);
+  }
+
+  /** 手动录入指标（需要 analytics.sync 能力点）：把平台后台看到的数字录进来 */
+  @Capability('analytics.sync')
+  @Post('manual-metrics')
+  manualMetrics(@Body() dto: ManualMetricsDto, @CurrentUser() user?: AuthUser): Promise<{ id: string }> {
+    return this.analyticsService.saveManualMetrics(dto, toActor(user));
   }
 
   @Post('plugin-metrics')

@@ -1,9 +1,11 @@
+import { BadRequestException } from '@nestjs/common';
 import { BadGatewayException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { PlatformCode, PublishTaskStatus } from '@mediaflow/shared';
 import {
   IsNull, Between, Repository } from 'typeorm';
 import { ChannelAdapterRegistry } from '@mediaflow/channel-adapters';
+import { AuditService } from '../../audit/audit.service';
 import { WorkspaceContextService } from '../../common/workspace-context.service';
 import { CHANNEL_REGISTRY } from '../../publish/channel-registry.provider';
 import { PublishService } from '../../publish/publish.service';
@@ -65,6 +67,7 @@ export class AnalyticsService {
     private readonly workspaceContext: WorkspaceContextService,
     private readonly publishService: PublishService,
     @Inject(CHANNEL_REGISTRY) private readonly registry: ChannelAdapterRegistry,
+    private readonly audit: AuditService,
   ) {}
 
   async overview(): Promise<OverviewResult> {
@@ -362,6 +365,78 @@ export class AnalyticsService {
       shares: input.shares ?? 0,
       favorites: input.favorites ?? 0,
       extra: { source: 'browser-extension' },
+    });
+    return { id: saved.id };
+  }
+
+  /**
+   * 手动录入平台指标（无平台 API 时的取数路径之一）。
+   *
+   * 背景：数据中心原本只有"平台同步"一个来源，需要平台凭证；在拿到凭证之前，
+   * 成员可以看平台后台的数字后手工录入（另一条路是浏览器插件自动回收）。
+   * 与插件上报共用同一份快照模型，只用 `extra.source` 区分来源，前端与统计口径不需要分叉。
+   */
+  async saveManualMetrics(
+    input: {
+      platform: PlatformCode;
+      socialAccountId?: string;
+      contentId?: string;
+      postId?: string;
+      views?: number;
+      likes?: number;
+      comments?: number;
+      shares?: number;
+      favorites?: number;
+      capturedAt?: string;
+      note?: string;
+    },
+    actor: { id?: string | null; name?: string | null } = {},
+  ): Promise<{ id: string }> {
+    const scope = await this.workspaceContext.current();
+    const capturedAt = input.capturedAt ? new Date(input.capturedAt) : new Date();
+    if (Number.isNaN(capturedAt.getTime())) throw new BadRequestException('采集时间不是合法时间');
+
+    const saved = await this.upsertSnapshot({
+      tenantId: scope.tenantId,
+      workspaceId: scope.workspaceId,
+      platform: input.platform,
+      socialAccountId: input.socialAccountId ?? null,
+      platformPostId: input.postId ?? null,
+      contentId: input.contentId ?? null,
+      capturedAt,
+      views: input.views ?? 0,
+      likes: input.likes ?? 0,
+      comments: input.comments ?? 0,
+      shares: input.shares ?? 0,
+      favorites: input.favorites ?? 0,
+      extra: {
+        source: 'manual',
+        note: input.note?.trim() || null,
+        enteredBy: actor.name ?? actor.id ?? null,
+        enteredAt: new Date().toISOString(),
+      },
+    });
+
+    await this.audit.record({
+      action: 'analytics.manual_metrics',
+      resourceType: 'analytics',
+      resourceId: saved.id,
+      tenantId: scope.tenantId,
+      workspaceId: scope.workspaceId,
+      actorId: actor.id ?? null,
+      actorName: actor.name ?? null,
+      payload: {
+        platform: input.platform,
+        contentId: input.contentId ?? null,
+        postId: input.postId ?? null,
+        views: input.views ?? 0,
+        likes: input.likes ?? 0,
+        comments: input.comments ?? 0,
+        shares: input.shares ?? 0,
+        favorites: input.favorites ?? 0,
+        capturedAt: capturedAt.toISOString(),
+        note: input.note?.trim() || null,
+      },
     });
     return { id: saved.id };
   }

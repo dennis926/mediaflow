@@ -1,6 +1,6 @@
 'use client';
 
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { PLATFORM_LABELS, PlatformCode } from '@mediaflow/shared';
 import { tokens } from '@mediaflow/design-tokens';
 import { useState } from 'react';
@@ -17,6 +17,8 @@ import {
 import { Banner } from '../../../components/ui/Banner';
 import { Button } from '../../../components/ui/Button';
 import { Card } from '../../../components/ui/Card';
+import { Dialog } from '../../../components/ui/Dialog';
+import { Input, Select } from '../../../components/ui/Field';
 import { DataTable, type Column } from '../../../components/ui/DataTable';
 import { EmptyState } from '../../../components/ui/EmptyState';
 import { SkeletonRows } from '../../../components/ui/Skeleton';
@@ -30,7 +32,39 @@ import { AnalyticsIcon, InboxIcon, PublishIcon, RefreshIcon, WarningIcon } from 
 import styles from './page.module.css';
 
 export default function AnalyticsPage() {
+  const queryClient = useQueryClient();
   const [feedback, setFeedback] = useState<{ tone: 'success' | 'danger' | 'info'; text: string } | null>(null);
+  /** 手动录入指标（无平台 API 时的取数路径） */
+  const [manualOpen, setManualOpen] = useState(false);
+  const [manualForm, setManualForm] = useState({
+    platform: PlatformCode.WechatMp as PlatformCode,
+    views: '',
+    likes: '',
+    comments: '',
+    shares: '',
+    favorites: '',
+    note: '',
+  });
+
+  const manual = useMutation({
+    mutationFn: () =>
+      analyticsApi.manualMetrics({
+        platform: manualForm.platform,
+        views: Number(manualForm.views) || 0,
+        likes: Number(manualForm.likes) || 0,
+        comments: Number(manualForm.comments) || 0,
+        shares: Number(manualForm.shares) || 0,
+        favorites: Number(manualForm.favorites) || 0,
+        note: manualForm.note.trim() || undefined,
+      }),
+    onSuccess: () => {
+      setManualOpen(false);
+      setManualForm({ platform: PlatformCode.WechatMp as PlatformCode, views: '', likes: '', comments: '', shares: '', favorites: '', note: '' });
+      setFeedback({ tone: 'success', text: '指标已录入，数据看板与账号排行已更新' });
+      void queryClient.invalidateQueries({ queryKey: ['analytics'] });
+    },
+    onError: (error: unknown) => setFeedback({ tone: 'danger', text: error instanceof ApiError ? error.message : '录入失败' }),
+  });
 
   const overview = useQuery({ queryKey: ['analytics', 'overview'], queryFn: () => analyticsApi.overview() });
   const trend = useQuery({ queryKey: ['analytics', 'trend'], queryFn: () => analyticsApi.trend(14) });
@@ -93,9 +127,14 @@ export default function AnalyticsPage() {
         <Card
           title="近 14 天趋势"
           extra={
-            <Button size="sm" variant="secondary" icon={<RefreshIcon width={15} height={15} />} loading={sync.isPending} onClick={() => sync.mutate()}>
-              同步平台数据
-            </Button>
+            <>
+              <Button size="sm" variant="secondary" onClick={() => setManualOpen(true)}>
+                手动录入指标
+              </Button>
+              <Button size="sm" variant="secondary" icon={<RefreshIcon width={15} height={15} />} loading={sync.isPending} onClick={() => sync.mutate()}>
+                同步平台数据
+              </Button>
+            </>
           }
         >
           {trend.isLoading ? (
@@ -175,6 +214,42 @@ export default function AnalyticsPage() {
           }
         />
       </Card>
-    </>
+    
+      <Dialog
+        open={manualOpen}
+        title="手动录入平台指标"
+        onClose={() => setManualOpen(false)}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setManualOpen(false)}>
+              取消
+            </Button>
+            <Button loading={manual.isPending} onClick={() => manual.mutate()}>
+              保存指标
+            </Button>
+          </>
+        }
+      >
+        <p style={{ margin: '0 0 var(--mf-space-4)', fontSize: 'var(--mf-font-size-sm)', color: 'var(--mf-color-text-secondary)' }}>
+          没有平台 API 凭证时用这里：在平台后台看到数字后录进来（另一条路是浏览器插件自动回收）。
+          录入会记审计，并立即计入数据看板与内容排行。
+        </p>
+        <div style={{ display: 'grid', gap: 'var(--mf-space-3)' }}>
+          <Select
+            label="平台"
+            name="manualMetricsPlatform"
+            options={Object.values(PlatformCode).map((platform) => ({ value: platform, label: PLATFORM_LABELS[platform] }))}
+            value={manualForm.platform}
+            onChange={(event) => setManualForm({ ...manualForm, platform: event.target.value as PlatformCode })}
+          />
+          <Input label="阅读/播放" name="manualViews" inputMode="numeric" value={manualForm.views} onChange={(event) => setManualForm({ ...manualForm, views: event.target.value })} />
+          <Input label="点赞" name="manualLikes" inputMode="numeric" value={manualForm.likes} onChange={(event) => setManualForm({ ...manualForm, likes: event.target.value })} />
+          <Input label="评论" name="manualComments" inputMode="numeric" value={manualForm.comments} onChange={(event) => setManualForm({ ...manualForm, comments: event.target.value })} />
+          <Input label="分享" name="manualShares" inputMode="numeric" value={manualForm.shares} onChange={(event) => setManualForm({ ...manualForm, shares: event.target.value })} />
+          <Input label="收藏" name="manualFavorites" inputMode="numeric" value={manualForm.favorites} onChange={(event) => setManualForm({ ...manualForm, favorites: event.target.value })} />
+          <Input label="备注（可选）" name="manualNote" value={manualForm.note} onChange={(event) => setManualForm({ ...manualForm, note: event.target.value })} />
+        </div>
+      </Dialog>
+</>
   );
 }

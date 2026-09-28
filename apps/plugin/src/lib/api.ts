@@ -104,12 +104,42 @@ export const api = {
     return { token: result.accessToken, name: result.user.displayName };
   },
   me: () => request<{ displayName: string; email: string }>('/auth/me'),
-  /** Tasks awaiting browser-extension assisted publishing. */
-  pluginTasks: () => request<{ items: PluginTask[] }>('/publish/tasks?pageSize=20&status=pending'),
+  /**
+   * Tasks awaiting browser-extension assisted publishing.
+   *
+   * 同时取「待发布」与「待人工发布」：插件的核心用途恰恰是处理 `manual_required`
+   * （公众号禁止 API 发布、视频号/知乎等靠插件填充 + 人工确认）。
+   * 只取 pending 会让这些任务在插件里**根本看不见**（实测发现的断点）。
+   */
+  pluginTasks: async (): Promise<{ items: PluginTask[] }> => {
+    const [pending, manualRequired] = await Promise.all([
+      request<{ items: PluginTask[] }>('/publish/tasks?pageSize=20&status=pending'),
+      request<{ items: PluginTask[] }>('/publish/tasks?pageSize=20&status=manual_required'),
+    ]);
+    const seen = new Set<string>();
+    const items = [...manualRequired.items, ...pending.items].filter((task) => {
+      if (seen.has(task.id)) return false;
+      seen.add(task.id);
+      return true;
+    });
+    return { items };
+  },
   accounts: () => request<PluginAccount[]>('/accounts'),
-  /** Confirms a human-driven publish and optionally reports the platform post id. */
-  confirm: (taskId: string, platformUrl?: string) =>
-    request<{ id: string }>(`/publish/tasks/${taskId}/retry`, { method: 'POST' }).then(() => ({ id: taskId, platformUrl })),
+  /**
+   * 人工发布完成回填（插件侧）：走正式接口写回状态、链接与审计。
+   * 之前这里误用了 `retry` 接口——语义不对，也不会记录链接，任务级数据一直是空的。
+   */
+  confirm: (taskId: string, platformUrl?: string, postId?: string) =>
+    request<{ id: string }>(`/publish/tasks/${taskId}/manual-published`, {
+      method: 'POST',
+      body: JSON.stringify({ url: platformUrl || undefined, postId: postId || undefined, note: '浏览器插件回填' }),
+    }).then((task) => ({ id: (task as { id?: string }).id ?? taskId, platformUrl })),
+  /** 人工发布失败回填（原因必填，后端会校验长度） */
+  markFailed: (taskId: string, reason: string) =>
+    request<{ id: string }>(`/publish/tasks/${taskId}/manual-failed`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    }),
   /** Pushes numbers scraped from a platform analytics page. */
   reportMetrics: (payload: PluginMetricsPayload) =>
     request<{ id: string }>('/analytics/plugin-metrics', { method: 'POST', body: JSON.stringify(payload) }),

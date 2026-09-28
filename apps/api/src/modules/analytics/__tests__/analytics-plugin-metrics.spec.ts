@@ -21,9 +21,13 @@ function buildService(existing: Partial<Analytics> | null): { service: Analytics
 
   const stub = {} as never;
   // 参数顺序：analytics, events, contents, tasks, accounts, workspaceContext, publishService, registry
-  const service = new AnalyticsService(snapshots, stub, stub, stub, stub, workspaceContext, stub, stub);
+  const service = new AnalyticsService(snapshots, stub, stub, stub, stub, workspaceContext, stub, stub, auditStub);
   return { service, snapshots };
 }
+
+const auditStub = {
+  record: vi.fn(async () => undefined),
+} as unknown as import('../../../audit/audit.service').AuditService;
 
 describe('插件指标回收：同作品去重（避免多轮回收被累加）', () => {
   it('首次上报插入新快照', async () => {

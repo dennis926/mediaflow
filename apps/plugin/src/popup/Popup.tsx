@@ -42,8 +42,48 @@ export function Popup() {
   const [password, setPassword] = useState('');
   const [tasks, setTasks] = useState<PluginTask[]>([]);
   const [accounts, setAccounts] = useState<PluginAccount[]>([]);
-  const [message, setMessage] = useState<{ tone: 'info' | 'danger'; text: string } | null>(null);
+  const [message, setMessage] = useState<{ tone: 'info' | 'danger' | 'success'; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  /** 每个任务的回填输入（链接 / 失败原因）：插件里就能把事情收尾，不必回后台 */
+  const [confirmDraft, setConfirmDraft] = useState<Record<string, { url: string; reason: string; showReason: boolean }>>({});
+  const draftOf = (id: string) => confirmDraft[id] ?? { url: '', reason: '', showReason: false };
+  const patchDraft = (id: string, patch: Partial<{ url: string; reason: string; showReason: boolean }>) =>
+    setConfirmDraft((prev) => ({ ...prev, [id]: { ...draftOf(id), ...patch } }));
+
+  /** 回填已完成 / 已失败 */
+  const confirmPublished = async (task: PluginTask): Promise<void> => {
+    setBusy(true);
+    setMessage(null);
+    try {
+      const draft = draftOf(task.id);
+      await api.confirm(task.id, draft.url.trim() || undefined);
+      setMessage({ tone: 'success', text: '已回填为「已发布」，后台状态与审计都已更新' });
+      await refresh();
+    } catch (error) {
+      setMessage({ tone: 'danger', text: error instanceof Error ? error.message : '回填失败' });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const confirmFailed = async (task: PluginTask): Promise<void> => {
+    const draft = draftOf(task.id);
+    if (draft.reason.trim().length < 2) {
+      setMessage({ tone: 'danger', text: '请先填写失败原因（至少 2 个字）' });
+      return;
+    }
+    setBusy(true);
+    setMessage(null);
+    try {
+      await api.markFailed(task.id, draft.reason.trim());
+      setMessage({ tone: 'info', text: '已标记为「发布失败」，可在后台重试或重排' });
+      await refresh();
+    } catch (error) {
+      setMessage({ tone: 'danger', text: error instanceof Error ? error.message : '操作失败' });
+    } finally {
+      setBusy(false);
+    }
+  };
   const [settingsOpen, setSettingsOpen] = useState(false);
   // Scheduled metric collection: interval + the creator pages to visit, both stored locally.
   const [metricsInterval, setMetricsInterval] = useState(String(DEFAULT_METRICS_INTERVAL_MINUTES));
@@ -208,7 +248,13 @@ export function Popup() {
       </header>
 
       <div className="body">
-        {message ? <div className={`banner ${message.tone === 'danger' ? 'bannerDanger' : 'bannerInfo'}`}>{message.text}</div> : null}
+        {message ? (
+          <div
+            className={`banner ${message.tone === 'danger' ? 'bannerDanger' : message.tone === 'success' ? 'bannerSuccess' : 'bannerInfo'}`}
+          >
+            {message.text}
+          </div>
+        ) : null}
 
         {!loggedIn ? (
           <div className="card">
@@ -282,6 +328,32 @@ export function Popup() {
                     <button disabled={busy} onClick={() => void prepare(task)}>
                       打开平台编辑器并填充
                     </button>
+                    <div className="field">
+                      <input
+                        value={draftOf(task.id).url}
+                        onChange={(event) => patchDraft(task.id, { url: event.target.value })}
+                        placeholder="发布后的链接（可选）"
+                      />
+                      <button className="primary" disabled={busy} onClick={() => void confirmPublished(task)}>
+                        我已发布
+                      </button>
+                    </div>
+                    {draftOf(task.id).showReason ? (
+                      <div className="field">
+                        <input
+                          value={draftOf(task.id).reason}
+                          onChange={(event) => patchDraft(task.id, { reason: event.target.value })}
+                          placeholder="失败原因（至少 2 个字）"
+                        />
+                        <button disabled={busy} onClick={() => void confirmFailed(task)}>
+                          确认标记失败
+                        </button>
+                      </div>
+                    ) : (
+                      <button disabled={busy} onClick={() => patchDraft(task.id, { showReason: true })}>
+                        标记发布失败
+                      </button>
+                    )}
                   </div>
                 ))
               )}

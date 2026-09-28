@@ -221,6 +221,23 @@ export const analyticsApi = {
   overview: () => api.get<OverviewData>('/analytics/overview'),
   trend: (days = 14) => api.get<TrendPointData[]>('/analytics/trend', { days }),
   ranking: () => api.get<AccountRankingRow[]>('/analytics/accounts/ranking'),
+  /**
+   * 手动录入平台指标（无平台 API 时的取数路径之一；另一条是浏览器插件自动回收）。
+   * 成员看平台后台的数字后录进来，数据中心就不会一直是空的。
+   */
+  manualMetrics: (payload: {
+    platform: string;
+    contentId?: string;
+    socialAccountId?: string;
+    postId?: string;
+    views?: number;
+    likes?: number;
+    comments?: number;
+    shares?: number;
+    favorites?: number;
+    capturedAt?: string;
+    note?: string;
+  }) => api.post<{ id: string }>('/analytics/manual-metrics', payload),
   sync: (payload: { contentId?: string; limit?: number } = {}) =>
     api.post<{ synced: number; failed: number; results: Array<{ taskId: string; platform: string; ok: boolean; message: string }> }>(
       '/analytics/sync',
