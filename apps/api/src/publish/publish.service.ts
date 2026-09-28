@@ -8,19 +8,10 @@ import {
   PublishPayload,
   PublishResult,
 } from '@mediaflow/channel-adapters';
-import {
-  AiFlagType,
-  ContentStatus,
-  PlatformCode,
-  PLATFORM_LABELS,
-  PUBLISH_RETRY,
-  PublishMode,
-  PublishTaskStatus,
-  appendAiDisclosure,
-  buildAiMetadata,
-} from '@mediaflow/shared';
+import { AiFlagType, ContentStatus, PLATFORM_LABELS, PUBLISH_RETRY, PlatformCode, PublishMode, PublishTaskStatus, appendAiDisclosure, buildAiMetadata } from '@mediaflow/shared';
 import { In, IsNull, Repository } from 'typeorm';
 import { QuotaService } from '../modules/billing/quota.service';
+import { NotificationService } from '../modules/notification/notification.service';
 import { AuditService } from '../audit/audit.service';
 import { runtime } from '../modules/settings/runtime-config';
 import { WorkspaceContextService } from '../common/workspace-context.service';
@@ -74,6 +65,7 @@ export class PublishService {
     private readonly workspaceContext: WorkspaceContextService,
     private readonly settings: SettingsService,
     private readonly quota: QuotaService,
+    private readonly notifications: NotificationService,
   ) {}
 
   /** Retry spacing is configurable at runtime so local verification does not wait five minutes. */
@@ -159,7 +151,16 @@ export class PublishService {
     const created: PublishTask[] = [];
     for (const platform of platforms) {
       const adapter = this.adapterFor(platform);
-      if (dto.socialAccountId) await this.requireAccount(dto.socialAccountId, platform, scope.workspaceId);
+      const boundAccount = dto.socialAccountId
+        ? await this.requireAccount(dto.socialAccountId, platform, scope.workspaceId)
+        : null;
+      /**
+       * 无 API 凭证的账号（手动登记，或授权未完成）：不能走 API 发布，**自动落到人工/插件模式**，
+       * 否则任务会在适配器里因"没有凭据"失败，用户还得自己猜原因。
+       * 这里把模式改掉并在 extra 里写清下一步（插件填充 → 人工确认 → 回填结果）。
+       */
+      const lacksCredential = Boolean(boundAccount) && !boundAccount?.accessToken;
+      const publishMode = lacksCredential ? PublishMode.Manual : adapter.capabilities.mode;
 
       // 优先使用该平台的 AI 适配版本（没有则回落到主内容），否则多平台适配等于白做。
       const variant = await this.variants.findOne({
@@ -173,14 +174,20 @@ export class PublishService {
         contentId: content.id,
         contentVariantId: variant?.id ?? null,
         platform,
-        publishMode: adapter.capabilities.mode,
+        publishMode,
         socialAccountId: dto.socialAccountId ?? null,
         status: isFuture ? PublishTaskStatus.Scheduled : PublishTaskStatus.Pending,
         scheduledAt,
         maxAttempts: dto.maxAttempts ?? PUBLISH_RETRY.maxAttempts,
         attempts: 0,
         createdBy: actor.id ?? null,
-        extra: {},
+        extra: lacksCredential
+          ? {
+              manualMessage:
+                '该账号未配置 API 凭证（手动登记或授权未完成）：请用浏览器插件填充内容后人工确认发布，再回到队列回填结果。',
+              manualReason: 'no_credential',
+            }
+          : {},
       });
       let saved: PublishTask;
       try {
@@ -391,6 +398,141 @@ export class PublishService {
    * 强制重排：清掉锁与重试计数后重新入队。
    * 与 retry() 的区别是**无视锁定状态**——卡住的任务锁还在，普通 retry 会拒绝。
    */
+  /**
+   * 人工发布完成回填（无平台密钥时的主要出山路径）。
+   *
+   * 允许从 `manual_required` / `pending` / `failed` 等"未发布"状态回填：
+   * 真实场景里用户可能先在公众号后台发完，再回来点这个按钮（那时任务可能还停在待人工发布或已失败）。
+   * 已发布/已取消的任务不允许再回填（前者避免重复记账，后者是终态）。
+   */
+  async markManualPublished(
+    id: string,
+    dto: { url?: string; postId?: string; note?: string },
+    actor: PublishActor,
+  ): Promise<PublishTask> {
+    const scope = await this.workspaceContext.current();
+    const task = await this.tasks.findOne({ where: { id, workspaceId: scope.workspaceId } });
+    if (!task) throw new NotFoundException('发布任务不存在');
+    if (task.status === PublishTaskStatus.Published) {
+      throw new ConflictException('该任务已标记为已发布；如需更正链接请用「标记失败」重开后再回填');
+    }
+    if (task.status === PublishTaskStatus.Canceled) {
+      throw new BadRequestException('已取消的任务不能标记为已发布：如需发布请新建任务');
+    }
+
+    const publishedAt = new Date();
+    const extra = {
+      ...task.extra,
+      manualPublish: {
+        by: actor.id ?? null,
+        byName: actor.name ?? null,
+        at: publishedAt.toISOString(),
+        note: dto.note?.trim() || null,
+        /** 标明这是人工回填而不是适配器自动发布，数据中心据此区分口径 */
+        source: 'manual',
+      },
+    };
+
+    await this.tasks.update(
+      { id: task.id },
+      {
+        status: PublishTaskStatus.Published,
+        finishedAt: publishedAt,
+        errorMessage: null,
+        lockedBy: null,
+        lockedAt: null,
+        platformUrl: dto.url?.trim() || task.platformUrl || null,
+        platformPostId: dto.postId?.trim() || task.platformPostId || null,
+        extra,
+      } as never,
+    );
+
+    await this.audit.record({
+      action: 'publish_task.manual_published',
+      resourceType: 'publish_task',
+      resourceId: task.id,
+      tenantId: task.tenantId,
+      workspaceId: task.workspaceId,
+      actorId: actor.id ?? null,
+      actorName: actor.name ?? null,
+      payload: {
+        platform: task.platform,
+        url: dto.url?.trim() || null,
+        postId: dto.postId?.trim() || null,
+        note: dto.note?.trim() || null,
+        previousStatus: task.status,
+      },
+    });
+
+    await this.notifyManualOutcome(task, true, dto.note ?? null);
+    const updated = await this.tasks.findOneOrFail({ where: { id: task.id } });
+    this.logger.log(`发布任务已人工回填为已发布：${task.id}（${task.platform}）`);
+    return updated;
+  }
+
+  /** 人工发布失败回填：写明原因，任务转为 failed 并留痕（可再重试或重排）。 */
+  async markManualFailed(id: string, dto: { reason: string }, actor: PublishActor): Promise<PublishTask> {
+    const scope = await this.workspaceContext.current();
+    const task = await this.tasks.findOne({ where: { id, workspaceId: scope.workspaceId } });
+    if (!task) throw new NotFoundException('发布任务不存在');
+    if (task.status === PublishTaskStatus.Published) {
+      throw new ConflictException('已发布的任务不能标记为失败');
+    }
+    if (task.status === PublishTaskStatus.Canceled) {
+      throw new BadRequestException('已取消的任务不能再标记失败');
+    }
+
+    const reason = dto.reason.trim();
+    const extra = {
+      ...task.extra,
+      manualPublish: {
+        by: actor.id ?? null,
+        byName: actor.name ?? null,
+        at: new Date().toISOString(),
+        reason,
+        source: 'manual',
+      },
+    };
+
+    await this.tasks.update(
+      { id: task.id },
+      { status: PublishTaskStatus.Failed, errorMessage: reason, finishedAt: new Date(), extra } as never,
+    );
+    await this.audit.record({
+      action: 'publish_task.manual_failed',
+      resourceType: 'publish_task',
+      resourceId: task.id,
+      tenantId: task.tenantId,
+      workspaceId: task.workspaceId,
+      actorId: actor.id ?? null,
+      actorName: actor.name ?? null,
+      payload: { platform: task.platform, reason, previousStatus: task.status },
+    });
+    await this.notifyManualOutcome(task, false, reason);
+    const updated = await this.tasks.findOneOrFail({ where: { id: task.id } });
+    this.logger.warn(`发布任务被人工标记为失败：${task.id}（${task.platform}）｜${reason}`);
+    return updated;
+  }
+
+  /** 人工发布结果通报（站内通知；失败时用 warning 级，便于队列页顶部提示）。 */
+  private async notifyManualOutcome(task: PublishTask, ok: boolean, detail: string | null): Promise<void> {
+    try {
+      const content = await this.contents.findOne({ where: { id: task.contentId } });
+      await this.notifications.notify({
+        title: ok ? `人工发布已回填：${content?.title ?? '内容'}` : `人工发布失败：${content?.title ?? '内容'}`,
+        body: ok
+          ? `${PLATFORM_LABELS[task.platform] ?? task.platform} 已由成员手动发布并回填${detail ? `（${detail}）` : ''}。`
+          : `${PLATFORM_LABELS[task.platform] ?? task.platform} 人工发布未完成：${detail ?? '未填写原因'}`,
+        type: ok ? 'publish.manual_completed' : 'publish.manual_failed',
+        level: ok ? 'info' : 'warning',
+        resourceType: 'publish_task',
+        resourceId: task.id,
+      });
+    } catch (error) {
+      this.logger.warn(`人工发布通报失败（不影响主流程）：${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
   async requeue(id: string, actor: PublishActor): Promise<PublishTask> {
     const task = await this.tasks.findOne({ where: { id } });
     if (!task) throw new NotFoundException('发布任务不存在');

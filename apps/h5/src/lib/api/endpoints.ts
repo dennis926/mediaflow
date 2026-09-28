@@ -35,6 +35,12 @@ export const publishApi = {
   task: (id: string) => api.get<PublishTaskDto>(`/publish/tasks/${id}`),
   retry: (id: string) => api.post<PublishTaskDto>(`/publish/tasks/${id}/retry`),
   queueStats: () => api.get<{ length: number; pending: number; consumers: number }>('/publish/queue/stats'),
+  /** 人工发布完成回填（手机上发完即可回填，不必回电脑） */
+  markManualPublished: (id: string, payload: { url?: string; postId?: string; note?: string }) =>
+    api.post<PublishTaskDto>(`/publish/tasks/${id}/manual-published`, payload),
+  /** 人工发布失败回填（原因必填） */
+  markManualFailed: (id: string, payload: { reason: string }) =>
+    api.post<PublishTaskDto>(`/publish/tasks/${id}/manual-failed`, payload),
 };
 
 export const contentApi = {

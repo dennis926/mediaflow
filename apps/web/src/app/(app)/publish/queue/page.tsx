@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { useState } from 'react';
 import { Banner } from '../../../../components/ui/Banner';
 import { Button } from '../../../../components/ui/Button';
+import { ManualPublishDialog } from '../../../../components/publish/ManualPublishDialog';
 import { Card } from '../../../../components/ui/Card';
 import { DataTable, type Column } from '../../../../components/ui/DataTable';
 import { Dialog } from '../../../../components/ui/Dialog';
@@ -64,6 +65,8 @@ export default function PublishQueuePage() {
     queryKey: ['publish', 'queue', tab.key, page],
     queryFn: () => publishApi.tasks({ status: tab.status, page, pageSize: 10 }),
   });
+
+  const [manualTask, setManualTask] = useState<PublishTask | null>(null);
 
   const cancel = useMutation({
     mutationFn: (id: string) => publishApi.cancel(id),
@@ -166,6 +169,11 @@ export default function PublishQueuePage() {
       align: 'right',
       render: (row) => (
         <div className={styles.actions}>
+          {['manual_required', 'failed', 'pending'].includes(row.status) ? (
+            <Button variant="secondary" size="sm" onClick={() => setManualTask(row)}>
+              人工回填
+            </Button>
+          ) : null}
           <Button variant="text" size="sm" onClick={() => setDetail(row)}>
             详情
           </Button>
@@ -289,6 +297,10 @@ export default function PublishQueuePage() {
         {active === OPS_TAB ? null : <Pagination page={page} pageSize={site.pageSize} total={tasks.data?.meta.total ?? 0} onChange={setPage} />}
       </Card>
 
+      {/* 人工发布回填：必须是页面顶层元素。曾经误插进"任务详情"对话框的 children 里，
+          导致不打开详情时点「人工回填」什么都不发生（实测截图核验时发现）。 */}
+      <ManualPublishDialog open={Boolean(manualTask)} task={manualTask} onClose={() => setManualTask(null)} />
+
       <Dialog
         open={Boolean(detail)}
         title="任务详情"
@@ -317,7 +329,7 @@ export default function PublishQueuePage() {
           </>
         }
       >
-        {detail ? (
+      {detail ? (
           <div className={styles.detail}>
             <div className={styles.detailRow}>
               <span className={styles.detailLabel}>内容</span>

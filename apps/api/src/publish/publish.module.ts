@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { NotificationModule } from '../modules/notification/notification.module';
 import { BillingModule } from '../modules/billing/billing.module';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AiGeneration } from '../modules/ai/entities/ai-generation.entity';
@@ -17,7 +18,7 @@ import { PublishWorker } from './publish.worker';
 import { QueueTrimTask } from './queue-trim.task';
 
 @Module({
-  imports: [BillingModule, 
+  imports: [NotificationModule, BillingModule, 
     TypeOrmModule.forFeature([PublishTask, Content, ContentVariant, SocialAccount, AiGeneration, ContentReview]),
     ChannelModule,
     SettingsModule,

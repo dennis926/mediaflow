@@ -39,6 +39,7 @@ function AccountsPageInner() {
   const searchParams = useSearchParams();
   const [bindOpen, setBindOpen] = useState(false);
   const [oauthOpen, setOauthOpen] = useState(false);
+  const [manualOpen, setManualOpen] = useState(false);
   const [pendingUnbind, setPendingUnbind] = useState<AccountView | null>(null);
   const [feedback, setFeedback] = useState<{ tone: 'success' | 'danger' | 'info'; text: string } | null>(null);
   const [form, setForm] = useState({
@@ -50,6 +51,25 @@ function AccountsPageInner() {
   });
 
   const accounts = useQuery({ queryKey: ['accounts'], queryFn: () => accountsApi.list() });
+
+  /** 手动登记（无密钥）：只记元信息，发布走插件/人工 */
+  const [manualForm, setManualForm] = useState({ platform: PlatformCode.WechatVideo as PlatformCode, accountName: '', homepage: '', note: '' });
+  const registerManual = useMutation({
+    mutationFn: () =>
+      accountsApi.registerManual({
+        platform: manualForm.platform,
+        accountName: manualForm.accountName.trim(),
+        homepage: manualForm.homepage.trim() || undefined,
+        note: manualForm.note.trim() || undefined,
+      }),
+    onSuccess: (account) => {
+      setManualOpen(false);
+      setManualForm({ platform: PlatformCode.WechatVideo as PlatformCode, accountName: '', homepage: '', note: '' });
+      setFeedback({ tone: 'success', text: `已登记「${account.accountName}」：没有 API 凭证，发布将走插件填充或人工确认` });
+      void queryClient.invalidateQueries({ queryKey: ['accounts'] });
+    },
+    onError: (error: unknown) => setFeedback({ tone: 'danger', text: error instanceof ApiError ? error.message : '登记失败' }),
+  });
 
   useEffect(() => {
     const result = searchParams.get('oauth');
@@ -125,6 +145,9 @@ function AccountsPageInner() {
             <Button size="sm" variant="secondary" onClick={() => setOauthOpen(true)}>
               平台授权绑定
             </Button>
+            <Button size="sm" variant="secondary" onClick={() => setManualOpen(true)}>
+              手动登记（无密钥）
+            </Button>
             <Button size="sm" icon={<PlusIcon width={15} height={15} />} onClick={() => setBindOpen(true)}>
               手动填写令牌
             </Button>
@@ -178,7 +201,7 @@ function AccountsPageInner() {
                 </div>
               </article>
             ))}
-            <button type="button" className={styles.addCard} onClick={() => setBindOpen(true)}>
+            <button type="button" className={styles.addCard} onClick={() => setManualOpen(true)}>
               <PlusIcon width={20} height={20} />
               <span>绑定新账号</span>
             </button>
@@ -201,6 +224,57 @@ function AccountsPageInner() {
           />
         )}
       </Card>
+
+      <Dialog
+        open={manualOpen}
+        title="手动登记平台账号（无需密钥）"
+        onClose={() => setManualOpen(false)}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setManualOpen(false)}>
+              取消
+            </Button>
+            <Button loading={registerManual.isPending} disabled={!manualForm.accountName.trim()} onClick={() => registerManual.mutate()}>
+              登记账号
+            </Button>
+          </>
+        }
+      >
+        <p style={{ margin: '0 0 var(--mf-space-4)', fontSize: 'var(--mf-font-size-sm)', color: 'var(--mf-color-text-secondary)' }}>
+          还没有平台的 AppID/密钥时用这里：只登记账号信息（不保存任何 token），发布走<strong>浏览器插件填充</strong>或
+          <strong>人工发布后回填</strong>。拿到资质后可解绑，再走正式授权绑定升级为接口发布。
+        </p>
+        <div style={{ display: 'grid', gap: 'var(--mf-space-3)' }}>
+          <Select
+            label="平台"
+            name="manualPlatform"
+            options={PLATFORM_OPTIONS}
+            value={manualForm.platform}
+            onChange={(event) => setManualForm({ ...manualForm, platform: event.target.value as PlatformCode })}
+          />
+          <Input
+            label="账号名称"
+            name="manualAccountName"
+            placeholder="例如：卿尔美健康号"
+            value={manualForm.accountName}
+            onChange={(event) => setManualForm({ ...manualForm, accountName: event.target.value })}
+          />
+          <Input
+            label="主页链接（可选）"
+            name="manualHomepage"
+            placeholder="https://..."
+            value={manualForm.homepage}
+            onChange={(event) => setManualForm({ ...manualForm, homepage: event.target.value })}
+          />
+          <Input
+            label="备注（可选）"
+            name="manualNote"
+            placeholder="例如：主要发科普内容，粉丝 1.2 万"
+            value={manualForm.note}
+            onChange={(event) => setManualForm({ ...manualForm, note: event.target.value })}
+          />
+        </div>
+      </Dialog>
 
       <Dialog
         open={oauthOpen}

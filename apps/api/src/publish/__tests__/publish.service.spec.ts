@@ -67,6 +67,9 @@ function buildService(options: {
     findOne: vi.fn(async () => (options.review ?? null) as ContentReview | null),
   });
 
+  const notificationsStub = {
+    notify: vi.fn(async () => undefined),
+  } as unknown as import('../../modules/notification/notification.service').NotificationService;
   const service = new PublishService(
     tasks,
     contents,
@@ -81,6 +84,7 @@ function buildService(options: {
     workspaceContext,
     settings,
     quotaStub,
+    notificationsStub,
   );
   return { service, queue, tasks, reviews, settings };
 }

@@ -66,6 +66,69 @@ export class SocialAccountService {
     return rows.map((row) => this.toView(row, platformRows));
   }
 
+  /**
+   * 手动登记平台账号（无 OAuth 资质/密钥时的登记路径）。
+   *
+   * 与 `bind()` 的区别：**不接收、也不保存任何 token**。用途是"先把账号录进来"，
+   * 发布走浏览器插件填充 + 人工确认（任务会落到 manual/人工回填流程）。
+   * 之后拿到资质与密钥，可以解绑再走正式 OAuth 绑定（或直接补 token 升级为 API 发布）。
+   */
+  async registerManual(
+    input: { platform: PlatformCode; accountName: string; platformAccountId?: string; homepage?: string; note?: string },
+    actor: { id?: string | null; name?: string | null },
+  ): Promise<AccountView> {
+    const scope = await this.workspaceContext.current();
+    const platform = await this.platforms.findOne({
+      where: { code: input.platform, tenantId: scope.tenantId, workspaceId: scope.workspaceId },
+    });
+    if (!platform) throw new BadRequestException(`未知平台：${input.platform}（请先执行种子数据）`);
+
+    const accountName = input.accountName.trim();
+    // 去重口径：给了平台侧 id 就按 id 判重，否则按（平台 + 账号名）判重——避免手动登记出现重复行
+    const duplicate = await this.accounts.findOne({
+      where: input.platformAccountId
+        ? { workspaceId: scope.workspaceId, platformId: platform.id, platformAccountId: input.platformAccountId.trim() }
+        : { workspaceId: scope.workspaceId, platformId: platform.id, accountName },
+    });
+    if (duplicate) throw new ConflictException('该平台账号已登记，请勿重复添加');
+
+    const saved = await this.accounts.save(
+      this.accounts.create({
+        tenantId: scope.tenantId,
+        workspaceId: scope.workspaceId,
+        platformId: platform.id,
+        platformCode: input.platform,
+        accountName,
+        platformAccountId: input.platformAccountId?.trim() || `manual:${accountName}`.slice(0, 160),
+        avatarUrl: null,
+        accessToken: null,
+        refreshToken: null,
+        tokenExpiresAt: null,
+        status: 'active',
+        extra: {
+          manualBind: true,
+          homepage: input.homepage?.trim() || null,
+          note: input.note?.trim() || null,
+          registeredBy: actor.name ?? actor.id ?? null,
+          registeredAt: new Date().toISOString(),
+        },
+      }),
+    );
+
+    await this.audit.record({
+      action: 'platform.account.manual_registered',
+      resourceType: 'social_account',
+      resourceId: saved.id,
+      tenantId: scope.tenantId,
+      workspaceId: scope.workspaceId,
+      actorId: actor.id ?? null,
+      actorName: actor.name ?? null,
+      payload: { platform: input.platform, accountName, homepage: input.homepage ?? null, credential: 'none' },
+    });
+    this.logger.log(`已手动登记平台账号：${PLATFORM_LABELS[input.platform]} / ${accountName}（无凭证，发布走插件或人工）`);
+    return this.toView(saved, [platform]);
+  }
+
   async bind(input: BindAccountInput, actor: { id?: string | null; name?: string | null }): Promise<AccountView> {
     const scope = await this.workspaceContext.current();
     const platform = await this.platforms.findOne({ where: { code: input.platform, workspaceId: scope.workspaceId } });

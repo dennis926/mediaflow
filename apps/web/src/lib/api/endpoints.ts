@@ -164,6 +164,15 @@ export const publishApi = {
   queueHealth: () => api.get<QueueHealth>('/publish/queue/health'),
   /** 强制重排（无视锁定状态） */
   requeue: (id: string) => api.post<PublishTask>(`/publish/tasks/${id}/requeue`),
+  /**
+   * 人工发布完成回填：公众号按平台规则禁止 API 发布，视频号/知乎等靠插件填充 + 人工确认，
+   * 这些任务发完之后必须能回填结果，否则会永远停在"待人工发布"。
+   */
+  markManualPublished: (id: string, payload: { url?: string; postId?: string; note?: string }) =>
+    api.post<PublishTask>(`/publish/tasks/${id}/manual-published`, payload),
+  /** 人工发布失败回填（原因必填） */
+  markManualFailed: (id: string, payload: { reason: string }) =>
+    api.post<PublishTask>(`/publish/tasks/${id}/manual-failed`, payload),
 };
 
 export const aiApi = {
@@ -230,6 +239,12 @@ export const accountsApi = {
   /** Returns the platform authorize URL to open (needs the AppID configured in 系统设置). */
   oauthAuthorize: (platform: string) => api.get<OAuthAuthorizeResult>(`/accounts/oauth/${platform}/authorize`),
   list: (platform?: string) => api.get<AccountView[]>('/accounts', { platform }),
+  /**
+   * 手动登记账号（无需 OAuth 资质/密钥）：只记元信息，不保存 token。
+   * 适合"先跑起来"的场景——发布走浏览器插件填充或人工确认，之后再补正式授权。
+   */
+  registerManual: (payload: { platform: string; accountName: string; platformAccountId?: string; homepage?: string; note?: string }) =>
+    api.post<AccountView>('/accounts/manual', payload),
   bind: (payload: {
     platform: string;
     accountName: string;

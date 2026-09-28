@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
 import { AuthUser } from '../modules/auth/auth.types';
 import { CurrentUser } from '../modules/auth/current-user.decorator';
 import { toActor } from '../modules/auth/actor.util';
@@ -8,6 +8,7 @@ import { AdapterDescriptor, PublishService, PublishTaskPage } from './publish.se
 import { BatchPublishTaskDto } from './dto/batch-publish-task.dto';
 import { CreatePublishTaskDto } from './dto/create-publish-task.dto';
 import { QueryPublishTaskDto } from './dto/query-publish-task.dto';
+import { MarkManualFailedDto, MarkManualPublishedDto } from './dto/manual-publish.dto';
 import { PublishTask } from '../modules/publish/entities/publish-task.entity';
 
 @Controller('publish')
@@ -55,6 +56,33 @@ export class PublishController {
   }
 
   /** 强制重排（无视锁定状态，用于卡住的任务） */
+  /**
+   * 人工发布完成回填：把平台后台发完的结果写回任务（无平台密钥时的主要出山路径）。
+   * 公众号按平台规则禁止 API 发布，视频号/知乎等靠插件填充 + 人工确认，都需要这个入口。
+   */
+  @Capability('publish.execute')
+  @HttpCode(200)
+  @Post('tasks/:id/manual-published')
+  markManualPublished(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: MarkManualPublishedDto,
+    @CurrentUser() user?: AuthUser,
+  ): Promise<PublishTask> {
+    return this.publishService.markManualPublished(id, dto, toActor(user));
+  }
+
+  /** 人工发布失败回填：必须写原因，任务转 failed（可再重试/重排）。 */
+  @Capability('publish.execute')
+  @HttpCode(200)
+  @Post('tasks/:id/manual-failed')
+  markManualFailed(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: MarkManualFailedDto,
+    @CurrentUser() user?: AuthUser,
+  ): Promise<PublishTask> {
+    return this.publishService.markManualFailed(id, dto, toActor(user));
+  }
+
   @Capability('publish.execute')
   @Post('tasks/:id/requeue')
   requeue(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user?: AuthUser): Promise<PublishTask> {
