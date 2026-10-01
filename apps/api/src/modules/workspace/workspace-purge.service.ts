@@ -31,8 +31,17 @@ export interface PurgeResult {
   ledgerRetained: string[];
 }
 
-/** A 类：工作区私有业务数据 —— 硬删时按"子表先删"的顺序清理（同事务）。 */
-const BUSINESS_TABLES: string[] = [
+/**
+ * A 类：工作区私有业务数据 —— 硬删时按"子表先删"的顺序清理（同事务）。
+ *
+ * 2026-10-01 补漏（浏览器走查发现）：`system_settings` / `roles` / `quotas` 原先既不在
+ * 删除清单、也不在备份清单，属于"两边都不在"——purge 之后它们在库里留下指向已删工作区的
+ * 孤儿行（实测：18 条 system_settings、1 条 quotas）。这几张表恰好都**没有指向 workspaces
+ * 的外键**，所以数据库不会拦、第 7 项监控也看不见，只有人工看界面（站点名显示成上一个
+ * 工作区的配置）才会暴露。判断某张表该不该进这份清单的方法：**它是否带 workspace_id
+ * 且语义上属于工作区**——是，就必须在这里（或明确写进 LEDGER_TABLES 说明为什么保留）。
+ */
+export const BUSINESS_TABLES: string[] = [
   'track_events',
   'analytics',
   'publish_tasks',
@@ -47,6 +56,12 @@ const BUSINESS_TABLES: string[] = [
   'platforms',
   'notifications',
   'workspace_members',
+  // 工作区级配置（站点名、AI Key、通知渠道等）—— 不删会让下一个工作区"继承"别人的配置
+  'system_settings',
+  // 角色是按工作区各存一份（user_roles.roles_id 指向它，CASCADE 随角色删除而清）
+  'roles',
+  // 用量配额（发布次数、AI token 等）按工作区+周期记账
+  'quotas',
 ];
 
 /**
@@ -58,6 +73,10 @@ const BUSINESS_TABLES: string[] = [
  */
 export const BACKUP_TABLES: string[] = [
   'workspaces',
+  // 工作区级配置必须在备份里：否则"关停前导出、日后恢复"会丢掉站点名/AI Key/通知渠道
+  'system_settings',
+  'roles',
+  'quotas',
   'contents',
   'content_variants',
   'content_revisions',

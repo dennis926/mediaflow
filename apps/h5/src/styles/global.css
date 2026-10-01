@@ -503,3 +503,15 @@ a {
   from { background-position: 100% 50%; }
   to { background-position: 0 50%; }
 }
+
+/*
+ * 行内文字链接的移动端热区：视觉仍是普通文字链接，但点击区域撑到 44×44。
+ * 用于卡片右上角的「查看全部」这类小链接——AGENTS.md 要求移动端最小点击区 ≥44px。
+ */
+.link-tap {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 var(--mf-space-2);
+  margin: calc(var(--mf-space-3) * -1) 0;
+}

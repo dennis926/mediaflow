@@ -50,7 +50,15 @@ export function DashboardPage() {
         <div className="card" style={{ marginTop: 'var(--mf-space-4)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <strong>发布队列</strong>
-            <Link to="/publish/queue" className="muted">
+            {/*
+              点击区必须 ≥44×44（AGENTS.md 移动端硬约束）。原先这个链接只有文字高度（20px），
+              拇指点起来容易点空——用 padding + 负 margin 把热区撑到 44 高，同时不改变视觉间距。
+            */}
+            <Link
+              to="/publish/queue"
+              className="muted link-tap"
+              style={{ marginRight: 'calc(var(--mf-space-2) * -1)' }}
+            >
               查看全部
             </Link>
           </div>

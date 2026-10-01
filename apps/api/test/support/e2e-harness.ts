@@ -1,6 +1,7 @@
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { existsSync, readdirSync, rmSync, statSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
+import { BUSINESS_TABLES } from '../../src/modules/workspace/workspace-purge.service';
 import { Test } from '@nestjs/testing';
 import cookieParser from 'cookie-parser';
 import type Redis from 'ioredis';
@@ -279,9 +280,19 @@ export async function createHarness(titlePrefix: string, options: { requireAppro
         }
       }
 
-      // 测试工作区（先删成员再删工作区；users.workspace_id 对 workspaces 是 CASCADE，测试账号已先删）
+      /**
+       * 测试工作区：按生产 purge 的同一份清单清理，最后删工作区行。
+       *
+       * 为什么不能只 `DELETE FROM workspaces`：`system_settings` / `quotas` / `roles` 这些表
+       * **没有指向 workspaces 的外键**，只删工作区行会在临时库里留下孤儿行。以前这没被
+       * 发现是因为没人检查；2026-10-01 给监控加了孤儿行判定后立刻暴露出来——生产库上
+       * 同样的遗漏导致了 18 条 system_settings 孤儿（站点名显示成上一个工作区的配置）。
+       * 这里复用 BUSINESS_TABLES，保证"测试清理"和"生产 purge"行为一致。
+       */
       for (const workspaceId of harness.createdWorkspaceIds) {
-        await dataSource.query('DELETE FROM workspace_members WHERE workspace_id = $1', [workspaceId]);
+        for (const table of BUSINESS_TABLES) {
+          await dataSource.query(`DELETE FROM ${table} WHERE workspace_id = $1`, [workspaceId]);
+        }
         await dataSource.query('DELETE FROM workspaces WHERE id = $1', [workspaceId]);
       }
       // Queue hygiene: drop this run's messages, then the private stream itself.

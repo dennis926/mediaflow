@@ -375,12 +375,30 @@ export class OpsMonitorService {
    */
   async checkCrossWorkspaceRefs(): Promise<MonitorCheck> {
     const threshold = 0;
-    const rows = await this.dataSource.query(
+    const crossRef = await this.dataSource.query(
       `SELECT count(*)::int AS n
          FROM social_accounts a JOIN platforms p ON p.id = a.platform_id
         WHERE a.workspace_id <> p.workspace_id`,
     );
-    const current = Number(rows[0]?.n ?? 0);
+    /**
+     * 孤儿行：指向已不存在的工作区。
+     *
+     * 为什么必须单独查：真正会留下孤儿的表（system_settings / quotas / audit_logs 等）
+     * **都没有指向 workspaces 的外键**——有外键的表要么 CASCADE、要么被拦下，反而不会出问题。
+     * 2026-10-01 实测就是靠人工看界面才发现 18 条 system_settings 孤儿（站点名显示成上一个
+     * 工作区留下的配置），而监控当时报的是"0 条，符合预期"。这里把判定补上，
+     * 让"purge 漏清某张表"能被自动发现，而不是等人去看界面。
+     */
+    const orphans = await this.dataSource.query(
+      `SELECT count(*)::int AS n FROM (
+         SELECT s.workspace_id FROM system_settings s LEFT JOIN workspaces w ON w.id = s.workspace_id
+           WHERE s.workspace_id IS NOT NULL AND w.id IS NULL
+         UNION ALL
+         SELECT q.workspace_id FROM quotas q LEFT JOIN workspaces w ON w.id = q.workspace_id
+           WHERE q.workspace_id IS NOT NULL AND w.id IS NULL
+       ) t`,
+    );
+    const current = Number(crossRef[0]?.n ?? 0) + Number(orphans[0]?.n ?? 0);
     return {
       key: 'cross_workspace_refs',
       label: '跨工作区引用',
@@ -392,9 +410,8 @@ export class OpsMonitorService {
       level: 'error',
       detail:
         current > threshold
-          ? `发现 ${current} 条跨工作区引用（平台账号指向别的工作区的平台字典）：purge 会被 RESTRICT 拦住并整体回滚。` +
-            '请按 docs/RUNBOOK-purge演练.md §7.4 修正引用（把账号指向本工作区的同 code 平台），不要删数据。'
-          : '跨工作区引用 0 条（符合预期）。',
+          ? `发现 ${current} 条跨工作区引用 / 孤儿行：跨工作区引用会让 purge 被 RESTRICT 拦住并整体回滚（按 docs/RUNBOOK-purge演练.md §7.4 修正引用，不要删数据）；孤儿行说明某次 purge 漏清了表，对照 workspace-purge.service.ts 的 BUSINESS_TABLES 补齐清单后再清。`
+          : '跨工作区引用与孤儿行均为 0 条（符合预期）。',
       link: this.link('/settings'),
       checkedAt: this.now(),
     };
