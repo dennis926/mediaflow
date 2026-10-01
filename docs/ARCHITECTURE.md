@@ -1,6 +1,6 @@
-# MediaFlow 架构文档
+# NeedAi 内容分发系统 架构文档
 
-> 状态：骨架占位。随各阶段开发逐步补全。
+> 内部代号 MediaFlow。描述**当前线上真实架构**（v0.2.0）。
 
 ## 1. 总体架构
 
@@ -8,8 +8,9 @@
 apps/web (Next.js 14, PC)  ─┐
 apps/h5  (React + Vite, 移动) ─┼─→ apps/api (NestJS 10, /api)  ─→ PostgreSQL 16+
 apps/plugin (CRXJS 扩展)    ─┘                                 ─→ Redis 7 (Stream 队列)
-                                                               ─→ MinIO (媒体存储)
-                                                               ─→ DeepSeek V4-Flash (AI)
+                                                               ─→ MinIO (媒体存储，当前素材走本地磁盘)
+                                                               ─→ DeepSeek V4.1 Flash (AI)
+                                                               ─→ 供应商官网价目表 (AI 计费价源)
 ```
 
 ## 2. 仓库结构
@@ -27,6 +28,8 @@ pnpm workspace 单仓多包：
 - 前后端共享类型只能来自 `@mediaflow/shared`，禁止各端复制定义
 - 前端颜色 / 尺寸只能引用 CSS 变量 `var(--mf-*)`，不得硬编码
 - 所有 API 响应由 `ResponseInterceptor` 统一封装为 `{ code, message, data }`
+- 版本号单一来源：`packages/shared/src/constants/version.ts` 的 `APP_VERSION`，由 `pnpm release` 递增并打标签；组件内禁止写死版本字符串
+- AI 计费只认官方价，价格优先级「用户覆盖价 > 官网抓取价 > 预置目录价 > 全局兜底价」，禁止折扣与倍率
 
 ## 4. 平台适配层与异步发布链路
 
@@ -60,6 +63,24 @@ pnpm workspace 单仓多包：
 - AI 提供方由 `AiProviderFactory` 按当前配置动态构建，配置变更后无需重启即可生效（发布 Worker 开关与重试间隔改动仍需重启 API）
 - PC 端「系统设置」页（`/settings`）按分组渲染表单，含「测试连接」按钮
 - 因此把仓库公开出去时，仓库里只有 `.env.example` 模板，真实密钥一律在后台维护（提交前可跑 `pnpm check:secrets`）
+- AI 计费相关配置：`AI_PEAK_WINDOWS`（峰谷窗口 + 节假日）、`AI_OFFICIAL_PRICE_AUTO_REFRESH` / `AI_OFFICIAL_PRICE_REFRESH_MINUTES`（官网抓取）、`AI_OFFICIAL_PRICES`（抓取结果，系统自动写入）
+
+### 4.3.1 AI 计费链路
+
+```
+AI 调用 ──> AiService.complete()
+              ├─ 解析当前时段（pricing/peak-window.ts，按 Asia/Shanghai 日历判定高峰/空闲）
+              ├─ 取价（ModelPricingService.resolveOfficial）
+              │    官网抓取价 AI_OFFICIAL_PRICES  ──(优先)──┐
+              │    预置目录价 model-catalog.ts              ├─> 人民币峰谷价
+              │    用户覆盖价 AI_MODEL_PRICES ──(最高)──────┘
+              ├─ 四段计价（输入 / 输出 / 缓存写入 / 缓存读取）
+              └─ 落库 ai_generations.cost + price_snapshot（含 tier / tierLabel）
+
+定时任务 OfficialPriceRefreshTask（每分钟醒来，按配置间隔执行）
+  └─> pricing/deepseek-pricing.ts 抓取官网 ──> 解析 HTML 表格 ──> OfficialPriceStore 落库
+      解析失败：保留上一份价格 + 日志告警，绝不影响计费
+```
 
 ## 4.4 移动端（apps/h5）
 
@@ -84,18 +105,33 @@ pnpm workspace 单仓多包：
 
 ## 5. 本机开发环境说明（与 AGENTS.md 的差异）
 
-| 项 | AGENTS.md 目标环境 | 当前开发机 |
+| 项 | AGENTS.md 目标环境 | 当前生产机 |
 | --- | --- | --- |
-| 容器 | Docker Compose | **未安装 Docker**，使用原生 PostgreSQL / Redis 服务 |
-| PostgreSQL | 16 | 18.6（协议兼容） |
+| 容器 | Docker Compose | Docker 29.1.3 + compose v2 **已安装**，容器栈（B0.8）与 systemd 生产并存：容器 api/web 在 4300/3300，systemd 生产在 4000/3000 |
+| PostgreSQL | 16 | 18.6（协议兼容）；容器栈内为 16-alpine |
 | Node | 20 LTS | 22.22.1（满足 engines >= 20） |
 | H5 端口 | 3001 | 3101（3001 已被本机其它站点占用） |
 
-`docker-compose.yml` 保留，用于目标环境；本机使用系统服务：
+生产**以 systemd 承载为主**（`mediaflow-api` / `mediaflow-web`），容器栈用于验证容器化部署路径。
+`docker compose` 命令必须带 `--env-file .env.docker`，否则会读生产 `.env` 把密钥带进容器。
+
+本地开发可用 `docker compose up -d postgres redis minio`，或直接用系统服务
 `systemctl start postgresql redis-server`。
 
-## 6. 待补充
+## 6. 观测与运维
 
-- 部署拓扑与 Nginx 反代
-- 队列消费幂等与死信处理
-- 观测（日志 / 指标 / 告警）
+- **运行监控**：`OpsMonitorService` 7 项巡检（队列积压 / 磁盘 / 发布失败率 / 登录失败 / 跨工作区引用与孤儿行 / AI 配额等），
+  按 `scope: 'platform' | 'workspace'` 区分口径；前端「系统设置 → 运行监控」可视化。
+- **外部巡检**：cron 每 5 分钟探 `/api/health`，日志 `/var/log/mediaflow-monitor.log`。
+- **备份**：cron 每日 04:30 全库 `pg_dump`，产物 600 权限，保留在 `/www/backup/mediaflow/`。
+- **审计**：关键操作写 `audit_logs`；AI 调用写 `ai_generations`（含费用与档位快照）。
+
+## 7. 已知技术债
+
+| 项 | 说明 | 文档 |
+| --- | --- | --- |
+| 无全局租户过滤器 | 隔离靠逐查询带 `workspace_id`，已加**静态闸门**（`scripts/check-tenant-scope.mjs`）在 CI/预检拦截"按裸 id 读取"的新代码 | — |
+| purge 备份与库同机 | 备份未异地存放，同机故障会同时丢数据 | `TECHDEBT-purge备份异地.md` |
+| E2E 与生产隔离 | 已用临时库+哨兵解决；生产库仍有历史测试残留 | `TECHDEBT-E2E隔离.md` |
+| 权限粒度 | 角色级而非细粒度 ACL | `TECHDEBT-权限粒度.md` |
+| 角色数据源 | `roles` 表与代码内置角色双轨 | `TECHDEBT-角色数据源.md` |
