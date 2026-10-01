@@ -387,6 +387,7 @@ export interface PricingRulesView {
 }
 
 export interface OfficialPriceProviderSnapshotView {
+  /** 最近一次「抓取成功」的时间；从未成功过时为空字符串。 */
   fetchedAt: string;
   sourceUrl: string;
   models: Record<
@@ -402,6 +403,9 @@ export interface OfficialPriceProviderSnapshotView {
     }
   >;
   error?: string;
+  failedAt?: string;
+  consecutiveFailures?: number;
+  failures?: Array<{ at: string; message: string }>;
 }
 
 export interface OfficialPriceSnapshotView {
@@ -425,6 +429,8 @@ export interface OfficialPriceRefreshResultView {
     models: Array<{ model: string; currency: 'CNY' | 'USD' }>;
     warning: string | null;
   }>;
+  /** 本次抓取失败的供应商及原因（被反爬拦截等），界面照实列出。 */
+  failures?: Array<{ provider: string; message: string }>;
   warning: string | null;
 }
 

@@ -498,25 +498,40 @@ export class ModelPricingService {
 
   /**
    * 手动触发一次官网抓取（界面「立即抓取」按钮）。
+   *
+   * 返回成功与失败两份清单：只回成功的话，被反爬拦住的供应商在界面上会
+   * 表现为「这个供应商压根不存在」，用户无法区分「没配」和「抓不到」。
+   *
    * @param provider 指定供应商；传空则抓取全部支持的供应商
    */
-  async refreshOfficialPrices(provider?: string): Promise<ScrapeResult[]> {
-    const targets = provider ? [provider] : [...SCRAPERS.map((scraper) => scraper.provider)];
+  async refreshOfficialPrices(provider?: string): Promise<{
+    results: ScrapeResult[];
+    failures: Array<{ provider: string; message: string }>;
+  }> {
+    const targets = provider
+      ? SCRAPERS.filter((scraper) => scraper.provider === provider)
+      : [...SCRAPERS];
+    if (provider && !targets.length) {
+      throw new Error(`未知的供应商：${provider}`);
+    }
     const results: ScrapeResult[] = [];
     const failures: Array<{ provider: string; message: string }> = [];
 
     // 逐个抓：一个供应商的页面结构变化不能连累其他供应商的抓取。
     for (const target of targets) {
       try {
-        const result = await scrapeProvider(target);
+        const result = await scrapeProvider(target.provider);
         if (!result.prices.length) {
-          failures.push({ provider: target, message: result.warning ?? '未解析到任何价格' });
+          failures.push({
+            provider: target.provider,
+            message: result.warning ?? '未解析到任何价格',
+          });
           continue;
         }
         results.push(result);
       } catch (error) {
         failures.push({
-          provider: target,
+          provider: target.provider,
           message: error instanceof Error ? error.message : String(error),
         });
       }
@@ -531,14 +546,15 @@ export class ModelPricingService {
       );
     }
     for (const failure of failures) {
-      await this.officialPrices.recordFailure(failure.provider, failure.message);
+      const sourceUrl = targets.find((t) => t.provider === failure.provider)?.url ?? '';
+      await this.officialPrices.recordFailure(failure.provider, failure.message, sourceUrl);
     }
 
     // 指定单个供应商时，失败必须抛出去让界面看到原因，而不是静默返回空。
     if (provider && !results.length) {
       throw new Error(failures[0]?.message ?? '未解析到任何价格');
     }
-    return results;
+    return { results, failures };
   }
 
   /** 一轮定时抓取：抓取所有支持的供应商，返回成功与失败清单。 */
@@ -552,15 +568,16 @@ export class ModelPricingService {
       try {
         const result = await scrapeProvider(scraper.provider);
         if (!result.prices.length) {
-          failed.push({ provider: scraper.provider, message: result.warning ?? '未解析到任何价格' });
-          await this.officialPrices.recordFailure(scraper.provider, result.warning ?? '未解析到任何价格');
+          const message = result.warning ?? '未解析到任何价格';
+          failed.push({ provider: scraper.provider, message });
+          await this.officialPrices.recordFailure(scraper.provider, message, scraper.url);
           continue;
         }
         succeeded.push(result);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         failed.push({ provider: scraper.provider, message });
-        await this.officialPrices.recordFailure(scraper.provider, message);
+        await this.officialPrices.recordFailure(scraper.provider, message, scraper.url);
       }
     }
     if (succeeded.length) await this.officialPrices.saveMany(succeeded);

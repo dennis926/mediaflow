@@ -38,7 +38,11 @@ async function main(): Promise<void> {
   const snapshot = await store.read();
   for (const [provider, detail] of Object.entries(snapshot?.detail ?? {})) {
     const count = Object.keys(detail.models).length;
-    console.log(`  ${provider}: ${count} 个模型，抓取于 ${detail.fetchedAt}${detail.error ? `，错误：${detail.error}` : ''}`);
+    const success = detail.fetchedAt ? `上次成功 ${detail.fetchedAt}` : '从未成功抓取';
+    const failures = detail.consecutiveFailures ? `，连续失败 ${detail.consecutiveFailures} 次` : '';
+    console.log(
+      `  ${provider}: ${count} 个模型，${success}${failures}${detail.error ? `，错误：${detail.error}` : ''}`,
+    );
   }
 
   console.log('\n== 计费解析（走 官网价 > 目录价 优先级）==');

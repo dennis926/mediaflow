@@ -127,7 +127,7 @@ export class AiController {
   @Post('official-prices/refresh')
   async refreshOfficialPrices(@Body() body: { provider?: string }) {
     const provider = body?.provider ? String(body.provider) : undefined;
-    const results = await this.pricingService.refreshOfficialPrices(provider);
+    const { results, failures } = await this.pricingService.refreshOfficialPrices(provider);
     return {
       fetchedAt: new Date().toISOString(),
       providers: results.map((result) => ({
@@ -137,6 +137,11 @@ export class AiController {
         count: result.prices.length,
         models: result.prices,
         warning: result.warning ?? null,
+      })),
+      // 失败清单必须回传：否则被反爬拦住的供应商在界面上等于不存在。
+      failures: failures.map((failure) => ({
+        provider: failure.provider,
+        message: failure.message,
       })),
       warning: results.length ? null : '未抓取到任何价格',
     };

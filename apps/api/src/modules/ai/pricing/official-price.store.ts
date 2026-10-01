@@ -14,12 +14,25 @@ import { ScrapeResult, ScrapedPrice } from './types';
  * "上次成功时间"看起来也是新的，否则界面会显示一个骗人的新鲜度。
  */
 export interface OfficialPriceProviderSnapshot {
+  /** 最近一次「抓取成功」的时间；失败不会推进它，界面据此判断价格是否还新鲜。 */
   fetchedAt: string;
   sourceUrl: string;
-  /** 该供应商本次抓取到的模型价格（key = 供应商自己的模型名）。 */
+  /** 该供应商最近一次抓取到的模型价格（key = 供应商自己的模型名）。 */
   models: Record<string, ScrapedPrice>;
   /** 最近一次抓取失败的原因；成功后清空。 */
   error?: string;
+  /** 最近一次抓取失败的时间；成功后清空。 */
+  failedAt?: string;
+  /** 连续失败次数；成功后归零。用于定时任务的退避。 */
+  consecutiveFailures?: number;
+  /** 最近的失败记录（新→旧，最多保留 FAILURE_LOG_LIMIT 条），抓取成功后保留。 */
+  failures?: PriceFailureRecord[];
+}
+
+/** 一条抓取失败记录。 */
+export interface PriceFailureRecord {
+  at: string;
+  message: string;
 }
 
 export interface OfficialPriceSnapshot {
@@ -35,6 +48,9 @@ export interface OfficialPriceSnapshot {
 }
 
 const SETTING_KEY = 'AI_OFFICIAL_PRICES';
+
+/** 每个供应商最多保留多少条失败记录（防止设置项无限膨胀）。 */
+const FAILURE_LOG_LIMIT = 20;
 
 @Injectable()
 export class OfficialPriceStore {
@@ -80,10 +96,14 @@ export class OfficialPriceStore {
       }
       providers[result.provider] = models;
       sources[result.provider] = result.sourceUrl;
+      const previous = detail[result.provider];
       detail[result.provider] = {
         fetchedAt: result.fetchedAt,
         sourceUrl: result.sourceUrl,
         models,
+        // 成功即清空「当前错误」，但保留历史失败记录——否则一次成功会把
+        // 「这家曾经连续被反爬拦截 6 次」这类信息抹掉。
+        failures: previous?.failures,
       };
       if (result.fetchedAt > latest) latest = result.fetchedAt;
     }
@@ -106,13 +126,28 @@ export class OfficialPriceStore {
     return next;
   }
 
-  /** 记录某供应商抓取失败（保留其上一份价格，只更新失败原因）。 */
-  async recordFailure(provider: string, error: string): Promise<void> {
+  /**
+   * 记录某供应商抓取失败（保留其上一份价格，只更新失败原因与失败时间）。
+   *
+   * 对「从未成功抓取过」的供应商同样建档（`fetchedAt` 置空字符串）：
+   * 否则一家从上线第一天起就被反爬拦住的供应商在快照里完全不存在，
+   * 界面上看不出它被配置过、更看不出它为什么没价格——这正是豆包遇到的情况。
+   */
+  async recordFailure(provider: string, error: string, sourceUrl = ''): Promise<void> {
     const current = await this.read();
     const detail: Record<string, OfficialPriceProviderSnapshot> = { ...(current?.detail ?? {}) };
     const existing = detail[provider];
-    if (!existing) return;
-    detail[provider] = { ...existing, error };
+    const at = new Date().toISOString();
+    const failures = [{ at, message: error }, ...(existing?.failures ?? [])].slice(0, FAILURE_LOG_LIMIT);
+    detail[provider] = {
+      fetchedAt: existing?.fetchedAt ?? '',
+      sourceUrl: existing?.sourceUrl || sourceUrl,
+      models: existing?.models ?? {},
+      error,
+      failedAt: at,
+      consecutiveFailures: (existing?.consecutiveFailures ?? 0) + 1,
+      failures,
+    };
     const next: OfficialPriceSnapshot = {
       fetchedAt: current?.fetchedAt ?? new Date().toISOString(),
       sources: current?.sources ?? {},

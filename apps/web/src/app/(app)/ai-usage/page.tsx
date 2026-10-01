@@ -81,7 +81,7 @@ export default function AiUsagePage() {
   const [selection, setSelection] = useState<ModelSelection | null>(null);
   const [providerDialog, setProviderDialog] = useState<ProviderPricingView | null | 'new'>(null);
   const [priceDialog, setPriceDialog] = useState<AiUsageModelRow | null>(null);
-  const [feedback, setFeedback] = useState<{ tone: 'success' | 'danger' | 'info'; text: string } | null>(null);
+  const [feedback, setFeedback] = useState<{ tone: 'success' | 'danger' | 'info' | 'warning'; text: string } | null>(null);
 
   const report = useQuery({
     queryKey: ['ai', 'usage-report', days, provider, selection],
@@ -107,12 +107,12 @@ export default function AiUsagePage() {
     onSuccess: (result) => {
       // 逐个供应商汇总：只报"更新了 N 个模型"会掩盖某家抓取失败。
       const summary = result.providers.map((item) => `${item.provider} ${item.count} 个`).join('、');
-      const failed = result.providers.filter((item) => item.warning);
+      const failures = result.failures ?? [];
       setFeedback({
-        tone: !result.providers.length || failed.length ? 'danger' : 'success',
+        tone: failures.length ? 'warning' : 'success',
         text: !result.providers.length
-          ? `抓取失败：${result.warning ?? '未抓取到任何价格'}`
-          : `已从官网更新：${summary}${failed.length ? `（${failed.map((item) => item.provider).join('、')} 有异常）` : ''}`,
+          ? `抓取失败：${failures[0]?.message ?? result.warning ?? '未抓取到任何价格'}`
+          : `已从官网更新：${summary}${failures.length ? `；未抓到：${failures.map((item) => item.provider).join('、')}` : ''}`,
       });
       void queryClient.invalidateQueries({ queryKey: ['ai'] });
     },
@@ -453,16 +453,29 @@ export default function AiUsagePage() {
                           {failed ? '抓取失败' : entry ? `${models.length} 个模型` : '尚未抓取'}
                         </Tag>
                       </div>
-                      {entry ? (
+                      {entry?.fetchedAt ? (
                         <span className={styles.scrapeMeta}>
                           上次成功 {formatDateTime(entry.fetchedAt)}
+                          <br />
+                          {entry.sourceUrl}
+                        </span>
+                      ) : entry ? (
+                        <span className={styles.scrapeMeta}>
+                          从未成功抓取
                           <br />
                           {entry.sourceUrl}
                         </span>
                       ) : (
                         <span className={styles.scrapeMeta}>还没抓过，点上方「立即抓取官网价」</span>
                       )}
-                      {failed ? <span className={styles.scrapeReason}>{entry?.error}</span> : null}
+                      {failed ? (
+                        <span className={styles.scrapeReason}>
+                          {entry?.error}
+                          {entry?.consecutiveFailures && entry.consecutiveFailures > 1
+                            ? `（已连续失败 ${entry.consecutiveFailures} 次）`
+                            : ''}
+                        </span>
+                      ) : null}
                     </div>
                   );
                 })}
