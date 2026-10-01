@@ -382,6 +382,26 @@ export interface PricingRulesView {
   peakWindows: string;
   peakConfig: { windows: Array<{ days: number[]; start: string; end: string }>; holidays: string[]; timeZone: string };
   scrapableProviders: string[];
+  /** 无法自动抓取的供应商及原因（界面照实说明，不显示成故障） */
+  unscrapable: Array<{ provider: string; label: string; url: string; reason: string }>;
+}
+
+export interface OfficialPriceProviderSnapshotView {
+  fetchedAt: string;
+  sourceUrl: string;
+  models: Record<
+    string,
+    {
+      model: string;
+      catalogModel?: string;
+      version?: string;
+      currency: 'CNY' | 'USD';
+      peak: ModelPriceCnyTierView;
+      offpeak: ModelPriceCnyTierView;
+      note?: string;
+    }
+  >;
+  error?: string;
 }
 
 export interface OfficialPriceSnapshotView {
@@ -391,7 +411,21 @@ export interface OfficialPriceSnapshotView {
     string,
     Record<string, { model: string; version?: string; peak: ModelPriceCnyTierView; offpeak: ModelPriceCnyTierView }>
   >;
+  detail?: Record<string, OfficialPriceProviderSnapshotView>;
   warnings?: string[];
+}
+
+export interface OfficialPriceRefreshResultView {
+  fetchedAt: string;
+  providers: Array<{
+    provider: string;
+    sourceUrl: string;
+    fetchedAt: string;
+    count: number;
+    models: Array<{ model: string; currency: 'CNY' | 'USD' }>;
+    warning: string | null;
+  }>;
+  warning: string | null;
 }
 
 export interface ProviderConfigItem {

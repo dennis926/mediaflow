@@ -10,16 +10,24 @@ import { ModelPricingService } from '../model-pricing.service';
  *
  * 抓取失败**绝不影响计费**：失败时保留上一份快照，只是日志告警。
  * 计费永远有可用价格（官网快照 → 预置目录 → 全局兜底），不会因为对方网站挂了而算不出钱。
+ *
+ * 连续失败会退避：有的站点（火山引擎）会对自动化访问做人机校验，一直重试只会把
+ * 自己的出口 IP 拉黑得更久。失败次数越多、等得越久，最长退避 24 小时。
  */
 @Injectable()
 export class OfficialPriceRefreshTask {
   private readonly logger = new Logger(OfficialPriceRefreshTask.name);
   private lastRunAt = 0;
+  /** 防止上一轮还没跑完就启动下一轮（多供应商串行抓取会超过一分钟）。 */
+  private running = false;
+  /** provider -> 连续失败次数；成功即清零。 */
+  private readonly failures = new Map<string, number>();
 
   constructor(private readonly pricing: ModelPricingService) {}
 
   @Cron(CronExpression.EVERY_MINUTE)
   async tick(): Promise<void> {
+    if (this.running) return;
     try {
       const enabled = await this.pricing.officialRefreshEnabled();
       if (!enabled) return;
@@ -31,17 +39,43 @@ export class OfficialPriceRefreshTask {
       if (now - this.lastRunAt < intervalMinutes * 60_000) return;
       this.lastRunAt = now;
 
-      for (const provider of await this.pricing.scrapableProviders()) {
-        try {
-          await this.pricing.refreshOfficialPrices(provider);
-        } catch (error) {
-          this.logger.warn(
-            `抓取 ${provider} 官方价格失败（保留上一份快照）：${error instanceof Error ? error.message : String(error)}`,
-          );
-        }
+      this.running = true;
+      const { succeeded, failed } = await this.pricing.refreshAllOfficialPrices();
+
+      for (const result of succeeded) this.failures.delete(result.provider);
+      for (const failure of failed) {
+        const count = (this.failures.get(failure.provider) ?? 0) + 1;
+        this.failures.set(failure.provider, count);
+        const backoff = this.backoffMinutes(count);
+        this.logger.warn(
+          `抓取 ${failure.provider} 官方价格失败第 ${count} 次（保留上一份快照，${backoff} 分钟内不再重试）：${failure.message}`,
+        );
+      }
+
+      if (succeeded.length) {
+        this.logger.log(
+          `官网价格已刷新：${succeeded.map((item) => `${item.provider}(${item.prices.length})`).join('、')}`,
+        );
       }
     } catch (error) {
       this.logger.warn(`官方价格抓取任务异常：${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      this.running = false;
     }
+  }
+
+  /**
+   * 连续失败 n 次后的退避时长（分钟）：2^n 递增，封顶 24 小时。
+   * 第 1 次失败不额外退避（只按正常间隔），避免偶发网络抖动被当成封禁。
+   */
+  private backoffMinutes(consecutiveFailures: number): number {
+    if (consecutiveFailures <= 1) return 0;
+    const minutes = Math.min(2 ** (consecutiveFailures - 1), 24 * 60);
+    return minutes;
+  }
+
+  /** 当前连续失败次数（供健康检查/监控读取）。 */
+  failureCounts(): Record<string, number> {
+    return Object.fromEntries(this.failures);
   }
 }

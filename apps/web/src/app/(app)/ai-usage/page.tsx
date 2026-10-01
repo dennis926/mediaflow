@@ -95,17 +95,24 @@ export default function AiUsagePage() {
     queryKey: ['ai', 'generations', 'recent', selection],
     queryFn: () => aiApi.generations({ page: 1, pageSize: 20 }),
   });
+  /** 官网价格快照：按供应商显示"上次抓到什么时候、抓到几个模型、哪家失败了" */
+  const official = useQuery({
+    queryKey: ['ai', 'official-prices'],
+    queryFn: () => aiApi.officialPrices(),
+  });
 
   /** 立即抓取官网价目表：成功后刷新价目（价格会立刻按新值计费）。 */
   const refreshOfficial = useMutation({
-    mutationFn: () => aiApi.refreshOfficialPrices(),
+    mutationFn: (provider?: string) => aiApi.refreshOfficialPrices(provider),
     onSuccess: (result) => {
-      const models = result.models.map((item) => item.model).join('、');
+      // 逐个供应商汇总：只报"更新了 N 个模型"会掩盖某家抓取失败。
+      const summary = result.providers.map((item) => `${item.provider} ${item.count} 个`).join('、');
+      const failed = result.providers.filter((item) => item.warning);
       setFeedback({
-        tone: result.warning ? 'danger' : 'success',
-        text: result.warning
-          ? `抓取完成但有异常：${result.warning}`
-          : `已从官网更新 ${result.models.length} 个模型的价格（${models}）`,
+        tone: !result.providers.length || failed.length ? 'danger' : 'success',
+        text: !result.providers.length
+          ? `抓取失败：${result.warning ?? '未抓取到任何价格'}`
+          : `已从官网更新：${summary}${failed.length ? `（${failed.map((item) => item.provider).join('、')} 有异常）` : ''}`,
       });
       void queryClient.invalidateQueries({ queryKey: ['ai'] });
     },
@@ -425,9 +432,52 @@ export default function AiUsagePage() {
               <span className={styles.meta}>
                 价格为各供应商<strong>官方价</strong>（不加价、不打折）：国内供应商直接取官网人民币价并区分<strong>峰谷两档</strong>，
                 海外供应商按官方美元价 × 汇率 {data?.rules.usdToCny ?? 7} 折算；
-                {data?.rules.scrapableProviders.length ? '系统会定时抓取官网价目表，官方调价后自动跟随，也可点上方「立即抓取官网价」。' : '官方调价后点「改价」即可覆盖该模型。'}
+                {data?.rules.scrapableProviders.length
+                  ? `系统会定时抓取 ${data.rules.scrapableProviders.length} 家官网价目表，官方调价后自动跟随，也可点上方「立即抓取官网价」。`
+                  : '官方调价后点「改价」即可覆盖该模型。'}
               </span>
             </div>
+            {/* 抓取覆盖情况：抓到了哪几家、上次什么时候、哪家抓不到及原因 */}
+            {data?.rules.scrapableProviders.length ? (
+              <div className={styles.scrapeGrid}>
+                {data.rules.scrapableProviders.map((code) => {
+                  const label = providers.find((item) => item.provider === code)?.label ?? code;
+                  const entry = official.data?.detail?.[code];
+                  const models = entry ? Object.keys(entry.models) : [];
+                  const failed = Boolean(entry?.error);
+                  return (
+                    <div key={code} className={`${styles.scrapeItem} ${failed ? styles.scrapeItemFailed : ''}`}>
+                      <div className={styles.scrapeHead}>
+                        <span className={styles.scrapeName}>{label}</span>
+                        <Tag tone={failed ? 'danger' : entry ? 'success' : 'default'}>
+                          {failed ? '抓取失败' : entry ? `${models.length} 个模型` : '尚未抓取'}
+                        </Tag>
+                      </div>
+                      {entry ? (
+                        <span className={styles.scrapeMeta}>
+                          上次成功 {formatDateTime(entry.fetchedAt)}
+                          <br />
+                          {entry.sourceUrl}
+                        </span>
+                      ) : (
+                        <span className={styles.scrapeMeta}>还没抓过，点上方「立即抓取官网价」</span>
+                      )}
+                      {failed ? <span className={styles.scrapeReason}>{entry?.error}</span> : null}
+                    </div>
+                  );
+                })}
+                {/* 明确抓不到的供应商：写清原因，避免看起来像功能坏了 */}
+                {(data.rules.unscrapable ?? []).map((item) => (
+                  <div key={item.provider} className={`${styles.scrapeItem} ${styles.scrapeItemFailed}`}>
+                    <div className={styles.scrapeHead}>
+                      <span className={styles.scrapeName}>{item.label}</span>
+                      <Tag tone="default">不支持自动抓取</Tag>
+                    </div>
+                    <span className={styles.scrapeReason}>{item.reason}</span>
+                  </div>
+                ))}
+              </div>
+            ) : null}
           </Card>
 
           <div className={styles.statGrid}>

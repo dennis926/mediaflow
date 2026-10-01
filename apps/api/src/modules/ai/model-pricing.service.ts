@@ -14,8 +14,9 @@ import {
 } from './model-catalog';
 import { ProviderConfig, ProviderConfigService } from './provider-config.service';
 import { PeakWindowConfig, PriceTier, describeWindows, tierAt } from './pricing/peak-window';
-import { ScrapeResult, scrapeDeepseek } from './pricing/deepseek-pricing';
+import { ScrapeResult, scrapeProvider, SCRAPERS, BLOCKED_SOURCES } from './pricing/scrapers';
 import { OfficialPriceSnapshot, OfficialPriceStore } from './pricing/official-price.store';
+import { ScrapedPrice } from './pricing/types';
 
 /** 四段计价（人民币 / 百万 token），与中转站价目表一致。 */
 export interface ModelPriceCny {
@@ -75,6 +76,13 @@ export interface PricingRuleView {
   peakConfig: PeakWindowConfig;
   /** 支持自动抓取价格的供应商 */
   scrapableProviders: string[];
+  /** 无法自动抓取的供应商 -> 原因（界面照实说明，不显示成故障） */
+  unscrapable: Array<{ provider: string; label: string; url: string; reason: string }>;
+}
+
+/** 金额保留 4 位小数：再多的位数在界面上只是噪声，且会让对账看起来有差异。 */
+function round4(value: number): number {
+  return Math.round(value * 10_000) / 10_000;
 }
 
 /**
@@ -175,12 +183,23 @@ export class ModelPricingService {
     snapshot: OfficialPriceSnapshot | null,
   ): { tiered: ModelPriceCnyTiered; source: 'official' | 'catalog' } | null {
     // 1) 官网抓取价（优先，且它带 peak/offpeak 两档）
-    const scraped = snapshot?.providers?.[provider]?.[model];
+    const scraped = this.findScraped(provider, model, snapshot);
     if (scraped && (scraped.peak.input > 0 || scraped.peak.output > 0)) {
+      // 供应商用美元报价时按汇率折算；人民币报价直接用，绝不二次换算。
+      const toCny = (value: number): number =>
+        scraped.currency === 'USD' ? round4(value * rate) : value;
       return {
         tiered: {
-          peak: { input: scraped.peak.input, output: scraped.peak.output, cacheRead: scraped.peak.cacheRead },
-          offpeak: { input: scraped.offpeak.input, output: scraped.offpeak.output, cacheRead: scraped.offpeak.cacheRead },
+          peak: {
+            input: toCny(scraped.peak.input),
+            output: toCny(scraped.peak.output),
+            cacheRead: toCny(scraped.peak.cacheRead),
+          },
+          offpeak: {
+            input: toCny(scraped.offpeak.input),
+            output: toCny(scraped.offpeak.output),
+            cacheRead: toCny(scraped.offpeak.cacheRead),
+          },
         },
         source: 'official',
       };
@@ -197,13 +216,36 @@ export class ModelPricingService {
     if (catalogModel.officialUsd) {
       // 海外供应商：美元价 × 汇率，不分峰谷（两档同价）
       const usd = catalogModel.officialUsd;
-      const round4 = (value: number): number => Math.round(value * 10_000) / 10_000;
       const tier: ModelPriceCnyTier = {
         input: round4(usd.input * rate),
         output: round4(usd.output * rate),
         cacheRead: round4(usd.cacheRead * rate),
       };
       return { tiered: { peak: { ...tier }, offpeak: { ...tier } }, source: 'catalog' };
+    }
+    return null;
+  }
+
+  /**
+   * 在官网快照里找某个模型的抓取价。
+   *
+   * 先按目录模型 id 精确匹配，再按抓取记录里的 `catalogModel` 反查，最后按
+   * 供应商原始模型名匹配。三层都要：供应商页面的写法（`claude-opus-5-5` 展示名、
+   * `GLM-5.3` 大写）与目录 id 不总是一致，只匹配一层会让价格静默落回目录价。
+   */
+  private findScraped(
+    provider: string,
+    model: string,
+    snapshot: OfficialPriceSnapshot | null,
+  ): ScrapedPrice | null {
+    const models = snapshot?.providers?.[provider];
+    if (!models) return null;
+    const direct = models[model];
+    if (direct) return direct;
+    for (const candidate of Object.values(models)) {
+      if (candidate.catalogModel === model) return candidate;
+      // 大小写不敏感兜底：GLM-5.3 vs glm-5.3
+      if (candidate.catalogModel?.toLowerCase() === model.toLowerCase()) return candidate;
     }
     return null;
   }
@@ -237,7 +279,6 @@ export class ModelPricingService {
         (officialCny.peak.input !== officialCny.offpeak.input || officialCny.peak.output !== officialCny.offpeak.output),
     );
 
-    const round4 = (value: number): number => Math.round(value * 10_000) / 10_000;
     const converted: ModelPriceCny | null = officialCny
       ? {
           input: round4(officialCny[tier].input),
@@ -391,6 +432,12 @@ export class ModelPricingService {
       peakWindows: describeWindows(peakConfig),
       peakConfig,
       scrapableProviders: [...(await this.officialPrices.scrapableProviders())],
+      unscrapable: BLOCKED_SOURCES.map((item) => ({
+        provider: item.provider,
+        label: providerLabel(item.provider),
+        url: item.url,
+        reason: item.reason,
+      })),
     };
   }
 
@@ -449,18 +496,75 @@ export class ModelPricingService {
     }));
   }
 
-  /** 手动触发一次官网抓取（界面「立即抓取」按钮）。 */
-  async refreshOfficialPrices(provider: string): Promise<ScrapeResult> {
-    if (provider !== 'deepseek') {
-      throw new Error(`暂不支持抓取 ${provider} 的官方价格`);
+  /**
+   * 手动触发一次官网抓取（界面「立即抓取」按钮）。
+   * @param provider 指定供应商；传空则抓取全部支持的供应商
+   */
+  async refreshOfficialPrices(provider?: string): Promise<ScrapeResult[]> {
+    const targets = provider ? [provider] : [...SCRAPERS.map((scraper) => scraper.provider)];
+    const results: ScrapeResult[] = [];
+    const failures: Array<{ provider: string; message: string }> = [];
+
+    // 逐个抓：一个供应商的页面结构变化不能连累其他供应商的抓取。
+    for (const target of targets) {
+      try {
+        const result = await scrapeProvider(target);
+        if (!result.prices.length) {
+          failures.push({ provider: target, message: result.warning ?? '未解析到任何价格' });
+          continue;
+        }
+        results.push(result);
+      } catch (error) {
+        failures.push({
+          provider: target,
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
     }
-    const result = await scrapeDeepseek();
-    if (!result.prices.length) {
-      throw new Error(result.warning ?? '未解析到任何价格');
+
+    if (results.length) {
+      await this.officialPrices.saveMany(results);
+      this.logger.log(
+        `已抓取官方价格：${results
+          .map((result) => `${result.provider}(${result.prices.length})`)
+          .join('、')}`,
+      );
     }
-    await this.officialPrices.save(result);
-    this.logger.log(`已抓取 ${provider} 官方价格：${result.prices.map((price) => price.model).join('、')}`);
-    return result;
+    for (const failure of failures) {
+      await this.officialPrices.recordFailure(failure.provider, failure.message);
+    }
+
+    // 指定单个供应商时，失败必须抛出去让界面看到原因，而不是静默返回空。
+    if (provider && !results.length) {
+      throw new Error(failures[0]?.message ?? '未解析到任何价格');
+    }
+    return results;
+  }
+
+  /** 一轮定时抓取：抓取所有支持的供应商，返回成功与失败清单。 */
+  async refreshAllOfficialPrices(): Promise<{
+    succeeded: ScrapeResult[];
+    failed: Array<{ provider: string; message: string }>;
+  }> {
+    const succeeded: ScrapeResult[] = [];
+    const failed: Array<{ provider: string; message: string }> = [];
+    for (const scraper of SCRAPERS) {
+      try {
+        const result = await scrapeProvider(scraper.provider);
+        if (!result.prices.length) {
+          failed.push({ provider: scraper.provider, message: result.warning ?? '未解析到任何价格' });
+          await this.officialPrices.recordFailure(scraper.provider, result.warning ?? '未解析到任何价格');
+          continue;
+        }
+        succeeded.push(result);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        failed.push({ provider: scraper.provider, message });
+        await this.officialPrices.recordFailure(scraper.provider, message);
+      }
+    }
+    if (succeeded.length) await this.officialPrices.saveMany(succeeded);
+    return { succeeded, failed };
   }
 
   /** 官网价格快照（界面展示抓取时间与来源）。 */

@@ -122,18 +122,23 @@ export class AiController {
     return this.pricingService.officialSnapshot();
   }
 
-  /** 立即抓取某供应商官网价格（失败会报错，不会写入半份数据） */
+  /** 立即抓取官网价格（不传 provider 则抓取全部支持的供应商） */
   @Capability('settings.write')
   @Post('official-prices/refresh')
   async refreshOfficialPrices(@Body() body: { provider?: string }) {
-    const provider = String(body?.provider ?? 'deepseek');
-    const result = await this.pricingService.refreshOfficialPrices(provider);
+    const provider = body?.provider ? String(body.provider) : undefined;
+    const results = await this.pricingService.refreshOfficialPrices(provider);
     return {
-      provider: result.provider,
-      sourceUrl: result.sourceUrl,
-      fetchedAt: result.fetchedAt,
-      models: result.prices,
-      warning: result.warning ?? null,
+      fetchedAt: new Date().toISOString(),
+      providers: results.map((result) => ({
+        provider: result.provider,
+        sourceUrl: result.sourceUrl,
+        fetchedAt: result.fetchedAt,
+        count: result.prices.length,
+        models: result.prices,
+        warning: result.warning ?? null,
+      })),
+      warning: results.length ? null : '未抓取到任何价格',
     };
   }
 

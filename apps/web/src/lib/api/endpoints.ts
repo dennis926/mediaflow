@@ -37,7 +37,7 @@ import type {
   OverviewData,
   Paged,
   ParseResult,
-  ModelPriceCnyTierView,
+  OfficialPriceRefreshResultView,
   OfficialPriceSnapshotView,
   PricingRulesView,
   ProviderConfigItem,
@@ -204,15 +204,9 @@ export const aiApi = {
   pricingRules: () => api.get<PricingRulesView>('/ai/pricing-rules'),
   /** 官网价格快照（最近一次抓取的时间、来源与各模型峰谷价） */
   officialPrices: () => api.get<OfficialPriceSnapshotView | null>('/ai/official-prices'),
-  /** 立即抓取供应商官网价格 */
-  refreshOfficialPrices: (provider = 'deepseek') =>
-    api.post<{
-      provider: string;
-      sourceUrl: string;
-      fetchedAt: string;
-      models: Array<{ model: string; version?: string; peak: ModelPriceCnyTierView; offpeak: ModelPriceCnyTierView }>;
-      warning: string | null;
-    }>('/ai/official-prices/refresh', { provider }),
+  /** 立即抓取官网价格；不传 provider 则抓取全部支持的供应商 */
+  refreshOfficialPrices: (provider?: string) =>
+    api.post<OfficialPriceRefreshResultView>('/ai/official-prices/refresh', provider ? { provider } : {}),
   generations: (query: { page?: number; pageSize?: number; taskType?: string }) =>
     api.get<Paged<AiGeneration>>('/ai/generations', { ...query }),
 };

@@ -215,3 +215,58 @@
   background: var(--mf-color-success-soft, rgba(16, 185, 129, 0.14));
   color: var(--mf-color-success, #047857);
 }
+
+/* 抓取状态：每个供应商一行，让"哪家抓到了、哪家没抓到"一眼可见 */
+.scrapeGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: var(--mf-space-3);
+  padding: var(--mf-space-3) var(--mf-space-4);
+  border-top: 1px solid var(--mf-color-border-subtle);
+}
+
+.scrapeItem {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: var(--mf-space-3);
+  border: 1px solid var(--mf-color-border-subtle);
+  border-radius: var(--mf-radius-md);
+  background: var(--mf-color-surface-raised);
+}
+
+.scrapeItemFailed {
+  border-color: var(--mf-color-danger, #dc2626);
+  background: var(--mf-color-danger-soft, rgba(220, 38, 38, 0.06));
+}
+
+.scrapeHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--mf-space-2);
+}
+
+.scrapeName {
+  font-size: var(--mf-font-size-sm);
+  font-weight: var(--mf-font-weight-medium);
+  color: var(--mf-color-text-primary);
+}
+
+.scrapeMeta {
+  font-size: var(--mf-font-size-xs);
+  color: var(--mf-color-text-tertiary);
+  line-height: 1.5;
+  word-break: break-all;
+}
+
+.scrapeReason {
+  font-size: var(--mf-font-size-xs);
+  color: var(--mf-color-danger, #dc2626);
+  line-height: 1.5;
+}
+
+.scrapeCurrency {
+  font-size: var(--mf-font-size-xs);
+  color: var(--mf-color-text-tertiary);
+}
