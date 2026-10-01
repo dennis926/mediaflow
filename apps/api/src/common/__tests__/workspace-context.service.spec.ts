@@ -45,12 +45,13 @@ describe('工作区作用域（多工作区隔离）', () => {
     expect(outside.workspaceId).toBe(DEFAULT_WORKSPACE.id);
   });
 
-  it('默认工作区只查一次（缓存只用于后台任务）', async () => {
+  it('默认工作区每次回退都重新读取（不缓存，避免工作区被删除/改名后作用域陈旧）', async () => {
     const { service, workspaces } = buildService();
 
     await service.current();
     await service.current();
 
-    expect(workspaces.find).toHaveBeenCalledTimes(1);
+    // 每次调用各查一次：后台任务频率很低（分钟级），一次索引查询远比"作用域指向已删除工作区"划算
+    expect(workspaces.find).toHaveBeenCalledTimes(2);
   });
 });

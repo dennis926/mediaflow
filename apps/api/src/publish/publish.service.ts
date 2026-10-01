@@ -247,8 +247,20 @@ export class PublishService {
     return { items, meta: { page, pageSize, total, totalPages: Math.ceil(total / pageSize) || 1 } };
   }
 
+  /**
+   * Load one task inside the current workspace scope.
+   *
+   * The workspace filter is mandatory: without it any workspace could read (and then
+   * mutate) another workspace's tasks by guessing an id — the cross-tenant leak that
+   * test/cross-workspace.e2e.spec.ts now pins down. Background callers are safe because
+   * the worker wraps every message in runInWorkspaceScope() before calling in.
+   */
   async get(id: string): Promise<PublishTask> {
-    const task = await this.tasks.findOne({ where: { id }, relations: { content: true, contentVariant: true } });
+    const scope = await this.workspaceContext.current();
+    const task = await this.tasks.findOne({
+      where: { id, workspaceId: scope.workspaceId },
+      relations: { content: true, contentVariant: true },
+    });
     if (!task) throw new NotFoundException('发布任务不存在');
     return task;
   }
@@ -517,7 +529,7 @@ export class PublishService {
   /** 人工发布结果通报（站内通知；失败时用 warning 级，便于队列页顶部提示）。 */
   private async notifyManualOutcome(task: PublishTask, ok: boolean, detail: string | null): Promise<void> {
     try {
-      const content = await this.contents.findOne({ where: { id: task.contentId } });
+      const content = await this.contents.findOne({ where: { id: task.contentId, workspaceId: task.workspaceId } });
       await this.notifications.notify({
         title: ok ? `人工发布已回填：${content?.title ?? '内容'}` : `人工发布失败：${content?.title ?? '内容'}`,
         body: ok
@@ -534,7 +546,8 @@ export class PublishService {
   }
 
   async requeue(id: string, actor: PublishActor): Promise<PublishTask> {
-    const task = await this.tasks.findOne({ where: { id } });
+    const scope = await this.workspaceContext.current();
+    const task = await this.tasks.findOne({ where: { id, workspaceId: scope.workspaceId } });
     if (!task) throw new NotFoundException('发布任务不存在');
     if (task.status === PublishTaskStatus.Published) {
       throw new BadRequestException('已发布的任务不能重排');
@@ -581,11 +594,16 @@ export class PublishService {
 
   /** Builds the platform payload, including the mandatory AI disclosure suffix. */
   async buildPayload(task: PublishTask): Promise<PublishPayload> {
-    const content = await this.contents.findOne({ where: { id: task.contentId } });
+    /**
+     * Read the content/variant inside the task's own workspace. The worker already runs
+     * under the task's scope, but tying the lookup to task.workspaceId keeps this method
+     * correct no matter which scope the caller is in.
+     */
+    const content = await this.contents.findOne({ where: { id: task.contentId, workspaceId: task.workspaceId } });
     if (!content) throw new Error('内容不存在或已被删除');
 
     const variant = task.contentVariantId
-      ? await this.variants.findOne({ where: { id: task.contentVariantId } })
+      ? await this.variants.findOne({ where: { id: task.contentVariantId, contentId: task.contentId } })
       : null;
 
     const aiFlagType = variant?.aiFlagType ?? content.aiFlagType;
@@ -688,9 +706,13 @@ export class PublishService {
     patch: Record<string, unknown>,
     rest: Record<string, unknown> = {},
   ): Promise<void> {
-    const current = await this.tasks.findOne({ where: { id: taskId }, select: ['id', 'extra'] });
+    const scope = await this.workspaceContext.current();
+    const current = await this.tasks.findOne({
+      where: { id: taskId, workspaceId: scope.workspaceId },
+      select: ['id', 'extra'],
+    });
     const merged: Record<string, unknown> = { ...(current?.extra ?? {}), ...patch };
-    await this.tasks.update({ id: taskId }, { ...rest, extra: merged } as never);
+    await this.tasks.update({ id: taskId, workspaceId: scope.workspaceId }, { ...rest, extra: merged } as never);
   }
 
   async markScheduled(task: PublishTask): Promise<void> {
@@ -759,7 +781,8 @@ export class PublishService {
    * flag so plugin platforms can be pushed again as well.
    */
   async retry(id: string, actor: PublishActor): Promise<PublishTask> {
-    const task = await this.tasks.findOne({ where: { id } });
+    const scope = await this.workspaceContext.current();
+    const task = await this.tasks.findOne({ where: { id, workspaceId: scope.workspaceId } });
     if (!task) throw new NotFoundException('发布任务不存在');
 
     /**
@@ -852,7 +875,8 @@ export class PublishService {
    * (the worker may already have called the platform) and published ones are final.
    */
   async cancel(id: string, actor: PublishActor): Promise<PublishTask> {
-    const task = await this.tasks.findOne({ where: { id } });
+    const scope = await this.workspaceContext.current();
+    const task = await this.tasks.findOne({ where: { id, workspaceId: scope.workspaceId } });
     if (!task) throw new NotFoundException('发布任务不存在');
 
     const cancelable: PublishTaskStatus[] = [

@@ -8,6 +8,9 @@ FILE="$BACKUP_DIR/mediaflow_${STAMP}.sql.gz"
 TMP=$(mktemp /tmp/mediaflow_backup_XXXX.sql)
 trap 'rm -f "$TMP"' EXIT
 mkdir -p "$BACKUP_DIR"
+# 备份含全库数据，必须只有 root 可读：显式设 umask，不依赖调用方（cron 下 umask 是 022，
+# 曾导致备份落到 644 —— 部署预检会因此失败）
+umask 077
 export PGPASSWORD="${DB_PASSWORD:-mediaflow_dev}"
 
 # 先导出为明文临时文件，校验通过后再压缩，避免写出坏备份

@@ -1,4 +1,5 @@
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import { MustChangePasswordGate } from './components/MustChangePasswordGate';
 import { TabBar } from './components/TabBar';
 import { ApprovalPage } from './pages/ApprovalPage';
 import { DashboardPage } from './pages/DashboardPage';
@@ -11,7 +12,7 @@ import { getToken } from './lib/api/client';
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const location = useLocation();
   if (!getToken()) return <Navigate to="/login" replace state={{ from: location.pathname }} />;
-  return <>{children}</>;
+  return <MustChangePasswordGate>{children}</MustChangePasswordGate>;
 }
 
 export function App() {

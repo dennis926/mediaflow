@@ -166,6 +166,20 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
     placeholder: '7d',
   },
   {
+    key: 'AUTH_FORCE_PASSWORD_CHANGE',
+    group: 'permissions',
+    label: '临时密码强制改密',
+    description:
+      '开启后（默认）：管理员重置密码或邀请生成的临时密码，必须先改密才能使用其它功能，服务端强制；关闭则只在界面上提示',
+    secret: false,
+    envKey: 'AUTH_FORCE_PASSWORD_CHANGE',
+    placeholder: 'true',
+    options: [
+      { value: 'true', label: '强制（推荐）' },
+      { value: 'false', label: '仅提示' },
+    ],
+  },
+  {
     key: 'ROLE_LABELS',
     group: 'permissions',
     label: '角色显示名（JSON）',

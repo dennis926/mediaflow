@@ -308,6 +308,11 @@ export class UserService {
     }
 
     await this.users.update({ id: user.id }, { passwordHash: await bcrypt.hash(dto.newPassword, 10), mustChangePassword: false });
+    /**
+     * 会话快照缓存 30 秒，里面带着 mustChangePassword：不主动失效的话，
+     * 用户改完密码仍会被守卫拦最多 30 秒（看起来像"改了也没用"）。
+     */
+    await this.sessions.invalidate(user.id);
     await this.record('user.change_password', user.id, { id: user.id, name: user.displayName }, { self: true });
     return { success: true };
   }

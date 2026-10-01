@@ -148,6 +148,11 @@ export interface AuthRuntimeConfig {
   accessExpires: string;
   /** 刷新令牌有效期（如 7d） */
   refreshExpires: string;
+  /**
+   * 临时密码是否强制先改密：为 true 时，拿到管理员发放的临时密码后，
+   * 除了改密/读自己这几条白名单接口外，其它接口一律 403（服务端强制，不只是前端提示）。
+   */
+  forcePasswordChange: boolean;
 }
 
 export interface MediaRuntimeConfig {
@@ -337,7 +342,11 @@ export const DEFAULT_ROLE_LABELS_RUNTIME: Record<string, string> = {
   viewer: '只读',
 };
 
-export const DEFAULT_AUTH_RUNTIME: AuthRuntimeConfig = { accessExpires: '2h', refreshExpires: '7d' };
+export const DEFAULT_AUTH_RUNTIME: AuthRuntimeConfig = {
+  accessExpires: '2h',
+  refreshExpires: '7d',
+  forcePasswordChange: true,
+};
 
 export const DEFAULT_MEDIA_RUNTIME: MediaRuntimeConfig = {
   storageDir: 'uploads/media',
@@ -647,6 +656,7 @@ function buildRuntimeConfig(flat: Record<string, string | undefined>, onError?: 
   built.auth = {
     accessExpires: text(flat.AUTH_ACCESS_EXPIRES, DEFAULT_AUTH_RUNTIME.accessExpires),
     refreshExpires: text(flat.AUTH_REFRESH_EXPIRES, DEFAULT_AUTH_RUNTIME.refreshExpires),
+    forcePasswordChange: bool(flat.AUTH_FORCE_PASSWORD_CHANGE, DEFAULT_AUTH_RUNTIME.forcePasswordChange),
   };
 
   const parsedMatrix = parseJson<Record<string, string[]>>(flat.PERMISSION_MATRIX, DEFAULT_PERMISSION_MATRIX_RUNTIME, onError);

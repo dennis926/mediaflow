@@ -1,4 +1,5 @@
 import { existsSync, readdirSync, statSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -11,8 +12,13 @@ import { createHarness, e2eCredentialsReady, type E2eHarness } from './support/e
  * 每一个用例都同时校验 HTTP 状态、临时目录、最终目录与素材表四处状态。
  */
 const PREFIX = 'E2E上传边界';
-/** 上传临时目录（与运行时配置一致；默认 /tmp/mediaflow-upload）。 */
-const TEMP_DIR = process.env.MEDIA_TMP_DIR?.trim() || '/tmp/mediaflow-upload';
+/**
+ * 上传临时目录：必须与应用同款算法（media-upload.interceptor.ts 的 mediaTempDir()）。
+ * 注意 **不能硬编码 /tmp**：Node 的 os.tmpdir() 会跟随 TMPDIR，在设置了 TMPDIR 的环境里
+ * （例如本机 Hermes 把 TMPDIR 指到 /root/.hermes/cache/scratch）应用根本不会用 /tmp，
+ * 断言就会对着一个不存在的目录报 ENOENT。
+ */
+const TEMP_DIR = process.env.MEDIA_TMP_DIR?.trim() || join(tmpdir(), 'mediaflow-upload');
 const MEDIA_DIR = '/www/wwwroot/mediaflow/uploads/media';
 const CONCURRENT_LIMIT = 3;
 
@@ -152,6 +158,17 @@ describe.skipIf(!e2eCredentialsReady)('类别 5：上传边界', () => {
   });
 
   it('6. 临时目录与素材目录权限 700，上传结束后临时目录零残留', async () => {
+    /**
+     * 临时目录只在真正有上传时才由拦截器创建（mkdirSync mode 0700），
+     * 所以这里先做一次真实上传再断言权限 —— 否则用例会在"目录恰好不存在"时
+     * 直接 ENOENT 报错（与业务无关的假失败）。
+     */
+    const response = await upload(PNG_OK, 'e2e-perm.png', { groupName: 'E2E上传边界' }).expect(201);
+    const id = response.body.data.id as string;
+    createdIds.push(id);
+    await removeAsset(id);
+    createdIds.splice(createdIds.indexOf(id), 1);
+
     expect(statSync(TEMP_DIR).mode & 0o777).toBe(0o700);
     expect(statSync(MEDIA_DIR).mode & 0o777).toBe(0o700);
     expect(tempFiles()).toHaveLength(0);

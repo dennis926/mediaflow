@@ -23,6 +23,11 @@ export interface AuthSessionSnapshot {
    * 守卫据此对非生命周期接口返回 404。
    */
   workspaceStatus: WorkspaceStatus;
+  /**
+   * 是否持有未修改的临时密码（管理员重置/邀请生成）。守卫据此强制先改密（P1-4）。
+   * 老缓存条目没有该字段 → 按 false 处理，最坏情况只是这一轮不拦截，30 秒后自动纠正。
+   */
+  mustChangePassword?: boolean;
 }
 
 /**
@@ -87,6 +92,7 @@ export class AuthSessionService {
       exists: true,
       // 工作区行不存在 = 已被永久清除：对业务接口等同"已软删"（404）
       workspaceStatus: (workspace?.status ?? 'soft_deleted') as WorkspaceStatus,
+      mustChangePassword: user.mustChangePassword,
     };
   }
 

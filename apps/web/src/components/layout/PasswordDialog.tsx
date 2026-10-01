@@ -1,6 +1,6 @@
 'use client';
 
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { ApiError } from '../../lib/api/client';
 import { authApi } from '../../lib/api/endpoints';
@@ -9,7 +9,18 @@ import { Button } from '../ui/Button';
 import { Dialog } from '../ui/Dialog';
 import { Input } from '../ui/Field';
 
-export function PasswordDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+export interface PasswordDialogProps {
+  open: boolean;
+  onClose: () => void;
+  /**
+   * 强制改密模式（P1-4）：服务端会拦住临时密码的其它请求，这里同步把弹窗做成
+   * 不可关闭（无遮罩点击、无 Esc、无右上角关闭按钮），避免用户关掉后满屏 403。
+   */
+  required?: boolean;
+}
+
+export function PasswordDialog({ open, onClose, required = false }: PasswordDialogProps) {
+  const queryClient = useQueryClient();
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -22,6 +33,11 @@ export function PasswordDialog({ open, onClose }: { open: boolean; onClose: () =
       setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
+      /**
+       * 刷新自己的身份：守卫读的是服务端会话快照，改密后 mustChangePassword 变为 false，
+       * 重新拉取 /auth/me 才能让强制弹窗真正消失。
+       */
+      void queryClient.invalidateQueries({ queryKey: ['auth', 'me'] });
     },
     onError: (error: unknown) =>
       setMessage({ tone: 'danger', text: error instanceof ApiError ? error.message : '修改失败' }),
@@ -33,16 +49,19 @@ export function PasswordDialog({ open, onClose }: { open: boolean; onClose: () =
   return (
     <Dialog
       open={open}
-      title="修改密码"
+      dismissible={!required}
+      title={required ? '请先修改初始密码' : '修改密码'}
       onClose={() => {
         setMessage(null);
         onClose();
       }}
       footer={
         <>
-          <Button variant="secondary" onClick={onClose}>
-            关闭
-          </Button>
+          {required ? null : (
+            <Button variant="secondary" onClick={onClose}>
+              关闭
+            </Button>
+          )}
           <Button
             loading={change.isPending}
             disabled={!currentPassword || !newPassword || mismatch || tooShort}
@@ -53,6 +72,9 @@ export function PasswordDialog({ open, onClose }: { open: boolean; onClose: () =
         </>
       }
     >
+      {required && !message ? (
+        <Banner tone="warning">你正在使用管理员分配的临时密码，修改后才能使用其它功能。</Banner>
+      ) : null}
       {message ? <Banner tone={message.tone}>{message.text}</Banner> : null}
       <Input
         label="当前密码"

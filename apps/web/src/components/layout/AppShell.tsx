@@ -98,6 +98,15 @@ export function AppShell({ children }: { children: ReactNode }) {
     enabled: ready,
   });
 
+  /**
+   * 临时密码强制改密（P1-4）：服务端会拦住其它接口，所以前端直接把改密弹窗顶到最前，
+   * 而不是只在顶部显示一条可忽略的提示。
+   */
+  const mustChangePassword = user?.mustChangePassword === true;
+  useEffect(() => {
+    if (mustChangePassword) setPasswordOpen(true);
+  }, [mustChangePassword]);
+
   const signOut = (): void => {
     // 先把刷新令牌交给服务端加黑名单（幂等、失败不阻塞）；再做本地清除
     const refreshToken = getRefreshToken() ?? undefined;
@@ -149,7 +158,11 @@ export function AppShell({ children }: { children: ReactNode }) {
         </div>
       ) : null}
 
-      <PasswordDialog open={passwordOpen} onClose={() => setPasswordOpen(false)} />
+      <PasswordDialog
+        open={passwordOpen}
+        required={mustChangePassword}
+        onClose={() => setPasswordOpen(false)}
+      />
 
       <div className={styles.main}>
         <header className={styles.topbar}>

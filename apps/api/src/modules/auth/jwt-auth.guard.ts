@@ -13,10 +13,34 @@ import { Request } from 'express';
 import { AuthUser } from './auth.types';
 import { AuthSessionService } from './auth-session.service';
 import { IS_PUBLIC_KEY } from './public.decorator';
+import { SKIP_PASSWORD_CHANGE_KEY } from './skip-password-change.decorator';
 import { WORKSPACE_LIFECYCLE_KEY } from './workspace-lifecycle.decorator';
+import { runtime } from '../settings/runtime-config';
 
 /** 只读方法：归档态下仍然放行（查看历史，但不能改动） */
 const READ_ONLY_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+
+/**
+ * 持临时密码时必须仍然可用的路由（P1-4）。改密本身、读自己、登出/续期、切换工作区、
+ * 能力点、站点配置与健康检查——否则用户会被锁死在"必须改密"的死循环里。
+ */
+const PASSWORD_CHANGE_ALLOWLIST: ReadonlyArray<{ method: string; pattern: RegExp }> = [
+  { method: 'POST', pattern: /^\/auth\/change-password$/ },
+  { method: 'POST', pattern: /^\/auth\/logout$/ },
+  { method: 'POST', pattern: /^\/auth\/refresh$/ },
+  { method: 'POST', pattern: /^\/auth\/switch-workspace$/ },
+  { method: 'GET', pattern: /^\/auth\/me$/ },
+  { method: 'GET', pattern: /^\/auth\/capabilities$/ },
+  { method: 'GET', pattern: /^\/public\// },
+  { method: 'GET', pattern: /^\/health$/ },
+];
+
+/** Normalises the express path to the in-controller route (strips a global prefix and the query string). */
+function routePath(request: Request): string {
+  const raw = request.path || request.url || '/';
+  const path = raw.split('?')[0];
+  return path.startsWith('/api/') ? path.slice(4) : path;
+}
 
 interface JwtPayload {
   sub: string;
@@ -82,6 +106,27 @@ export class JwtAuthGuard implements CanActivate {
           }
         }
 
+        /**
+         * 临时密码强制改密（P1-4）。此前 `mustChangePassword` 被硬编码成 false，
+         * 前端提示可以绕过：管理员重置密码后，用户不修改也能继续用全部功能。
+         * 这里在服务端拦住（403），只放行改密本身与读自己等白名单路由。
+         */
+        const skipPasswordChange = this.reflector.getAllAndOverride<boolean>(SKIP_PASSWORD_CHANGE_KEY, [
+          context.getHandler(),
+          context.getClass(),
+        ]);
+        if (
+          runtime().auth.forcePasswordChange &&
+          session.mustChangePassword === true &&
+          !isPublic &&
+          !skipPasswordChange &&
+          !PASSWORD_CHANGE_ALLOWLIST.some(
+            (rule) => rule.method === request.method && rule.pattern.test(routePath(request)),
+          )
+        ) {
+          throw new ForbiddenException('请先修改初始密码后再使用其它功能');
+        }
+
         const tokenRoles = payload.roles as AuthUser['roles'];
         const drifted = tokenRoles.length !== session.roles.length
           || session.roles.some((role) => !tokenRoles.includes(role));
@@ -104,7 +149,7 @@ export class JwtAuthGuard implements CanActivate {
           workspaceId: payload.workspaceId,
           roles: drifted ? session.roles : tokenRoles,
           isSuperAdmin: payload.isSuperAdmin,
-          mustChangePassword: false,
+          mustChangePassword: session.mustChangePassword === true,
         };
         return true;
       } catch (error) {
