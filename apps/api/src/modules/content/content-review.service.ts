@@ -149,7 +149,7 @@ export class ContentReviewService {
     const scope = await this.workspaceContext.current();
     const review = await this.reviews.findOne({ where: { id, workspaceId: scope.workspaceId } });
     if (!review) throw new NotFoundException('审核记录不存在');
-    const content = await this.contents.findOne({ where: { id: review.contentId } });
+    const content = await this.contents.findOne({ where: { id: review.contentId } });  // tenant-scope-ok: 评审行先按 workspaceId 取到，此处按 review.contentId 取内容
     return Object.assign(review, { contentTitle: content?.title });
   }
 
@@ -213,7 +213,7 @@ export class ContentReviewService {
     const saved = await this.dataSource.transaction(async (manager) => {
       await manager.update(Content, { id: review.contentId }, { status: nextStatus });
       // 记录审批时刻的内容版本（updatedAt），供发布闸门判断"审批后是否又被改动"
-      const after = await manager.findOne(Content, { where: { id: review.contentId }, select: ['id', 'updatedAt'] });
+      const after = await manager.findOne(Content, { where: { id: review.contentId }, select: ['id', 'updatedAt'] });  // tenant-scope-ok: 评审行先按 workspaceId 取到，此处按 review.contentId 取内容
       review.contentUpdatedAt = after?.updatedAt ?? new Date();
       return manager.save(review);
     });
@@ -236,7 +236,7 @@ export class ContentReviewService {
       },
     });
 
-    const content = await this.contents.findOne({ where: { id: review.contentId } });
+    const content = await this.contents.findOne({ where: { id: review.contentId } });  // tenant-scope-ok: 评审行先按 workspaceId 取到，此处按 review.contentId 取内容
     if (content) {
 
       await this.notifications.notify({

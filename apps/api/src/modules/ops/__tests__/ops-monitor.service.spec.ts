@@ -33,27 +33,41 @@ function build(options: {
     set: vi.fn(async () => (options.setResult === undefined ? 'OK' : options.setResult)),
   } as unknown as Redis;
 
+  /**
+   * 发布失败率与 AI 配额现在按工作区拆分（多工作区下"一个工作区把配额用光"不该
+   * 让另一个工作区收到告警），查询由 getRawOne 改为 groupBy + getRawMany。
+   * 断言不变：这里把单工作区样本还原成一行，验证的仍是阈值边界。
+   */
   const tasksRepo = {
-    createQueryBuilder: () => ({
-      select: () => ({
-        addSelect: () => ({
-          where: () => ({
-            getRawOne: async () => ({
-              total: String((options.tasks as { total?: number })?.total ?? 0),
-              failed: String((options.tasks as { failed?: number })?.failed ?? 0),
-            }),
-          }),
-        }),
-      }),
-    }),
+    createQueryBuilder: () => {
+      const chain = {
+        select: () => chain,
+        addSelect: () => chain,
+        where: () => chain,
+        groupBy: () => chain,
+        getRawMany: async () => [
+          {
+            workspaceId: 'w1',
+            total: String((options.tasks as { total?: number })?.total ?? 0),
+            failed: String((options.tasks as { failed?: number })?.failed ?? 0),
+          },
+        ],
+      };
+      return chain;
+    },
   } as unknown as Repository<PublishTask>;
 
   const generationsRepo = {
-    createQueryBuilder: () => ({
-      select: () => ({
-        where: () => ({ getRawOne: async () => ({ tokens: options.tokens ?? '0' }) }),
-      }),
-    }),
+    createQueryBuilder: () => {
+      const chain = {
+        select: () => chain,
+        addSelect: () => chain,
+        where: () => chain,
+        groupBy: () => chain,
+        getRawMany: async () => [{ workspaceId: 'w1', tokens: options.tokens ?? '0' }],
+      };
+      return chain;
+    },
   } as unknown as Repository<AiGeneration>;
 
   const notify = vi.fn(async (_input: unknown) => undefined);
@@ -69,7 +83,10 @@ function build(options: {
 afterEach(() => applyRuntimeConfig({}));
 
 const dataSourceStub = {
-  query: vi.fn(async () => [{ n: 0 }]),
+  // 跨工作区引用巡检要 count(*)，工作区名称映射要 id/name —— 按 SQL 内容区分返回
+  query: vi.fn(async (sql: string) =>
+    String(sql).includes('FROM workspaces') ? [{ id: 'w1', name: '默认工作区' }] : [{ n: 0 }],
+  ),
 } as unknown as import('typeorm').DataSource;
 
 describe('运行监控：六类阈值（第 6 项）', () => {

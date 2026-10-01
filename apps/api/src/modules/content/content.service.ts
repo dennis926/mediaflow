@@ -287,7 +287,7 @@ export class ContentService {
   /** 回滚到指定版本：先把当前状态留一份，再套用旧版本内容（审核结论会退回草稿）。 */
   async restoreRevision(contentId: string, revisionId: string, actor: ContentActor): Promise<Content> {
     const content = await this.get(contentId);
-    const revision = await this.revisions.findOne({ where: { id: revisionId, contentId } });
+    const revision = await this.revisions.findOne({ where: { id: revisionId, contentId } });  // tenant-scope-ok: 内容行先按 workspaceId 取到，此处按 contentId 级联子表
     if (!revision) throw new NotFoundException('历史版本不存在');
 
     await this.snapshot(content, actor, `恢复前留档（第 ${revision.version} 版）`);

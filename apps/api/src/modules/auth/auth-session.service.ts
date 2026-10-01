@@ -77,7 +77,7 @@ export class AuthSessionService {
   }
 
   private async load(userId: string, workspaceId: string): Promise<AuthSessionSnapshot> {
-    const user = await this.users.findOne({ where: { id: userId }, relations: { roles: true } });
+    const user = await this.users.findOne({ where: { id: userId }, relations: { roles: true } });  // tenant-scope-ok: 会话快照按 userId 读用户，登录阶段尚无工作区作用域
     if (!user) {
       this.logger.warn(`令牌指向的用户不存在（可能已被删除）：${userId}`);
       return { active: false, member: false, roles: [], exists: false, workspaceStatus: 'soft_deleted' };

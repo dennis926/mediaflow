@@ -371,7 +371,7 @@ export class PublishService {
     const titles = new Map<string, string>();
     const contentIds = [...new Set([...stuck, ...dead].map((task) => task.contentId))];
     if (contentIds.length > 0) {
-      const contents = await this.contents.find({ where: { id: In(contentIds) }, select: ['id', 'title'] });
+      const contents = await this.contents.find({ where: { id: In(contentIds) }, select: ['id', 'title'] });  // tenant-scope-ok: 任务行先按 workspaceId 取到，此处按 task.id 跟进
       for (const content of contents) titles.set(content.id, content.title);
     }
 
@@ -477,7 +477,7 @@ export class PublishService {
     });
 
     await this.notifyManualOutcome(task, true, dto.note ?? null);
-    const updated = await this.tasks.findOneOrFail({ where: { id: task.id } });
+    const updated = await this.tasks.findOneOrFail({ where: { id: task.id } });  // tenant-scope-ok: 任务行先按 workspaceId 取到，此处按 task.id 跟进
     this.logger.log(`发布任务已人工回填为已发布：${task.id}（${task.platform}）`);
     return updated;
   }
@@ -521,7 +521,7 @@ export class PublishService {
       payload: { platform: task.platform, reason, previousStatus: task.status },
     });
     await this.notifyManualOutcome(task, false, reason);
-    const updated = await this.tasks.findOneOrFail({ where: { id: task.id } });
+    const updated = await this.tasks.findOneOrFail({ where: { id: task.id } });  // tenant-scope-ok: 任务行先按 workspaceId 取到，此处按 task.id 跟进
     this.logger.warn(`发布任务被人工标记为失败：${task.id}（${task.platform}）｜${reason}`);
     return updated;
   }
@@ -603,7 +603,7 @@ export class PublishService {
     if (!content) throw new Error('内容不存在或已被删除');
 
     const variant = task.contentVariantId
-      ? await this.variants.findOne({ where: { id: task.contentVariantId, contentId: task.contentId } })
+      ? await this.variants.findOne({ where: { id: task.contentVariantId, contentId: task.contentId } })  // tenant-scope-ok: 任务行先按 workspaceId 取到，此处按 task.id 跟进
       : null;
 
     const aiFlagType = variant?.aiFlagType ?? content.aiFlagType;

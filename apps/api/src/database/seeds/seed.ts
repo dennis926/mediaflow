@@ -180,7 +180,7 @@ async function seedAdmin(dataSource: DataSource, scope: DefaultScope): Promise<s
   // 按邮箱判重：老安装的管理员 ID 与常量不同。
   const existing =
     (await userRepository.findOne({ where: { email: DEFAULT_ADMIN_EMAIL } })) ??
-    (await userRepository.findOne({ where: { id: DEFAULT_ADMIN_ID } }));
+    (await userRepository.findOne({ where: { id: DEFAULT_ADMIN_ID } }));  // tenant-scope-ok: 种子脚本无请求上下文，按 id 幂等查重
   if (existing) {
     logger.log(`管理员已存在，密码保持不变：${existing.email}`);
     return null;

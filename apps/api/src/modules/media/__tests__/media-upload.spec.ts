@@ -43,7 +43,14 @@ function buildService(options: { saveFails?: boolean } = {}) {
   const workspaceContext = {
     current: vi.fn(async () => ({ tenantId: 't-1', workspaceId: 'w-1' })),
   } as unknown as WorkspaceContextService;
-  const service = new MediaService(assets, workspaceContext, audit, quotaStub);
+  /**
+   * 素材链接签名替身：只回相对地址（不含签名参数），这样用例对 url 的断言
+   * 仍然验证"入库地址指向本站公开路由"这个原始意图。
+   */
+  const linksStub = {
+    sign: (storedName: string) => ({ url: `/api/public/media/${storedName}`, expiresAt: null }),
+  } as unknown as import('../media-link.service').MediaLinkService;
+  const service = new MediaService(assets, workspaceContext, audit, quotaStub, linksStub, {} as never);
   applyRuntimeConfig({ MEDIA_STORAGE_DIR: workDir, MEDIA_MAX_FILE_MB: '1', MEDIA_ALLOWED_TYPES: 'image/png,image/jpeg' });
   return { service, workDir, incomingDir, assets, audit };
 }

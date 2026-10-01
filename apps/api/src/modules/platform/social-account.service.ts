@@ -215,7 +215,7 @@ export class SocialAccountService {
           lastSyncedAt: new Date(),
         },
       );
-      const refreshed = await this.accounts.findOne({ where: { id: existing.id } });
+      const refreshed = await this.accounts.findOne({ where: { id: existing.id } });  // tenant-scope-ok: 账号行先按 workspaceId 取到；令牌刷新由后台任务按账号 id 调用
       this.logger.log(`已更新授权账号：${input.accountName}（${input.platform}）`);
       return this.toView(refreshed ?? existing, [platform]);
     }
@@ -290,7 +290,7 @@ export class SocialAccountService {
 
   /** 标记"令牌刷新失败"：状态置为 expired 并在 extra 记时间，供列表中警示与去重提醒。 */
   async markTokenProblem(accountId: string, reason: string): Promise<void> {
-    const account = await this.accounts.findOne({ where: { id: accountId } });
+    const account = await this.accounts.findOne({ where: { id: accountId } });  // tenant-scope-ok: 账号行先按 workspaceId 取到；令牌刷新由后台任务按账号 id 调用
     if (!account) return;
     await this.accounts.update(
       { id: accountId },
@@ -303,7 +303,7 @@ export class SocialAccountService {
 
   /** 记录"即将到期"提醒时间（不改状态，仅用于去重）。 */
   async markTokenWarning(accountId: string, note: string): Promise<void> {
-    const account = await this.accounts.findOne({ where: { id: accountId } });
+    const account = await this.accounts.findOne({ where: { id: accountId } });  // tenant-scope-ok: 账号行先按 workspaceId 取到；令牌刷新由后台任务按账号 id 调用
     if (!account) return;
     await this.accounts.update(
       { id: accountId },

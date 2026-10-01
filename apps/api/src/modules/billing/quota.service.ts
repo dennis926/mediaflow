@@ -96,7 +96,7 @@ export class QuotaService {
         order: { createdAt: 'DESC' },
       });
       if (subscription) {
-        const plan = await this.plans.findOne({ where: { id: subscription.planId } });
+        const plan = await this.plans.findOne({ where: { id: subscription.planId } });  // tenant-scope-ok: plans 为平台级字典（无 workspace_id 列）
         if (plan) return plan;
       }
     }

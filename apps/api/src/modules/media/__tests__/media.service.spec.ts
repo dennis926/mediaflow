@@ -19,7 +19,8 @@ const quotaStub = {
 } as unknown as QuotaService;
 
 describe('素材库文件类型校验', () => {
-  const service = new MediaService({} as never, {} as never, {} as never, quotaStub);
+  // 后两个替身：素材链接签名（MediaLinkService）与主密钥 HMAC（CryptoService），本组用例不涉及
+  const service = new MediaService({} as never, {} as never, {} as never, quotaStub, {} as never, {} as never);
 
   it('按文件头识别真实类型', () => {
     expect(detectMimeType(PNG)).toBe('image/png');

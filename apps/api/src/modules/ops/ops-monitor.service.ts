@@ -23,6 +23,22 @@ export type MonitorCheckKey =
   // B0.4 第 5 步遗留的巡检项：跨工作区引用必须为 0（见 RUNBOOK-purge演练.md §7.4）
   | 'cross_workspace_refs';
 
+/**
+ * 检查口径：
+ * - platform：平台级指标（队列、磁盘、登录失败），跨工作区合计本来就是正确的口径；
+ * - workspace：业务指标（发布失败率、AI 配额），必须按工作区看——
+ *   否则一个工作区把配额用光会让另一个工作区收到告警，且数字对不上自己的用量。
+ */
+export type MonitorScope = 'platform' | 'workspace';
+
+/** 按工作区拆分的观测值（仅 workspace 口径的检查提供）。 */
+export interface MonitorBreakdown {
+  workspaceId: string;
+  workspaceName: string;
+  current: number;
+  triggered: boolean;
+}
+
 export interface MonitorCheck {
   key: MonitorCheckKey;
   label: string;
@@ -37,6 +53,10 @@ export interface MonitorCheck {
   /** 排查入口（站内页面直链） */
   link: string;
   checkedAt: string;
+  /** 口径：平台级 or 工作区级（多工作区下决定数字怎么读） */
+  scope: MonitorScope;
+  /** 工作区级检查按工作区拆分的明细（多工作区时前端可展开看是谁命中） */
+  byWorkspace?: MonitorBreakdown[];
 }
 
 export interface MonitorRunResult {
@@ -108,6 +128,7 @@ export class OpsMonitorService {
       threshold,
       unit: '条',
       triggered: current > threshold,
+      scope: 'platform',
       level: 'warning',
       detail:
         current > threshold
@@ -131,6 +152,7 @@ export class OpsMonitorService {
       threshold: thresholdSeconds,
       unit: '秒',
       triggered,
+      scope: 'platform',
       level: 'error',
       detail:
         idleMs === null
@@ -143,34 +165,55 @@ export class OpsMonitorService {
     };
   }
 
-  /** 3. 近 1 小时发布失败率 */
+  /** 3. 近 1 小时发布失败率（按工作区拆分，避免一个工作区的问题算到别人头上） */
   async checkPublishFailureRate(): Promise<MonitorCheck> {
     const threshold = runtime().monitor.failureRatePercent;
     const minSample = runtime().monitor.failureMinSample;
     const since = new Date(Date.now() - 60 * 60 * 1000);
-    const row = await this.tasks
+    const rows = await this.tasks
       .createQueryBuilder('task')
-      .select("COUNT(*) FILTER (WHERE task.status = 'failed')", 'failed')
+      .select('task.workspaceId', 'workspaceId')
+      .addSelect("COUNT(*) FILTER (WHERE task.status = 'failed')", 'failed')
       .addSelect('COUNT(*)', 'total')
       .where('task.finishedAt >= :since', { since })
-      .getRawOne<{ failed: string; total: string }>();
-    const total = Number(row?.total ?? 0);
-    const failed = Number(row?.failed ?? 0);
+      .groupBy('task.workspaceId')
+      .getRawMany<{ workspaceId: string; failed: string; total: string }>();
+
+    const names = await this.workspaceNames(rows.map((row) => row.workspaceId));
+    const byWorkspace: MonitorBreakdown[] = rows.map((row) => {
+      const total = Number(row.total ?? 0);
+      const failed = Number(row.failed ?? 0);
+      const rate = total === 0 ? 0 : Math.round((failed / total) * 1000) / 10;
+      return {
+        workspaceId: row.workspaceId,
+        workspaceName: names.get(row.workspaceId) ?? row.workspaceId.slice(0, 8),
+        current: rate,
+        triggered: total >= minSample && rate > threshold,
+      };
+    });
+
+    const total = rows.reduce((sum, row) => sum + Number(row.total ?? 0), 0);
+    const failed = rows.reduce((sum, row) => sum + Number(row.failed ?? 0), 0);
     const rate = total === 0 ? 0 : Math.round((failed / total) * 1000) / 10;
     const enough = total >= minSample;
+    const hit = byWorkspace.filter((item) => item.triggered);
     return {
       key: 'publish_failure_rate',
       label: '发布失败率',
       current: rate,
       threshold,
       unit: '%',
-      triggered: enough && rate > threshold,
+      triggered: hit.length > 0,
+      scope: 'workspace',
+      byWorkspace: byWorkspace.sort((left, right) => right.current - left.current),
       level: 'warning',
       detail: !enough
         ? `近 1 小时发布任务 ${total} 条（样本少于 ${minSample} 条，不做失败率判定）。`
-        : rate > threshold
-          ? `近 1 小时 ${total} 条任务中失败 ${failed} 条，失败率 ${rate}%（阈值 ${threshold}%）：请检查平台凭证是否过期、内容是否被平台拒审。`
-          : `近 1 小时 ${total} 条任务，失败率 ${rate}%，未超过阈值 ${threshold}%。`,
+        : hit.length > 0
+          ? `有 ${hit.length} 个工作区失败率超阈值 ${threshold}%：` +
+            hit.map((item) => `${item.workspaceName} ${item.current}%`).join('、') +
+            `（合计 ${total} 条任务失败 ${failed} 条，${rate}%）。请检查平台凭证是否过期、内容是否被平台拒审。`
+          : `近 1 小时 ${total} 条任务，合计失败率 ${rate}%，未超过阈值 ${threshold}%。`,
       link: this.link('/publish/queue'),
       checkedAt: this.now(),
     };
@@ -189,6 +232,7 @@ export class OpsMonitorService {
       threshold,
       unit: '次',
       triggered: current > threshold,
+      scope: 'platform',
       level: 'error',
       detail:
         current > threshold
@@ -231,6 +275,7 @@ export class OpsMonitorService {
       threshold,
       unit: '%',
       triggered: current > threshold,
+      scope: 'platform',
       level: 'warning',
       detail,
       link: this.link('/media'),
@@ -244,17 +289,31 @@ export class OpsMonitorService {
     const threshold = runtime().monitor.aiQuotaPercent;
     const start = new Date();
     start.setHours(0, 0, 0, 0);
-    const row = await this.generations
+    const tokenExpr =
+      'COALESCE(SUM(COALESCE(generation.tokensInput, 0) + COALESCE(generation.tokensOutput, 0) + ' +
+      'COALESCE(generation.tokensCached, 0) + COALESCE(generation.tokensCacheWrite, 0) + ' +
+      'COALESCE(generation.tokensReasoning, 0)), 0)';
+    const rows = await this.generations
       .createQueryBuilder('generation')
-      .select(
-        'COALESCE(SUM(COALESCE(generation.tokensInput, 0) + COALESCE(generation.tokensOutput, 0) + ' +
-          'COALESCE(generation.tokensCached, 0) + COALESCE(generation.tokensCacheWrite, 0) + ' +
-          'COALESCE(generation.tokensReasoning, 0)), 0)',
-        'tokens',
-      )
+      .select('generation.workspaceId', 'workspaceId')
+      .addSelect(tokenExpr, 'tokens')
       .where('generation.createdAt >= :start', { start })
-      .getRawOne<{ tokens: string }>();
-    const used = Number(row?.tokens ?? 0);
+      .groupBy('generation.workspaceId')
+      .getRawMany<{ workspaceId: string; tokens: string }>();
+
+    const names = await this.workspaceNames(rows.map((row) => row.workspaceId));
+    const byWorkspace: MonitorBreakdown[] = rows.map((row) => {
+      const tokens = Number(row.tokens ?? 0);
+      const percent = quota <= 0 ? 0 : Math.round((tokens / quota) * 1000) / 10;
+      return {
+        workspaceId: row.workspaceId,
+        workspaceName: names.get(row.workspaceId) ?? row.workspaceId.slice(0, 8),
+        current: percent,
+        triggered: quota > 0 && percent > threshold,
+      };
+    });
+
+    const used = rows.reduce((sum, row) => sum + Number(row.tokens ?? 0), 0);
     if (quota <= 0) {
       return {
         key: 'ai_token_quota',
@@ -263,6 +322,8 @@ export class OpsMonitorService {
         threshold: 0,
         unit: 'token',
         triggered: false,
+        scope: 'workspace',
+        byWorkspace: byWorkspace.sort((left, right) => right.current - left.current),
         level: 'warning',
         detail: `未配置 AI 日配额（AI_DAILY_TOKEN_QUOTA=0），今日已用 ${used} token，跳过告警。`,
         link: this.link('/ai-usage'),
@@ -270,21 +331,37 @@ export class OpsMonitorService {
       };
     }
     const percent = Math.round((used / quota) * 1000) / 10;
+    const hit = byWorkspace.filter((item) => item.triggered);
     return {
       key: 'ai_token_quota',
       label: 'AI 日配额消耗',
       current: percent,
       threshold,
       unit: '%',
-      triggered: percent > threshold,
+      triggered: hit.length > 0,
+      scope: 'workspace',
+      byWorkspace: byWorkspace.sort((left, right) => right.current - left.current),
       level: 'warning',
       detail:
-        percent > threshold
-          ? `今日已用 ${used} / ${quota} token（${percent}%，阈值 ${threshold}%）：接近配额上限，可考虑降级模型或减少批量生成。`
-          : `今日已用 ${used} / ${quota} token（${percent}%），未超过阈值 ${threshold}%。`,
+        hit.length > 0
+          ? `有 ${hit.length} 个工作区接近配额上限（阈值 ${threshold}%）：` +
+            hit.map((item) => `${item.workspaceName} ${item.current}%`).join('、') +
+            `。今日合计已用 ${used} / ${quota} token（${percent}%），可考虑降级模型或减少批量生成。`
+          : `今日合计已用 ${used} / ${quota} token（${percent}%），各工作区均未超过阈值 ${threshold}%。`,
       link: this.link('/ai-usage'),
       checkedAt: this.now(),
     };
+  }
+
+  /** 工作区 id → 名称（巡检要给人看，只显示 uuid 没法排查）。 */
+  private async workspaceNames(ids: string[]): Promise<Map<string, string>> {
+    const unique = [...new Set(ids.filter(Boolean))];
+    if (unique.length === 0) return new Map();
+    const rows = await this.dataSource.query<Array<{ id: string; name: string }>>(
+      'SELECT id, name FROM workspaces WHERE id = ANY($1::uuid[])',
+      [unique],
+    );
+    return new Map(rows.map((row) => [row.id, row.name]));
   }
 
   /** 跑全部检查；emit=false 只观察不告警（用于后台预演与测试断言）。 */
@@ -311,6 +388,7 @@ export class OpsMonitorService {
       threshold,
       unit: '条',
       triggered: current > threshold,
+      scope: 'platform',
       level: 'error',
       detail:
         current > threshold

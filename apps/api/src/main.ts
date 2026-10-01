@@ -9,6 +9,16 @@ import { ResponseInterceptor } from './common/interceptors/response.interceptor'
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule);
   const config = app.get(ConfigService);
+  const http = app.getHttpAdapter().getInstance() as { set: (key: string, value: unknown) => void };
+
+  /**
+   * 反向代理后面必须信任一跳代理头，否则 req.ip 是 nginx 的 127.0.0.1：
+   * - 公开素材接口的一次性令牌校验（IP 绑定）会对所有人放行；
+   * - 登录失败锁定按邮箱计数，但审计与限流拿到的来源 IP 全是本机，等于没有来源信息。
+   * 只信任 1 跳（本机 nginx），不写 true——写成 true 时客户端可以伪造 X-Forwarded-For。
+   */
+  const trustProxy = Number(config.get<string>('TRUST_PROXY_HOPS') ?? 1);
+  http.set('trust proxy', Number.isFinite(trustProxy) && trustProxy >= 0 ? trustProxy : 1);
 
   app.setGlobalPrefix('api');
   app.use(cookieParser());

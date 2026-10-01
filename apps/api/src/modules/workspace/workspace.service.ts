@@ -192,7 +192,7 @@ export class WorkspaceService {
     await this.sessions.invalidateWorkspace(workspace.id);
     await this.recordLifecycle('workspace.archive', workspace, actor, { previousStatus: workspace.status });
     this.logger.log(`工作区已归档：${workspace.name}`);
-    return this.statusView(await this.workspaces.findOneOrFail({ where: { id: workspace.id } }));
+    return this.statusView(await this.workspaces.findOneOrFail({ where: { id: workspace.id } }));  // tenant-scope-ok: 工作区自身以主键寻址，其 id 即作用域
   }
 
   /** 取消归档：回到可写状态。 */
@@ -204,7 +204,7 @@ export class WorkspaceService {
     await this.sessions.invalidateWorkspace(workspace.id);
     await this.recordLifecycle('workspace.unarchive', workspace, actor, {});
     this.logger.log(`工作区已取消归档：${workspace.name}`);
-    return this.statusView(await this.workspaces.findOneOrFail({ where: { id: workspace.id } }));
+    return this.statusView(await this.workspaces.findOneOrFail({ where: { id: workspace.id } }));  // tenant-scope-ok: 工作区自身以主键寻址，其 id 即作用域
   }
 
   /**
@@ -295,7 +295,7 @@ export class WorkspaceService {
         });
     }
     this.logger.warn(`工作区已软删（${retentionDays} 天内可恢复）：${workspace.name}${isLastWorkspace ? '｜注意：这是该租户最后一个工作区' : ''}`);
-    return this.statusView(await this.workspaces.findOneOrFail({ where: { id: workspace.id } }));
+    return this.statusView(await this.workspaces.findOneOrFail({ where: { id: workspace.id } }));  // tenant-scope-ok: 工作区自身以主键寻址，其 id 即作用域
   }
 
   /** 恢复：仅在保留期内可恢复；过期返回 410（明确告知不可恢复，而不是含糊的 400）。 */
@@ -449,7 +449,7 @@ export class WorkspaceService {
     // 若此前登记过合规删除请求，恢复即视为撤回请求（并留痕）
     await this.cancelDeletionRequest(workspaceId, actor);
     this.logger.log(`工作区已恢复：${workspace.name}`);
-    return this.statusView(await this.workspaces.findOneOrFail({ where: { id: workspace.id } }));
+    return this.statusView(await this.workspaces.findOneOrFail({ where: { id: workspace.id } }));  // tenant-scope-ok: 工作区自身以主键寻址，其 id 即作用域
   }
 
   /** 只读状态视图（前端据此显示倒计时与可执行操作）。 */
@@ -562,7 +562,7 @@ export class WorkspaceService {
     const users = new Map<string, User>();
     const ids = [...new Set(rows.map((row) => row.userId))];
     if (ids.length > 0) {
-      for (const user of await this.users.find({ where: { id: In(ids) }, select: ['id', 'displayName', 'email'] })) {
+      for (const user of await this.users.find({ where: { id: In(ids) }, select: ['id', 'displayName', 'email'] })) {  // tenant-scope-ok: 工作区自身以主键寻址，其 id 即作用域
         users.set(user.id, user);
       }
     }

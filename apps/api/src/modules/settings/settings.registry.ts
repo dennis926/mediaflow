@@ -394,6 +394,15 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
     envKey: 'MEDIA_PUBLIC_BASE_URL',
   },
   {
+    key: 'MEDIA_PUBLIC_RATE_LIMIT_PER_MINUTE',
+    group: 'media',
+    label: '素材公开访问限流（次/分钟/IP）',
+    description: '公开素材接口无需登录即可访问，按来源 IP 限流防刷；0 表示不限制，默认 120',
+    secret: false,
+    envKey: 'MEDIA_PUBLIC_RATE_LIMIT_PER_MINUTE',
+    placeholder: '120',
+  },
+  {
     key: 'AI_SYSTEM_PROMPT',
     group: 'ai',
     label: 'AI 写作规范（系统提示词）',

@@ -21,8 +21,10 @@ import { IsNull, Like, Repository } from 'typeorm';
 import { QuotaService } from '../billing/quota.service';
 import { AuditService } from '../../audit/audit.service';
 import { WorkspaceContextService } from '../../common/workspace-context.service';
+import { CryptoService } from '../../common/crypto.service';
 import { runtime } from '../settings/runtime-config';
 import { MediaAsset, MediaKind } from './entities/media-asset.entity';
+import { MediaLinkService } from './media-link.service';
 
 export interface MediaActor {
   id?: string | null;
@@ -122,6 +124,8 @@ export class MediaService {
     private readonly workspaceContext: WorkspaceContextService,
     private readonly audit: AuditService,
     private readonly quota: QuotaService,
+    private readonly links: MediaLinkService,
+    private readonly crypto: CryptoService,
   ) {}
 
   /** 素材目录：可用 MEDIA_STORAGE_DIR 指到挂载盘或对象存储的本地挂载点。 */
@@ -130,9 +134,42 @@ export class MediaService {
     return configured.startsWith('/') ? configured : join(process.cwd(), '../..', configured);
   }
 
+  /**
+   * 入库时保存的公开地址：带长期签名（exp=0）。
+   *
+   * 为什么入库就签名：内容正文/发布体里存的是这条 URL，平台侧要能直接拉取。
+   * 签名让链接可追溯（谁能拿到、什么时候泄漏的都能对上），而裸 UUID 只要被看到就永久公开。
+   * 需要更严格时可以给单次发布签发短时链接（issueAccessLink）。
+   */
   private publicUrl(storedName: string): string {
-    const base = runtime().media.publicBaseUrl.trim().replace(/\/$/, '');
-    return base ? `${base}/${storedName}` : `/api/public/media/${storedName}`;
+    return this.links.sign(storedName, 0).url;
+  }
+
+  /** 签发（或续签）某素材的访问链接：内容编辑器插入图片时调用。 */
+  async issueAccessLink(id: string, ttlSeconds = 0): Promise<{ url: string; expiresAt: string | null }> {
+    const scope = await this.workspaceContext.current();
+    const asset = await this.assets.findOne({ where: { id, workspaceId: scope.workspaceId, deletedAt: IsNull() } });
+    if (!asset) throw new NotFoundException('素材不存在');
+    const ttl = Number.isFinite(ttlSeconds) && ttlSeconds > 0 ? Math.min(ttlSeconds, 30 * 24 * 3600) : 0;
+    return this.links.sign(asset.storedName, ttl);
+  }
+
+  /**
+   * 素材访问令牌：给"裸 UUID"老链接用的短时通行证（放在 X-Media-Token 头）。
+   * 令牌与文件名绑定，默认 30 分钟有效，密钥轮换即全部失效。
+   */
+  issueAccessToken(storedName: string, ttlSeconds = 1800): string {
+    const expiresAt = Math.floor(Date.now() / 1000) + ttlSeconds;
+    return `${expiresAt}.${this.crypto.hmac(`media-access|${storedName}|${expiresAt}`)}`;
+  }
+
+  verifyAccessToken(storedName: string, token: string | undefined): boolean {
+    if (!token) return false;
+    const [expiresRaw, signature] = token.split('.');
+    const expiresAt = Number(expiresRaw);
+    if (!signature || !Number.isFinite(expiresAt)) return false;
+    if (expiresAt * 1000 < Date.now()) return false;
+    return this.crypto.verifyHmac(`media-access|${storedName}|${expiresAt}`, signature);
   }
 
   /**

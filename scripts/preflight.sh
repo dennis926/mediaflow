@@ -163,8 +163,15 @@ else
   fail "nodemailer $nodemailer_version 低于 9.1.1（含多个已修复漏洞）"
 fi
 
+echo "-- 7. 租户作用域静态巡检（防止再出现\"按 id 读却不过滤工作区\"的越权）"
+if (cd "$ROOT" && node scripts/check-tenant-scope.mjs >/tmp/tenant-scope.log 2>&1); then
+  pass "$(cat /tmp/tenant-scope.log)"
+else
+  fail "租户作用域巡检未通过：$(tail -n +1 /tmp/tenant-scope.log | head -n 12 | tr '\n' ' ')"
+fi
+
 if [[ $STRICT == 1 ]]; then
-  echo "-- 7. 依赖漏洞（严格模式）"
+  echo "-- 8. 依赖漏洞（严格模式）"
   if (cd "$ROOT" && pnpm audit --prod --audit-level=high >/dev/null 2>&1); then pass "无 high 及以上漏洞"; else fail "存在 high/critical 依赖漏洞，见 pnpm audit --prod"; fi
 fi
 

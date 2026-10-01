@@ -171,6 +171,8 @@ export interface MediaRuntimeConfig {
   publicBaseUrl: string;
   /** 内容版本历史保留条数，0 = 不留历史 */
   contentHistoryLimit: number;
+  /** 公开素材接口：同一 IP 每分钟允许的请求数（0 = 不限） */
+  publicRateLimitPerMinute: number;
 }
 
 export interface NotifyRuntimeConfig {
@@ -367,6 +369,7 @@ export const DEFAULT_MEDIA_RUNTIME: MediaRuntimeConfig = {
   ],
   publicBaseUrl: '',
   contentHistoryLimit: 20,
+  publicRateLimitPerMinute: 120,
 };
 
 export const DEFAULT_NOTIFY_RUNTIME: NotifyRuntimeConfig = {
@@ -587,6 +590,7 @@ function buildRuntimeConfig(flat: Record<string, string | undefined>, onError?: 
     })(),
     publicBaseUrl: text(flat.MEDIA_PUBLIC_BASE_URL, DEFAULT_MEDIA_RUNTIME.publicBaseUrl),
     contentHistoryLimit: num(flat.CONTENT_HISTORY_LIMIT, DEFAULT_MEDIA_RUNTIME.contentHistoryLimit, 0, 200),
+    publicRateLimitPerMinute: num(flat.MEDIA_PUBLIC_RATE_LIMIT_PER_MINUTE, DEFAULT_MEDIA_RUNTIME.publicRateLimitPerMinute, 0, 10_000),
   };
 
   built.knowledge = {

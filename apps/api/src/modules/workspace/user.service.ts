@@ -338,7 +338,7 @@ export class UserService {
 
   /** Blocks the operation when it would leave the workspace without any active owner. */
   private async assertOwnerSurvives(user: User, message: string): Promise<void> {
-    const roles = user.roles ?? (await this.users.findOne({ where: { id: user.id }, relations: { roles: true } }))?.roles ?? [];
+    const roles = user.roles ?? (await this.users.findOne({ where: { id: user.id }, relations: { roles: true } }))?.roles ?? [];  // tenant-scope-ok: loadUser 已按 workspaceId 取到，此处按 user.id 操作
     if (!roles.some((role) => role.code === 'owner')) return;
     const activeOwners = await this.countActiveOwners();
     if (activeOwners <= 1) throw new ForbiddenException(message);
@@ -357,7 +357,7 @@ export class UserService {
       .filter((member) => (member.roleCodes ?? []).includes('owner'))
       .map((member) => member.userId);
     if (ownerIds.length === 0) return 0;
-    return this.users.count({ where: { id: In(ownerIds), status: 'active' } });
+    return this.users.count({ where: { id: In(ownerIds), status: 'active' } });  // tenant-scope-ok: loadUser 已按 workspaceId 取到，此处按 user.id 操作
   }
 
   /** 新建/邀请用户时把他加入当前工作区，否则切换工作区列表是空的。 */

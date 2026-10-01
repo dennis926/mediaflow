@@ -179,7 +179,7 @@ export class WorkspaceExportService {
 
   /** 真正生成 ZIP（流式写出，素材以文件流形式进包，不整块载入内存）。 */
   async runJob(jobId: string): Promise<void> {
-    const job = await this.jobs.findOne({ where: { id: jobId } });
+    const job = await this.jobs.findOne({ where: { id: jobId } });  // tenant-scope-ok: 任务行先按 workspaceId 取到，此处按 job.id 跟进
     if (!job) return;
     const startedAt = Date.now();
     await this.jobs.update({ id: jobId }, { status: 'running', progress: 5, errorMessage: null });
@@ -347,7 +347,7 @@ export class WorkspaceExportService {
     jobId: string,
     userId: string,
   ): Promise<{ url: string; expiresAt: string }> {
-    const job = await this.jobs.findOne({ where: { id: jobId } });
+    const job = await this.jobs.findOne({ where: { id: jobId } });  // tenant-scope-ok: 任务行先按 workspaceId 取到，此处按 job.id 跟进
     if (!job) throw new NotFoundException('导出任务不存在');
     const jobWorkspace = jobWorkspaceId(job);
     if (jobWorkspace) {
@@ -414,7 +414,7 @@ export class WorkspaceExportService {
 
     // 令牌已经把 workspaceId 与 jobId 一起做了 HMAC 绑定，这里不必再用 workspace_id 去匹配：
     // 工作区被永久清除后 job.workspace_id 会被置空，若仍按它匹配，已发出的下载链接会直接失效。
-    const job = await this.jobs.findOne({ where: { id: jobId } });
+    const job = await this.jobs.findOne({ where: { id: jobId } });  // tenant-scope-ok: 任务行先按 workspaceId 取到，此处按 job.id 跟进
     const jobWorkspace = job ? jobWorkspaceId(job) : null;
     if (!job || (jobWorkspace && jobWorkspace !== workspaceId)) throw new NotFoundException('导出产物不存在');
     if (job.status !== 'completed' || !job.filePath) throw new NotFoundException('导出产物不存在');

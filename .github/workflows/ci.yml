@@ -49,6 +49,8 @@ jobs:
         run: pnpm -r lint
       - name: 凭据扫描（真实密钥 / 密文 / .env / 历史泄露指纹）
         run: pnpm check:secrets
+      - name: 租户作用域巡检（按 id 读取必须带工作区过滤或写明豁免原因）
+        run: node scripts/check-tenant-scope.mjs
       - name: 部署断言（仅配置，不依赖本机服务）
         run: bash scripts/preflight.sh --config-only
       - name: 依赖漏洞门禁（high 及以上必须修）

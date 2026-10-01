@@ -31,7 +31,7 @@ export class MeService {
 
   async exportMe(userId: string): Promise<{ buffer: Buffer; fileName: string; counts: Record<string, number> }> {
     const scope = await this.workspaceContext.current();
-    const user = await this.users.findOne({ where: { id: userId } });
+    const user = await this.users.findOne({ where: { id: userId } });  // tenant-scope-ok: userId 来自当前令牌本身
     if (!user) throw new NotFoundException('账号不存在');
 
     const memberships = await this.users.query(

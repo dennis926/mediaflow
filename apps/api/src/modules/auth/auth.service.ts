@@ -120,7 +120,7 @@ export class AuthService {
         if (payload.type === 'refresh' && payload.sub) {
           await this.blockRefreshToken(payload);
           // 审计要带真实作用域；用户已被删除时退化为占位（不能为空）
-          const owner = await this.users.findOne({ where: { id: payload.sub } });
+          const owner = await this.users.findOne({ where: { id: payload.sub } });  // tenant-scope-ok: 登录阶段按令牌 userId 读用户，工作区由 resolveLoginWorkspace 解析
           await this.audit.record({
             action: 'auth.logout',
             resourceType: 'user',
@@ -158,7 +158,7 @@ export class AuthService {
       if (blocked) throw new UnauthorizedException('登录状态已失效（该令牌已登出或被轮换），请重新登录');
     }
 
-    const user = await this.users.findOne({ where: { id: payload.sub } });
+    const user = await this.users.findOne({ where: { id: payload.sub } });  // tenant-scope-ok: 登录阶段按令牌 userId 读用户，工作区由 resolveLoginWorkspace 解析
     if (!user) throw new UnauthorizedException('账号不存在，请重新登录');
     if (user.status !== 'active') throw new UnauthorizedException('账号已被禁用，请联系管理员');
 
@@ -270,7 +270,7 @@ export class AuthService {
     userId: string,
     workspaceId: string,
   ): Promise<{ accessToken: string; refreshToken: string; expiresIn: string; user: AuthUser }> {
-    const user = await this.users.findOne({ where: { id: userId } });
+    const user = await this.users.findOne({ where: { id: userId } });  // tenant-scope-ok: 登录阶段按令牌 userId 读用户，工作区由 resolveLoginWorkspace 解析
     if (!user) throw new UnauthorizedException('账号不存在');
     if (user.status !== 'active') throw new UnauthorizedException('账号已被禁用，请联系管理员');
 
@@ -342,7 +342,7 @@ export class AuthService {
   }
 
   async profile(userId: string): Promise<AuthUser> {
-    const user = await this.users.findOne({ where: { id: userId } });
+    const user = await this.users.findOne({ where: { id: userId } });  // tenant-scope-ok: 登录阶段按令牌 userId 读用户，工作区由 resolveLoginWorkspace 解析
     if (!user) throw new UnauthorizedException('账号不存在');
     // 当前工作区取自请求作用域（令牌），不再依赖 users.workspace_id（M8 后可能为空）
     const scope = await this.workspaceContext.current();
