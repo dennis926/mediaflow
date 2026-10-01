@@ -197,7 +197,7 @@
 | PUT | `/api/ai/model-price` | 覆盖单个模型的实付价（元/百万 token，四段） |
 | GET | `/api/ai/pricing-rules` | 当前计费规则：汇率、当前时段（高峰/空闲）、高峰窗口定义、可抓取价格的供应商 |
 | GET | `/api/ai/official-prices` | 官网价格快照：最近一次抓取时间、来源地址、各模型的峰谷两档价 |
-| POST | `/api/ai/official-prices/refresh` | **立即抓取供应商官网价目表**（需 `settings.write`）；body `{ provider: 'deepseek' }`。抓取失败会报错且不写入半份数据 |
+| POST | `/api/ai/official-prices/refresh` | **立即抓取供应商官网价目表**（需 `settings.write`）；body `{ provider: 'deepseek' }`（省略则抓全部）。响应 `data.providers[]` 为成功清单、`data.failures[]` 为失败清单（含原因）。指定单个供应商且失败时返回 500 并带原因，不写入半份数据 |
 | GET | `/api/ai/usage-legacy` |（保留）旧版用量汇总 | **AI 用量与花费**：按天/任务/模型聚合（`days` 默认 14） |
 | POST | `/api/contents/batch` | 内容批量操作：`{ids[], action: archive\|unarchive\|delete}`，逐条返回失败原因 |
 | GET | `/api/contents/:id/revisions` | 内容版本历史（新到旧） |
@@ -257,6 +257,7 @@ OCR 引擎为 **tesseract 5（chi_sim+eng）**，离线运行；两种版面模�
 ### AI 计费口径（v0.2.0 起）
 
 - 价格优先级：用户覆盖价（`AI_MODEL_PRICES`）> 官网抓取价（`AI_OFFICIAL_PRICES`）> 预置目录价 > 全局兜底价；**不加价、不打折**。
+- `GET /api/ai/official-prices` 的 `data.detail[provider]` 逐家记录 `fetchedAt`（**只记成功时间**）、`error`、`failedAt`、`consecutiveFailures`、`failures[]`。从未成功抓取过的供应商同样建档，`fetchedAt` 为空字符串——界面据此区分「从未成功」与「上次成功时间」。
 - 国内供应商（DeepSeek）直接采用官网人民币价，并按调用时刻落在**高峰/空闲**时段取对应档位：
   高峰 = 工作日 09:00-12:00、14:00-18:00（北京时间，不含法定节假日），其余为空闲（官网口径为空闲价为高峰价的一半）。
 - 时段窗口与节假日在 `AI_PEAK_WINDOWS` 配置；配置损坏时一律按空闲计价（宁可少算，不虚高）。
