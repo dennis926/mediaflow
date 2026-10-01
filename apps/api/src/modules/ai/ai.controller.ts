@@ -110,10 +110,31 @@ export class AiController {
     return { ok: true };
   }
 
-  /** 当前计费规则（汇率与公式说明） */
+  /** 当前计费规则（汇率、峰谷时段、公式说明） */
   @Get('pricing-rules')
   pricingRules() {
     return this.pricingService.rules();
+  }
+
+  /** 官网价格快照（最近一次抓取时间、来源、各模型峰谷价） */
+  @Get('official-prices')
+  officialPrices() {
+    return this.pricingService.officialSnapshot();
+  }
+
+  /** 立即抓取某供应商官网价格（失败会报错，不会写入半份数据） */
+  @Capability('settings.write')
+  @Post('official-prices/refresh')
+  async refreshOfficialPrices(@Body() body: { provider?: string }) {
+    const provider = String(body?.provider ?? 'deepseek');
+    const result = await this.pricingService.refreshOfficialPrices(provider);
+    return {
+      provider: result.provider,
+      sourceUrl: result.sourceUrl,
+      fetchedAt: result.fetchedAt,
+      models: result.prices,
+      warning: result.warning ?? null,
+    };
   }
 
   @Capability('content.write')

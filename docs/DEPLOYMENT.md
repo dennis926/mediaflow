@@ -203,6 +203,7 @@ E2E_ADMIN_EMAIL=you@example.com E2E_ADMIN_PASSWORD=... pnpm --filter @mediaflow/
 ## 9. 备份
 
 - 数据库：`pg_dump -U mediaflow mediaflow > mediaflow_$(date +%F).sql`
+- 回滚到某一版：`git checkout v<版本号>` → `pnpm install && pnpm build:packages` → 按 `scripts/deploy.sh` 重建并重启；数据库若含新迁移，参考对应迁移的 `down()`
 - 上传/构建产物：`apps/*/dist`、`/www/wwwroot/auto.liangyijianye.cn/h5`
 - 配置：`.env`（含密钥，单独安全存放，不要提交到仓库）
 
@@ -211,11 +212,15 @@ E2E_ADMIN_EMAIL=you@example.com E2E_ADMIN_PASSWORD=... pnpm --filter @mediaflow/
 
 1. **站点信息**：名称、副标题、公司、支持邮箱、品牌主色、Logo、每页条数、AI 标识文案 —— 「设置 → 站点信息」。
 2. **AI 服务**：服务商/Key/模型/写作规范/各平台风格/随机度/最大输出/单价/限流与每日额度 —— 「设置 → AI 服务」。
+   - **峰谷时段**（`AI_PEAK_WINDOWS`）：分峰谷计价的供应商在此配置高峰窗口与节假日；默认按 DeepSeek 口径（工作日 09:00-12:00、14:00-18:00 为高峰，北京时间）。
+   - **官网价格抓取**（`AI_OFFICIAL_PRICE_AUTO_REFRESH` / `AI_OFFICIAL_PRICE_REFRESH_MINUTES`）：默认开启、每 720 分钟抓一次；抓取结果写入 `AI_OFFICIAL_PRICES`，可在「AI 用量」页手动触发。
+   - 计费口径详见 `docs/DESIGN-AI计费口径.md`。
 3. **合规词库**：违规词 + 原因 + 建议 + 扣分权重 —— 「设置 → 合规词库」。
 4. **知识库**：分类（可视化编辑）、引用条数、切片长度/重叠/片数、单文件上限、OCR 开关与参数 —— 「设置 → 知识库」。
 5. **发布队列**：Worker 开关、重试次数与间隔、轮询参数、通知保留天数、队列名、AI 元数据开关 —— 「设置 → 发布队列」。
 6. **角色与权限**：权限矩阵、角色显示名、登录有效期与免登录时长 —— 「设置 → 角色与权限」。
 7. **平台密钥**：微信/抖音/小红书 AppID 与 Secret —— 「设置 → 平台密钥」。
+8. **界面版本号**：来自 `packages/shared/src/constants/version.ts`，由 `pnpm release <patch|minor|major> "说明"` 统一递增（会同步所有 `package.json`、追加 `CHANGELOG.md`、提交并打 `v<版本号>` 标签）。排查线上问题时以页脚显示的版本号为准。
 
 ### 初始化命令（新环境按顺序执行）
 

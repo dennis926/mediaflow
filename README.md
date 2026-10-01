@@ -1,6 +1,23 @@
-# MediaFlow
+# NeedAi 内容分发系统（内部代号 MediaFlow）
 
 社交媒体内容分发与矩阵运营平台。技术栈：NestJS 10 + Next.js 14 + PostgreSQL + Redis + TypeScript 5，pnpm workspace 单仓多包。
+
+- 线上地址：<https://auto.liangyijianye.cn/>（PC）、`/h5/`（移动端）、`/api/`（后端）
+- 界面显示的品牌名来自设置项 `SITE_NAME`（设置 → 站点信息），**交给别的公司时改配置即可，不必改代码**
+- 当前版本见侧边栏页脚 `v<版本号> · <版本标识>`，与 git 标签一一对应
+
+## 版本迭代
+
+界面版本号来自 `packages/shared/src/constants/version.ts`，由发版脚本统一维护：
+
+```bash
+pnpm release patch "修复发布队列重试次数统计"   # 0.2.0 → 0.2.1
+pnpm release minor "新增 XX 功能"              # 0.2.0 → 0.3.0
+pnpm release major "首个对外 SaaS 版本"        # 0.2.0 → 1.0.0
+```
+
+脚本会同步改所有 `package.json`、追加 `CHANGELOG.md`、提交并打 `v<版本号>` 标签。
+排查线上问题时，用页脚版本号即可直接定位到对应提交。
 
 ## 快速开始
 

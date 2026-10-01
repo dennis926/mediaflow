@@ -5,6 +5,7 @@ import { Dialog } from '../components/Dialog';
 import { PageHeader } from '../components/PageHeader';
 import { ApiError, clearSession, getRefreshToken } from '../lib/api/client';
 import { authApi } from '../lib/api/endpoints';
+import { APP_EDITION, APP_VERSION } from '@mediaflow/shared';
 import { roleLabel, roleTone } from '../lib/roles';
 
 interface PasswordForm {
@@ -201,6 +202,10 @@ export function ProfilePage() {
             退出登录
           </button>
         </div>
+
+        <p className="muted" style={{ marginTop: 'var(--mf-space-4)', textAlign: 'center', fontSize: '0.85em' }}>
+          香港节点 · v{APP_VERSION} · {APP_EDITION}
+        </p>
       </div>
 
       <Dialog

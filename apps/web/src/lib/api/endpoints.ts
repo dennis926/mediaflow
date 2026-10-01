@@ -37,6 +37,9 @@ import type {
   OverviewData,
   Paged,
   ParseResult,
+  ModelPriceCnyTierView,
+  OfficialPriceSnapshotView,
+  PricingRulesView,
   ProviderConfigItem,
   ProviderPricingView,
   PublishTask,
@@ -198,7 +201,18 @@ export const aiApi = {
     api.put<{ ok: true }>('/ai/model-price', payload),
   /** 删除覆盖价，恢复「官方美元价 × 汇率」 */
   clearModelPrice: (provider: string, model: string) => api.delete<{ ok: true }>('/ai/model-price', { provider, model }),
-  pricingRules: () => api.get<{ usdToCny: number; description: string }>('/ai/pricing-rules'),
+  pricingRules: () => api.get<PricingRulesView>('/ai/pricing-rules'),
+  /** 官网价格快照（最近一次抓取的时间、来源与各模型峰谷价） */
+  officialPrices: () => api.get<OfficialPriceSnapshotView | null>('/ai/official-prices'),
+  /** 立即抓取供应商官网价格 */
+  refreshOfficialPrices: (provider = 'deepseek') =>
+    api.post<{
+      provider: string;
+      sourceUrl: string;
+      fetchedAt: string;
+      models: Array<{ model: string; version?: string; peak: ModelPriceCnyTierView; offpeak: ModelPriceCnyTierView }>;
+      warning: string | null;
+    }>('/ai/official-prices/refresh', { provider }),
   generations: (query: { page?: number; pageSize?: number; taskType?: string }) =>
     api.get<Paged<AiGeneration>>('/ai/generations', { ...query }),
 };

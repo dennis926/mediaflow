@@ -51,6 +51,21 @@ export function ModelPriceDialog({ open, row, onClose, onSaved, onError }: Model
     if (!row) return;
     try {
       const rules = await aiApi.pricingRules();
+      /** 分峰谷的供应商直接取当前时段那一档的人民币价，不再乘汇率。 */
+      if (row.officialCny) {
+        const tier = row.officialCny[rules.tier];
+        setPrice({
+          input: tier.input,
+          output: tier.output,
+          cacheWrite: tier.input,
+          cacheRead: tier.cacheRead,
+        });
+        return;
+      }
+      if (!row.officialUsd) {
+        onError('该模型没有收录官方价，请手工填写');
+        return;
+      }
       setPrice({
         input: Number((row.officialUsd.input * rules.usdToCny).toFixed(4)),
         output: Number((row.officialUsd.output * rules.usdToCny).toFixed(4)),
@@ -82,8 +97,22 @@ export function ModelPriceDialog({ open, row, onClose, onSaved, onError }: Model
         <div className={styles.form}>
           <Banner tone="info">
             <span>
-              官方价（美元/百万 token）：输入 ${row.officialUsd.input} · 输出 ${row.officialUsd.output} · 缓存写入 ${row.officialUsd.cacheWrite} · 缓存读取 $
-              {row.officialUsd.cacheRead}。这里填的是人民币价，默认按「官方价 × 汇率」折算；只有官方调价时才需要手工改。
+              {row.officialCny ? (
+                <>
+                  官方价（人民币/百万 token，分峰谷）：高峰 输入 ￥{row.officialCny.peak.input} · 输出 ￥
+                  {row.officialCny.peak.output} · 缓存 ￥{row.officialCny.peak.cacheRead}；空闲 输入 ￥
+                  {row.officialCny.offpeak.input} · 输出 ￥{row.officialCny.offpeak.output} · 缓存 ￥
+                  {row.officialCny.offpeak.cacheRead}。系统按调用时刻自动取对应档位，通常不需要手工改。
+                </>
+              ) : row.officialUsd ? (
+                <>
+                  官方价（美元/百万 token）：输入 ${row.officialUsd.input} · 输出 ${row.officialUsd.output} · 缓存写入 $
+                  {row.officialUsd.cacheWrite} · 缓存读取 ${row.officialUsd.cacheRead}。这里填的是人民币价，默认按「官方价 × 汇率」折算；
+                  只有官方调价时才需要手工改。
+                </>
+              ) : (
+                <>该模型没有收录官方价，请手工填写人民币单价。</>
+              )}
             </span>
           </Banner>
           <div className={styles.twoCol}>

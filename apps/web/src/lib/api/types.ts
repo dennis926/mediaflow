@@ -328,14 +328,35 @@ export interface ModelPriceCnyView {
   cacheRead: number;
 }
 
+export interface ModelPriceCnyTierView {
+  input: number;
+  output: number;
+  cacheRead: number;
+}
+
+export interface ModelPriceCnyTieredView {
+  peak: ModelPriceCnyTierView;
+  offpeak: ModelPriceCnyTierView;
+}
+
+export type PriceTier = 'peak' | 'offpeak';
+
 export interface ModelPricingView {
   provider: string;
   providerLabel: string;
   model: string;
   label: string;
+  /** 实付价（人民币/百万 token），按当前时段取峰或谷 */
   price: ModelPriceCnyView;
-  officialUsd: ModelPriceCnyView;
-  source: 'override' | 'catalog' | 'global';
+  /** 官方美元价（海外供应商才有） */
+  officialUsd: ModelPriceCnyView | null;
+  /** 官方人民币价，分峰谷（国内供应商才有） */
+  officialCny: ModelPriceCnyTieredView | null;
+  /** 当前生效的档位 */
+  tier: PriceTier;
+  /** 是否分峰谷两档计费 */
+  tiered: boolean;
+  source: 'override' | 'official' | 'catalog' | 'global';
   configured: boolean;
   reference: boolean;
   note?: string;
@@ -348,7 +369,29 @@ export interface ProviderPricingView {
   hasApiKey: boolean;
   baseUrl: string;
   protocol: string;
+  /** 是否支持从官网自动抓取价格 */
+  scrapable: boolean;
   models: ModelPricingView[];
+}
+
+export interface PricingRulesView {
+  usdToCny: number;
+  description: string;
+  tier: PriceTier;
+  tierLabel: string;
+  peakWindows: string;
+  peakConfig: { windows: Array<{ days: number[]; start: string; end: string }>; holidays: string[]; timeZone: string };
+  scrapableProviders: string[];
+}
+
+export interface OfficialPriceSnapshotView {
+  fetchedAt: string;
+  sources: Record<string, string>;
+  providers: Record<
+    string,
+    Record<string, { model: string; version?: string; peak: ModelPriceCnyTierView; offpeak: ModelPriceCnyTierView }>
+  >;
+  warnings?: string[];
 }
 
 export interface ProviderConfigItem {
@@ -393,7 +436,7 @@ export interface AiUsageReport {
   byModel: Array<{ provider: string; model: string; calls: number; tokens: number; cost: string }>;
   models: AiUsageModelRow[];
   providers: ProviderPricingView[];
-  rules: { usdToCny: number; description: string };
+  rules: PricingRulesView;
   note: string | null;
 }
 

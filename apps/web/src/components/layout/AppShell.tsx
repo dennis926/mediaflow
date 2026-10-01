@@ -3,6 +3,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState, type ReactNode } from 'react';
+import { APP_EDITION, APP_VERSION } from '@mediaflow/shared';
 import { authApi } from '../../lib/api/endpoints';
 import { getRefreshToken, getToken, setToken } from '../../lib/api/client';
 import { trackEvent } from '../../lib/track';
@@ -131,7 +132,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           siteTagline={site.tagline}
           siteLogoUrl={site.logoUrl}
           brandExtra={<WorkspaceSwitcher />}
-          footer={<span>香港节点 · v0.1.0</span>}
+          footer={<span>香港节点 · v{APP_VERSION} · {APP_EDITION}</span>}
         />
       </div>
 

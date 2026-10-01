@@ -6,11 +6,13 @@ import { SettingsModule } from '../settings/settings.module';
 import { AiService } from './ai.service';
 import { ModelPricingService } from './model-pricing.service';
 import { AiGeneration } from './entities/ai-generation.entity';
+import { OfficialPriceStore } from './pricing/official-price.store';
+import { OfficialPriceRefreshTask } from './pricing/official-price-refresh.task';
 
 @Module({
   imports: [TypeOrmModule.forFeature([AiGeneration]), SettingsModule, BillingModule],
   controllers: [AiController],
-  providers: [AiService, ModelPricingService],
-  exports: [AiService, ModelPricingService],
+  providers: [AiService, ModelPricingService, OfficialPriceStore, OfficialPriceRefreshTask],
+  exports: [AiService, ModelPricingService, OfficialPriceStore],
 })
 export class AiModule {}

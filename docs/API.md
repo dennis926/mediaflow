@@ -195,7 +195,9 @@
 | DELETE | `/api/ai/provider-configs/:provider` | 删除供应商配置（用量历史保留） |
 | GET | `/api/ai/catalog` | 预置供应商与模型目录（"添加供应商"下拉用） |
 | PUT | `/api/ai/model-price` | 覆盖单个模型的实付价（元/百万 token，四段） |
-| GET | `/api/ai/pricing-rules` | 当前计费规则（汇率与公式说明） |
+| GET | `/api/ai/pricing-rules` | 当前计费规则：汇率、当前时段（高峰/空闲）、高峰窗口定义、可抓取价格的供应商 |
+| GET | `/api/ai/official-prices` | 官网价格快照：最近一次抓取时间、来源地址、各模型的峰谷两档价 |
+| POST | `/api/ai/official-prices/refresh` | **立即抓取供应商官网价目表**（需 `settings.write`）；body `{ provider: 'deepseek' }`。抓取失败会报错且不写入半份数据 |
 | GET | `/api/ai/usage-legacy` |（保留）旧版用量汇总 | **AI 用量与花费**：按天/任务/模型聚合（`days` 默认 14） |
 | POST | `/api/contents/batch` | 内容批量操作：`{ids[], action: archive\|unarchive\|delete}`，逐条返回失败原因 |
 | GET | `/api/contents/:id/revisions` | 内容版本历史（新到旧） |
@@ -251,6 +253,15 @@ OCR 引擎为 **tesseract 5（chi_sim+eng）**，离线运行；两种版面模�
 | GET/PATCH/POST | `/api/notifications` | 站内通知列表、标记已读、全部已读（发布失败/待人工/审核变动） |
 | GET | `/api/accounts/oauth/:platform/authorize` | 生成平台授权链接（需先配置 AppID） |
 | GET | `/api/accounts/oauth/:platform/callback` | 平台回调：换 token、加密入库、跳回前端 |
+
+### AI 计费口径（v0.2.0 起）
+
+- 价格优先级：用户覆盖价（`AI_MODEL_PRICES`）> 官网抓取价（`AI_OFFICIAL_PRICES`）> 预置目录价 > 全局兜底价；**不加价、不打折**。
+- 国内供应商（DeepSeek）直接采用官网人民币价，并按调用时刻落在**高峰/空闲**时段取对应档位：
+  高峰 = 工作日 09:00-12:00、14:00-18:00（北京时间，不含法定节假日），其余为空闲（官网口径为空闲价为高峰价的一半）。
+- 时段窗口与节假日在 `AI_PEAK_WINDOWS` 配置；配置损坏时一律按空闲计价（宁可少算，不虚高）。
+- 每次调用把生效档位与单价写入 `ai_generations.price_snapshot`（含 `tier` / `tierLabel`），可追溯。
+- 详见 `docs/DESIGN-AI计费口径.md`。
 
 ## 4. 任务状态机
 

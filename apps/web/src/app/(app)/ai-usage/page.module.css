@@ -195,3 +195,23 @@
   padding: var(--mf-space-3) var(--mf-space-4);
   border-top: 1px solid var(--mf-color-border-subtle);
 }
+
+/* 峰谷时段标记：当前处于哪一档，直接写在计费规则旁 */
+.tierPeak,
+.tierOffpeak {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-weight: 600;
+}
+
+.tierPeak {
+  background: var(--mf-color-warning-soft, rgba(245, 158, 11, 0.14));
+  color: var(--mf-color-warning, #b45309);
+}
+
+.tierOffpeak {
+  background: var(--mf-color-success-soft, rgba(16, 185, 129, 0.14));
+  color: var(--mf-color-success, #047857);
+}

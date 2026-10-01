@@ -280,7 +280,13 @@ export class AiService {
       model: string;
       label: string;
       price: { input: number; output: number; cacheWrite: number; cacheRead: number };
-      officialUsd: { input: number; output: number; cacheWrite: number; cacheRead: number };
+      officialUsd: { input: number; output: number; cacheWrite: number; cacheRead: number } | null;
+      officialCny: {
+        peak: { input: number; output: number; cacheRead: number };
+        offpeak: { input: number; output: number; cacheRead: number };
+      } | null;
+      tier: 'peak' | 'offpeak';
+      tiered: boolean;
       source: string;
     } | null;
     byDay: Array<{ date: string; calls: number; tokens: number; cached: number; cost: string }>;
@@ -292,7 +298,13 @@ export class AiService {
       model: string;
       label: string;
       price: { input: number; output: number; cacheWrite: number; cacheRead: number };
-      officialUsd: { input: number; output: number; cacheWrite: number; cacheRead: number };
+      officialUsd: { input: number; output: number; cacheWrite: number; cacheRead: number } | null;
+      officialCny: {
+        peak: { input: number; output: number; cacheRead: number };
+        offpeak: { input: number; output: number; cacheRead: number };
+      } | null;
+      tier: 'peak' | 'offpeak';
+      tiered: boolean;
       source: string;
       configured: boolean;
       reference: boolean;
@@ -307,7 +319,15 @@ export class AiService {
       baseUrl: string;
       models: Array<Record<string, unknown>>;
     }>;
-    rules: { usdToCny: number; description: string };
+    rules: {
+      usdToCny: number;
+      description: string;
+      tier: 'peak' | 'offpeak';
+      tierLabel: string;
+      peakWindows: string;
+      peakConfig: { windows: Array<{ days: number[]; start: string; end: string }>; holidays: string[]; timeZone: string };
+      scrapableProviders: string[];
+    };
     note: string | null;
   }> {
     const scope = await this.workspaceContext.current();
@@ -321,15 +341,26 @@ export class AiService {
     const rows = await this.generations.find({ where, order: { createdAt: 'DESC' }, take: 20_000 });
 
     // 价格缓存：同一 (provider, model) 只解析一次
-    const priceCache = new Map<string, { price: { input: number; output: number; cacheWrite: number; cacheRead: number }; source: string }>();
-    const priceFor = async (provider: string, model: string): Promise<{ price: { input: number; output: number; cacheWrite: number; cacheRead: number }; source: string }> => {
+    const priceCache = new Map<string, Awaited<ReturnType<ModelPricingService['priceFor']>>>();
+    const priceFor = async (provider: string, model: string): Promise<Awaited<ReturnType<ModelPricingService['priceFor']>>> => {
       const key = `${provider}/${model}`;
       const cached = priceCache.get(key);
       if (cached) return cached;
       const resolved = await this.pricing.priceFor(provider, model).catch(() => null);
-      const value = resolved
-        ? { price: resolved.price, source: resolved.source }
-        : { price: { input: 0, output: 0, cacheWrite: 0, cacheRead: 0 }, source: 'unset' };
+      const value: Awaited<ReturnType<ModelPricingService['priceFor']>> = resolved ?? {
+        provider,
+        providerLabel: provider,
+        model,
+        label: model,
+        price: { input: 0, output: 0, cacheWrite: 0, cacheRead: 0 },
+        officialUsd: null,
+        officialCny: null,
+        tier: 'offpeak',
+        tiered: false,
+        source: 'global',
+        configured: false,
+        reference: false,
+      };
       priceCache.set(key, value);
       return value;
     };
@@ -405,6 +436,9 @@ export class AiService {
           label: model.label,
           price: model.price,
           officialUsd: model.officialUsd,
+          officialCny: model.officialCny,
+          tier: model.tier,
+          tiered: model.tiered,
           source: model.source,
           configured: provider.configured,
           reference: model.reference,
@@ -455,6 +489,9 @@ export class AiService {
             label: selectedPricing.label,
             price: selectedPricing.price,
             officialUsd: selectedPricing.officialUsd,
+            officialCny: selectedPricing.officialCny,
+            tier: selectedPricing.tier,
+            tiered: selectedPricing.tiered,
             source: selectedPricing.source,
           }
         : null,
@@ -571,7 +608,15 @@ export class AiService {
             ? priced.cost
             : estimateLegacyCost(completion.tokensInput, completion.tokensOutput, completion.tokensCached ?? 0),
           priceSnapshot: priced
-            ? { provider: provider.name, model: completion.model ?? provider.model, price: priced.price, source: priced.source }
+            ? {
+                provider: provider.name,
+                model: completion.model ?? provider.model,
+                price: priced.price,
+                source: priced.source,
+                /** 计费时刻落在高峰还是空闲时段（分峰谷的供应商才不同价） */
+                tier: priced.tier,
+                tierLabel: priced.tier === 'peak' ? '高峰时段' : '空闲时段',
+              }
             : {},
           errorMessage: null,
           requestedBy: params.meta.requestedBy ?? null,

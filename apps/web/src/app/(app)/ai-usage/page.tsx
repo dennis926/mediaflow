@@ -12,7 +12,7 @@ import { SkeletonRows } from '../../../components/ui/Skeleton';
 import { Tag } from '../../../components/ui/Tag';
 import { ApiError } from '../../../lib/api/client';
 import { aiApi } from '../../../lib/api/endpoints';
-import type { AiGeneration, AiUsageModelRow, ProviderPricingView } from '../../../lib/api/types';
+import type { AiGeneration, AiUsageModelRow, ModelPricingView, ProviderPricingView } from '../../../lib/api/types';
 import { formatDateTime } from '../../../lib/format';
 import { PlusIcon, SparkleIcon } from '../../../lib/icons';
 import styles from './page.module.css';
@@ -50,6 +50,22 @@ function tokens(value: number): string {
 }
 
 /**
+ * 官方价提示：分峰谷的供应商显示两档，否则显示美元官方价。
+ * 分峰谷时用户最关心"现在按哪一档算"，所以当前档位加粗标注。
+ */
+function officialHint(row: ModelPricingView, field: 'input' | 'output' | 'cacheRead'): string {
+  if (row.officialCny) {
+    const peak = row.officialCny.peak[field];
+    const off = row.officialCny.offpeak[field];
+    if (peak === off) return `官方 ￥${peak}`;
+    const current = row.tier === 'peak' ? peak : off;
+    return `官方 峰 ￥${peak} / 谷 ￥${off}（当前 ￥${current}）`;
+  }
+  if (row.officialUsd) return `官方 $${row.officialUsd[field].toFixed(2)}`;
+  return '官方价未收录';
+}
+
+/**
  * AI 用量与模型价格。
  *
  * 参考主流中转站价目表的做法：
@@ -78,6 +94,23 @@ export default function AiUsagePage() {
   const generations = useQuery({
     queryKey: ['ai', 'generations', 'recent', selection],
     queryFn: () => aiApi.generations({ page: 1, pageSize: 20 }),
+  });
+
+  /** 立即抓取官网价目表：成功后刷新价目（价格会立刻按新值计费）。 */
+  const refreshOfficial = useMutation({
+    mutationFn: () => aiApi.refreshOfficialPrices(),
+    onSuccess: (result) => {
+      const models = result.models.map((item) => item.model).join('、');
+      setFeedback({
+        tone: result.warning ? 'danger' : 'success',
+        text: result.warning
+          ? `抓取完成但有异常：${result.warning}`
+          : `已从官网更新 ${result.models.length} 个模型的价格（${models}）`,
+      });
+      void queryClient.invalidateQueries({ queryKey: ['ai'] });
+    },
+    onError: (error: unknown) =>
+      setFeedback({ tone: 'danger', text: error instanceof ApiError ? error.message : '抓取官网价格失败' }),
   });
 
   const refresh = (): void => {
@@ -122,7 +155,13 @@ export default function AiUsagePage() {
           <span className={styles.strong}>{row.model}</span>
           <span className={styles.meta}>
             {row.label !== row.model ? `${row.label} · ` : ''}
-            {row.source === 'override' ? '已按官方调价' : row.source === 'catalog' ? '官方价' : '全局兜底价'}
+            {row.source === 'override'
+              ? '已按官方调价'
+              : row.source === 'official'
+                ? '官网自动抓取价'
+                : row.source === 'catalog'
+                  ? '官方价（预置）'
+                  : '全局兜底价'}
           </span>
         </div>
       ),
@@ -130,44 +169,44 @@ export default function AiUsagePage() {
     {
       key: 'input',
       title: '输入',
-      width: '150px',
+      width: '170px',
       render: (row) => (
         <span className={styles.priceCell}>
           <span className={styles.strong}>{priceText(row.price.input)} / 1M</span>
-          <span className={styles.official}>官方 ${row.officialUsd.input.toFixed(2)}</span>
+          <span className={styles.official}>{officialHint(row, 'input')}</span>
         </span>
       ),
     },
     {
       key: 'output',
       title: '输出',
-      width: '150px',
+      width: '170px',
       render: (row) => (
         <span className={styles.priceCell}>
           <span className={styles.strong}>{priceText(row.price.output)} / 1M</span>
-          <span className={styles.official}>官方 ${row.officialUsd.output.toFixed(2)}</span>
+          <span className={styles.official}>{officialHint(row, 'output')}</span>
         </span>
       ),
     },
     {
       key: 'cacheWrite',
       title: '缓存写入',
-      width: '150px',
+      width: '170px',
       render: (row) => (
         <span className={styles.priceCell}>
           <span className={styles.strong}>{priceText(row.price.cacheWrite)} / 1M</span>
-          <span className={styles.official}>官方 ${row.officialUsd.cacheWrite.toFixed(2)}</span>
+          <span className={styles.official}>官方未单独报价，按输入价计</span>
         </span>
       ),
     },
     {
       key: 'cacheRead',
       title: '缓存读取',
-      width: '150px',
+      width: '170px',
       render: (row) => (
         <span className={styles.priceCell}>
           <span className={styles.strong}>{priceText(row.price.cacheRead)} / 1M</span>
-          <span className={styles.official}>官方 ${row.officialUsd.cacheRead.toFixed(2)}</span>
+          <span className={styles.official}>{officialHint(row, 'cacheRead')}</span>
         </span>
       ),
     },
@@ -276,9 +315,21 @@ export default function AiUsagePage() {
           </Button>
           {data ? (
             <span className={styles.meta}>
-              计价规则：官方美元价 × 汇率 {data.rules.usdToCny} = 人民币价
+              <span className={data.rules.tier === 'peak' ? styles.tierPeak : styles.tierOffpeak}>
+                {data.rules.tierLabel}
+              </span>
+              {data.rules.peakWindows ? `（高峰：${data.rules.peakWindows}）` : '（未配置峰谷时段）'}
               {data.rules.description ? ` · ${data.rules.description}` : ''}
             </span>
+          ) : null}
+          {data?.rules.scrapableProviders.length ? (
+            <Button
+              variant="secondary"
+              loading={refreshOfficial.isPending}
+              onClick={() => refreshOfficial.mutate()}
+            >
+              立即抓取官网价
+            </Button>
           ) : null}
         </div>
       </Card>
@@ -372,8 +423,9 @@ export default function AiUsagePage() {
             />
             <div className={styles.priceNote}>
               <span className={styles.meta}>
-                价格为各供应商<strong>官方价</strong>：目录里存官方美元价，按汇率 {data?.rules.usdToCny ?? 7} 折算成人民币展示（不加价、不打折）；
-                官方调价后点「改价」即可覆盖该模型。
+                价格为各供应商<strong>官方价</strong>（不加价、不打折）：国内供应商直接取官网人民币价并区分<strong>峰谷两档</strong>，
+                海外供应商按官方美元价 × 汇率 {data?.rules.usdToCny ?? 7} 折算；
+                {data?.rules.scrapableProviders.length ? '系统会定时抓取官网价目表，官方调价后自动跟随，也可点上方「立即抓取官网价」。' : '官方调价后点「改价」即可覆盖该模型。'}
               </span>
             </div>
           </Card>

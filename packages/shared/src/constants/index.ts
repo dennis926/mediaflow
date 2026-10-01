@@ -1,5 +1,7 @@
 import { PlatformCode, PublishMode } from '../types/platform';
 
+export * from './version';
+
 /** Unified business codes used by every API response. */
 export const ApiCode = {
   Success: 0,
