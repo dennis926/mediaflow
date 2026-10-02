@@ -17,6 +17,8 @@ import { PeakWindowConfig, PriceTier, describeWindows, tierAt } from './pricing/
 import { ScrapeResult, scrapeProvider, SCRAPERS, BLOCKED_SOURCES } from './pricing/scrapers';
 import { OfficialPriceSnapshot, OfficialPriceStore } from './pricing/official-price.store';
 import { ScrapedPrice } from './pricing/types';
+import { MODELS_DEV_URL, parseModelsDev } from './pricing/models-dev';
+import { fetchPage } from './pricing/parse-utils';
 
 /** 四段计价（人民币 / 百万 token），与中转站价目表一致。 */
 export interface ModelPriceCny {
@@ -42,7 +44,7 @@ export interface ModelPricingView {
   /** 是否分峰谷两档计费 */
   tiered: boolean;
   /** 价格来源：override=自定义覆盖，official=官网抓取，catalog=预置，global=全局兜底价 */
-  source: 'override' | 'official' | 'catalog' | 'global';
+  source: 'override' | 'official' | 'aggregate' | 'catalog' | 'global';
   /** 该模型是否已被配置为可用 */
   configured: boolean;
   reference: boolean;
@@ -78,6 +80,8 @@ export interface PricingRuleView {
   scrapableProviders: string[];
   /** 无法自动抓取的供应商 -> 原因（界面照实说明，不显示成故障） */
   unscrapable: Array<{ provider: string; label: string; url: string; reason: string }>;
+  /** 聚合价目表来源（官网抓不到时的兜底，界面需说明它不是官方价） */
+  aggregateSource: { url: string; note: string };
 }
 
 /** 金额保留 4 位小数：再多的位数在界面上只是噪声，且会让对账看起来有差异。 */
@@ -181,7 +185,7 @@ export class ModelPricingService {
     model: string,
     rate: number,
     snapshot: OfficialPriceSnapshot | null,
-  ): { tiered: ModelPriceCnyTiered; source: 'official' | 'catalog' } | null {
+  ): { tiered: ModelPriceCnyTiered; source: 'official' | 'aggregate' | 'catalog' } | null {
     // 1) 官网抓取价（优先，且它带 peak/offpeak 两档）
     const scraped = this.findScraped(provider, model, snapshot);
     if (scraped && (scraped.peak.input > 0 || scraped.peak.output > 0)) {
@@ -205,7 +209,19 @@ export class ModelPricingService {
       };
     }
 
-    // 2) 预置目录价
+    // 2) 聚合价目表（models.dev）：只补官网抓不到的供应商，且只做兜底。
+    //    它是美元聚合价、峰谷已拍平，绝不允许越过上面的官网抓取价。
+    const aggregated = this.findAggregated(provider, model, snapshot);
+    if (aggregated && (aggregated.peak.input > 0 || aggregated.peak.output > 0)) {
+      const tier: ModelPriceCnyTier = {
+        input: round4(aggregated.peak.input * rate),
+        output: round4(aggregated.peak.output * rate),
+        cacheRead: round4(aggregated.peak.cacheRead * rate),
+      };
+      return { tiered: { peak: { ...tier }, offpeak: { ...tier } }, source: 'aggregate' };
+    }
+
+    // 3) 预置目录价
     const catalogModel = findCatalogModel(provider, model);
     if (!catalogModel) return null;
 
@@ -245,6 +261,29 @@ export class ModelPricingService {
     for (const candidate of Object.values(models)) {
       if (candidate.catalogModel === model) return candidate;
       // 大小写不敏感兜底：GLM-5.3 vs glm-5.3
+      if (candidate.catalogModel?.toLowerCase() === model.toLowerCase()) return candidate;
+    }
+    return null;
+  }
+
+  /**
+   * 在聚合价目表（models.dev）里找某个模型的价。
+   *
+   * 匹配顺序与官网快照一致：先按目录模型 id 精确匹配，再按抓取记录里的
+   * `catalogModel` 反查。聚合表的模型 id 带日期戳（`doubao-seed-2-1-pro-260628`），
+   * 因此反查是主要路径。
+   */
+  private findAggregated(
+    provider: string,
+    model: string,
+    snapshot: OfficialPriceSnapshot | null,
+  ): ScrapedPrice | null {
+    const models = snapshot?.aggregate?.providers?.[provider];
+    if (!models) return null;
+    const direct = models[model];
+    if (direct) return direct;
+    for (const candidate of Object.values(models)) {
+      if (candidate.catalogModel === model) return candidate;
       if (candidate.catalogModel?.toLowerCase() === model.toLowerCase()) return candidate;
     }
     return null;
@@ -438,6 +477,11 @@ export class ModelPricingService {
         url: item.url,
         reason: item.reason,
       })),
+      aggregateSource: {
+        url: MODELS_DEV_URL,
+        // 说明它为什么只能做兜底，避免用户以为它比官网价更权威
+        note: '聚合价目表，仅在官网抓不到时兜底使用；它只有美元价，且不区分峰谷',
+      },
     };
   }
 
@@ -507,6 +551,8 @@ export class ModelPricingService {
   async refreshOfficialPrices(provider?: string): Promise<{
     results: ScrapeResult[];
     failures: Array<{ provider: string; message: string }>;
+    aggregate: { providers: number; models: number } | null;
+    aggregateError: string | null;
   }> {
     const targets = provider
       ? SCRAPERS.filter((scraper) => scraper.provider === provider)
@@ -554,17 +600,35 @@ export class ModelPricingService {
     if (provider && !results.length) {
       throw new Error(failures[0]?.message ?? '未解析到任何价格');
     }
-    return { results, failures };
+
+    // 抓全部时顺带刷新聚合价目表（它是官网抓不到的供应商的唯一兜底）。
+    let aggregate: { providers: number; models: number } | null = null;
+    let aggregateError: string | null = null;
+    if (!provider) {
+      try {
+        aggregate = await this.refreshAggregatePrices();
+      } catch (error) {
+        aggregateError = error instanceof Error ? error.message : String(error);
+      }
+    }
+
+    return { results, failures, aggregate, aggregateError };
   }
 
-  /** 一轮定时抓取：抓取所有支持的供应商，返回成功与失败清单。 */
-  async refreshAllOfficialPrices(): Promise<{
+  /**
+   * 一轮定时抓取：抓取所有支持的供应商，返回成功与失败清单。
+   *
+   * @param skip 本轮跳过的供应商（退避中的那些）。被跳过的不会出现在成功或
+   *   失败清单里——它们不是「这次失败了」，而是「这次故意没打」。
+   */
+  async refreshAllOfficialPrices(skip: ReadonlySet<string> = new Set()): Promise<{
     succeeded: ScrapeResult[];
     failed: Array<{ provider: string; message: string }>;
   }> {
     const succeeded: ScrapeResult[] = [];
     const failed: Array<{ provider: string; message: string }> = [];
     for (const scraper of SCRAPERS) {
+      if (skip.has(scraper.provider)) continue;
       try {
         const result = await scrapeProvider(scraper.provider);
         if (!result.prices.length) {
@@ -581,7 +645,51 @@ export class ModelPricingService {
       }
     }
     if (succeeded.length) await this.officialPrices.saveMany(succeeded);
+
+    // 聚合价目表跟着一轮抓取一起刷新：它是官网抓取价的兜底，晚一轮就有一段时间
+    // 出现「官网抓不到、兜底也没有」的空档。它失败不影响上面的成功结果。
+    try {
+      await this.refreshAggregatePrices();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      failed.push({ provider: 'models.dev（聚合价目表）', message });
+    }
     return { succeeded, failed };
+  }
+
+  /**
+   * 抓取聚合价目表（models.dev）。
+   *
+   * 单独一个方法、单独一次请求：这份 JSON 有 5MB 左右，一次拿全比按供应商
+   * 分别请求省事，也避免把官网抓取的失败与它的失败混在一起计数。
+   * 失败时保留上一份聚合价并写原因，不影响官网价。
+   */
+  async refreshAggregatePrices(): Promise<{ providers: number; models: number }> {
+    try {
+      // 这份 JSON 约 5MB，超时给足；它是纯数据接口，不需要额外请求头。
+      const response = await fetchPage(MODELS_DEV_URL, fetch, 60_000);
+      if (!response.ok) {
+        throw new Error(`models.dev 返回 HTTP ${response.status}`);
+      }
+      let raw: unknown;
+      try {
+        raw = JSON.parse(response.text);
+      } catch {
+        throw new Error('models.dev 返回的不是合法 JSON（可能被中间设备改写）');
+      }
+      const results = parseModelsDev(raw);
+      if (!results.length) {
+        throw new Error('models.dev 里没有匹配到我们目录中的模型');
+      }
+      await this.officialPrices.saveAggregate(results);
+      const models = results.reduce((sum, item) => sum + item.prices.length, 0);
+      this.logger.log(`已抓取聚合价目表：${results.length} 家供应商、${models} 个模型`);
+      return { providers: results.length, models };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      await this.officialPrices.recordAggregateFailure(message, MODELS_DEV_URL);
+      throw error;
+    }
   }
 
   /** 官网价格快照（界面展示抓取时间与来源）。 */

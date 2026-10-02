@@ -44,6 +44,19 @@ export interface OfficialPriceSnapshot {
   providers: Record<string, Record<string, ScrapedPrice>>;
   /** provider -> 抓取明细（新字段，界面按它显示新鲜度与失败原因）。 */
   detail?: Record<string, OfficialPriceProviderSnapshot>;
+  /**
+   * 聚合价目表（models.dev）的价格，**只在官网抓取价缺失时使用**。
+   *
+   * 单独放一层而不是混进 `providers`：它是美元聚合价，且把峰谷拍平成单档，
+   * 一旦覆盖官网价会让高峰时段少收一半。分开存才能保证优先级不可越级。
+   */
+  aggregate?: {
+    fetchedAt: string;
+    sourceUrl: string;
+    /** provider -> 目录模型 id -> 价格 */
+    providers: Record<string, Record<string, ScrapedPrice>>;
+    error?: string;
+  };
   warnings?: string[];
 }
 
@@ -153,6 +166,62 @@ export class OfficialPriceStore {
       sources: current?.sources ?? {},
       providers: current?.providers ?? {},
       detail,
+      warnings: current?.warnings,
+    };
+    await this.settings.updateMany([{ key: SETTING_KEY, value: JSON.stringify(next) }], {
+      id: null,
+      name: '系统',
+    });
+  }
+
+  /**
+   * 保存聚合价目表（models.dev）的结果。
+   *
+   * 只覆盖 `aggregate` 层，绝不触碰 `providers`（官网抓取价）——两层混在一起
+   * 就没法保证「官网价优先」了。
+   */
+  async saveAggregate(results: ScrapeResult[]): Promise<void> {
+    const current = await this.read();
+    const providers: Record<string, Record<string, ScrapedPrice>> = { ...(current?.aggregate?.providers ?? {}) };
+    let fetchedAt = current?.aggregate?.fetchedAt ?? '';
+    let sourceUrl = current?.aggregate?.sourceUrl ?? '';
+
+    for (const result of results) {
+      const models: Record<string, ScrapedPrice> = {};
+      for (const price of result.prices) models[price.model] = price;
+      providers[result.provider] = models;
+      sourceUrl = result.sourceUrl;
+      if (result.fetchedAt > fetchedAt) fetchedAt = result.fetchedAt;
+    }
+
+    const next: OfficialPriceSnapshot = {
+      fetchedAt: current?.fetchedAt ?? new Date().toISOString(),
+      sources: current?.sources ?? {},
+      providers: current?.providers ?? {},
+      detail: current?.detail,
+      aggregate: { fetchedAt, sourceUrl, providers },
+      warnings: current?.warnings,
+    };
+    await this.settings.updateMany([{ key: SETTING_KEY, value: JSON.stringify(next) }], {
+      id: null,
+      name: '系统',
+    });
+  }
+
+  /** 记录聚合价目表抓取失败（保留上一份聚合价，只写原因）。 */
+  async recordAggregateFailure(error: string, sourceUrl = ''): Promise<void> {
+    const current = await this.read();
+    const next: OfficialPriceSnapshot = {
+      fetchedAt: current?.fetchedAt ?? new Date().toISOString(),
+      sources: current?.sources ?? {},
+      providers: current?.providers ?? {},
+      detail: current?.detail,
+      aggregate: {
+        fetchedAt: current?.aggregate?.fetchedAt ?? '',
+        sourceUrl: current?.aggregate?.sourceUrl || sourceUrl,
+        providers: current?.aggregate?.providers ?? {},
+        error,
+      },
       warnings: current?.warnings,
     };
     await this.settings.updateMany([{ key: SETTING_KEY, value: JSON.stringify(next) }], {

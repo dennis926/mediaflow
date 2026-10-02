@@ -1,6 +1,6 @@
 {
   "name": "@mediaflow/h5",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "private": true,
   "scripts": {
     "dev": "vite --port 3101 --strictPort",

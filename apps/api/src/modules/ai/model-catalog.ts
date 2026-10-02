@@ -253,6 +253,6 @@ export function isScrapable(provider: string): boolean {
  * 官方页面本身对中国香港出口封锁，只能手工改价。
  */
 export const UNSCRAPABLE_REASONS: Record<string, string> = {
-  openai: '官网对中国香港出口返回 403（Cloudflare 拦截），无法自动抓取，请手工改价',
-  minimax: '官网价格页为纯 JS 渲染（页面不含任何价格数字），无法自动抓取，请手工改价',
+  openai: '官网对本站出口 IP 返回 403（Cloudflare 拦截），无法直接抓取；已由聚合价目表（models.dev）兜底',
+  minimax: '官网价格页为纯 JS 渲染（页面不含任何价格数字），无法直接抓取；已由聚合价目表（models.dev）兜底',
 };

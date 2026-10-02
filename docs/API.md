@@ -256,8 +256,10 @@ OCR 引擎为 **tesseract 5（chi_sim+eng）**，离线运行；两种版面模�
 
 ### AI 计费口径（v0.2.0 起）
 
-- 价格优先级：用户覆盖价（`AI_MODEL_PRICES`）> 官网抓取价（`AI_OFFICIAL_PRICES`）> 预置目录价 > 全局兜底价；**不加价、不打折**。
+- 价格优先级：用户覆盖价（`AI_MODEL_PRICES`）> 官网抓取价（`AI_OFFICIAL_PRICES.providers`）> 聚合价目表（`AI_OFFICIAL_PRICES.aggregate`，models.dev，仅兜底）> 预置目录价 > 全局兜底价；**不加价、不打折**。
 - `GET /api/ai/official-prices` 的 `data.detail[provider]` 逐家记录 `fetchedAt`（**只记成功时间**）、`error`、`failedAt`、`consecutiveFailures`、`failures[]`。从未成功抓取过的供应商同样建档，`fetchedAt` 为空字符串——界面据此区分「从未成功」与「上次成功时间」。
+- `data.aggregate` 是**聚合价目表**（models.dev）的兜底层：`fetchedAt` / `sourceUrl` / `providers` / `error`。它只在官网抓取价缺失时被计费读取（详见 `docs/DESIGN-AI计费口径.md` §2.1）。
+- 计费返回的 `source` 取值：`override`（用户覆盖价）、`official`（官网抓取价）、`aggregate`（聚合价目表）、`catalog`（预置目录价）、`global`（全局兜底价）。
 - 国内供应商（DeepSeek）直接采用官网人民币价，并按调用时刻落在**高峰/空闲**时段取对应档位：
   高峰 = 工作日 09:00-12:00、14:00-18:00（北京时间，不含法定节假日），其余为空闲（官网口径为空闲价为高峰价的一半）。
 - 时段窗口与节假日在 `AI_PEAK_WINDOWS` 配置；配置损坏时一律按空闲计价（宁可少算，不虚高）。

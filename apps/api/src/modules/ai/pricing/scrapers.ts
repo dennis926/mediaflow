@@ -654,11 +654,17 @@ export function findScraper(provider: string): ScraperDefinition | undefined {
  * Surfaced in the UI so an unscrapable provider reads as "not available" rather
  * than as a broken feature.
  */
+/**
+ * 官网抓不到、且**没有**对应解析器的供应商。
+ *
+ * 它们仍会出现在界面上的「不支持自动抓取」区（照实说明原因），但价格由聚合
+ * 价目表（models.dev）兜底，不再等于「没有价格」。
+ */
 export const BLOCKED_SOURCES: Array<{ provider: string; url: string; reason: string }> = [
   {
     provider: 'openai',
     url: 'https://platform.openai.com/docs/pricing',
-    reason: '官网对中国香港出口返回 403（Cloudflare 拦截），无法自动抓取，请手工改价',
+    reason: '官网对本站出口 IP 返回 403（Cloudflare 拦截），无法直接抓取；已由聚合价目表（models.dev）兜底',
   },
 ];
 

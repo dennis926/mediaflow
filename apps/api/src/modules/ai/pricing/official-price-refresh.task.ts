@@ -22,6 +22,8 @@ export class OfficialPriceRefreshTask {
   private running = false;
   /** provider -> 连续失败次数；成功即清零。 */
   private readonly failures = new Map<string, number>();
+  /** provider -> 退避截止时间戳；到点前不再请求该供应商。 */
+  private readonly backoffUntil = new Map<string, number>();
 
   constructor(private readonly pricing: ModelPricingService) {}
 
@@ -40,13 +42,28 @@ export class OfficialPriceRefreshTask {
       this.lastRunAt = now;
 
       this.running = true;
-      const { succeeded, failed } = await this.pricing.refreshAllOfficialPrices();
 
-      for (const result of succeeded) this.failures.delete(result.provider);
+      // 真正跳过退避中的供应商。只把退避写进日志、请求照发，等于没有退避——
+      // 火山引擎的人机校验就是被这样一轮轮打出来的（失败 4 次仍在每轮重试）。
+      const now2 = Date.now();
+      const skip = new Set(
+        [...this.backoffUntil.entries()].filter(([, until]) => until > now2).map(([provider]) => provider),
+      );
+      if (skip.size) {
+        this.logger.log(`退避中，本轮跳过：${[...skip].join('、')}`);
+      }
+
+      const { succeeded, failed } = await this.pricing.refreshAllOfficialPrices(skip);
+
+      for (const result of succeeded) {
+        this.failures.delete(result.provider);
+        this.backoffUntil.delete(result.provider);
+      }
       for (const failure of failed) {
         const count = (this.failures.get(failure.provider) ?? 0) + 1;
         this.failures.set(failure.provider, count);
         const backoff = this.backoffMinutes(count);
+        if (backoff > 0) this.backoffUntil.set(failure.provider, Date.now() + backoff * 60_000);
         this.logger.warn(
           `抓取 ${failure.provider} 官方价格失败第 ${count} 次（保留上一份快照，${backoff} 分钟内不再重试）：${failure.message}`,
         );
@@ -77,5 +94,15 @@ export class OfficialPriceRefreshTask {
   /** 当前连续失败次数（供健康检查/监控读取）。 */
   failureCounts(): Record<string, number> {
     return Object.fromEntries(this.failures);
+  }
+
+  /** 当前处于退避中的供应商及剩余分钟数（供健康检查/监控读取）。 */
+  backoffState(): Record<string, number> {
+    const now = Date.now();
+    return Object.fromEntries(
+      [...this.backoffUntil.entries()]
+        .filter(([, until]) => until > now)
+        .map(([provider, until]) => [provider, Math.ceil((until - now) / 60_000)]),
+    );
   }
 }

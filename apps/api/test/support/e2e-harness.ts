@@ -138,6 +138,19 @@ export async function createHarness(titlePrefix: string, options: { requireAppro
   process.env.MEDIAFLOW_SETTING_OVERRIDE_PUBLISH_STREAM_NAME = E2E_STREAM;
   process.env.MEDIAFLOW_SETTING_OVERRIDE_PUBLISH_GROUP_NAME = E2E_GROUP;
   process.env.MEDIAFLOW_SETTING_OVERRIDE_REQUIRE_CONTENT_APPROVAL = options.requireApproval === false ? 'false' : 'true';
+  /**
+   * 关掉运维巡检的定时器。
+   *
+   * `enabled` 只在 `tick()` 里判断，HTTP 入口 `/api/ops/monitor/run` 不受影响，
+   * 因此关掉它不影响任何用例主动触发巡检。
+   *
+   * 不关会有一个真实的竞态：套件在 beforeAll 里清空 `ops:monitor:*`（含
+   * `ops:monitor:last` 上次运行时间），于是应用的每分钟 cron 会在下一个分钟边界
+   * 立刻执行 runAll()，抢先用掉告警冷却槽（`ops:monitor:alerted:*`）。等用例自己
+   * 调 `/api/ops/monitor/run` 时，部分检查项已被判定为「冷却中」，`emitted` 缺项，
+   * 用例随机失败。用例跑到一半才失败、重跑又过，正是这个竞态的特征。
+   */
+  process.env.MEDIAFLOW_SETTING_OVERRIDE_MONITOR_ENABLED = 'false';
 
   const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
   const app = moduleRef.createNestApplication();

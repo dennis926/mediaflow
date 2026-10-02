@@ -356,7 +356,7 @@ export interface ModelPricingView {
   tier: PriceTier;
   /** 是否分峰谷两档计费 */
   tiered: boolean;
-  source: 'override' | 'official' | 'catalog' | 'global';
+  source: PriceSource;
   configured: boolean;
   reference: boolean;
   note?: string;
@@ -374,6 +374,9 @@ export interface ProviderPricingView {
   models: ModelPricingView[];
 }
 
+/** 价格来源：用户覆盖价 / 官网抓取价 / 聚合价目表 / 预置目录价 / 全局兜底价 */
+export type PriceSource = 'override' | 'official' | 'aggregate' | 'catalog' | 'global';
+
 export interface PricingRulesView {
   usdToCny: number;
   description: string;
@@ -384,6 +387,8 @@ export interface PricingRulesView {
   scrapableProviders: string[];
   /** 无法自动抓取的供应商及原因（界面照实说明，不显示成故障） */
   unscrapable: Array<{ provider: string; label: string; url: string; reason: string }>;
+  /** 聚合价目表来源（官网抓不到时的兜底，界面需说明它不是官方价） */
+  aggregateSource: { url: string; note: string };
 }
 
 export interface OfficialPriceProviderSnapshotView {
@@ -408,9 +413,18 @@ export interface OfficialPriceProviderSnapshotView {
   failures?: Array<{ at: string; message: string }>;
 }
 
+export interface OfficialPriceAggregateView {
+  fetchedAt: string;
+  sourceUrl: string;
+  providers: Record<string, Record<string, unknown>>;
+  error?: string;
+}
+
 export interface OfficialPriceSnapshotView {
   fetchedAt: string;
   sources: Record<string, string>;
+  /** 聚合价目表（models.dev）：只在官网抓取价缺失时使用 */
+  aggregate?: OfficialPriceAggregateView;
   providers: Record<
     string,
     Record<string, { model: string; version?: string; peak: ModelPriceCnyTierView; offpeak: ModelPriceCnyTierView }>
@@ -431,6 +445,9 @@ export interface OfficialPriceRefreshResultView {
   }>;
   /** 本次抓取失败的供应商及原因（被反爬拦截等），界面照实列出。 */
   failures?: Array<{ provider: string; message: string }>;
+  /** 聚合价目表（models.dev）本次刷新结果 */
+  aggregate?: { providers: number; models: number } | null;
+  aggregateError?: string | null;
   warning: string | null;
 }
 
