@@ -6,6 +6,17 @@
 
 - AI 计费接入 models.dev 聚合价目表兜底（补齐 GPT/MiniMax/豆包），并修复退避未生效与 E2E 巡检竞态
 
+## v0.4.0 — 2026-10-02
+
+- **接入聚合价目表（models.dev）兜底**：补齐官网抓不到的三家——ChatGPT/OpenAI（官网对我们出口 IP 返 Cloudflare 403）、MiniMax（价格由 JS 渲染）、豆包（人机校验）。现在这三家在价目表里**有价格可用**，不再是空白。
+- **聚合价只能兜底，不得越级**：它只有美元价、且把峰谷拍平成单档（DeepSeek 高峰 ￥2/￥8，它给 ≈谷价）。若覆盖官网价，高峰时段会按谷价计费、**少收一半**。因此单独存一层（`AI_OFFICIAL_PRICES.aggregate`），只在官网抓取价缺失时读取。优先级：用户覆盖价 > 官网抓取价 > 聚合价目表 > 预置目录价 > 全局兜底价。
+- **模型名跨源匹配**：聚合表写 `doubao-seed-2-1-pro-260628`、我们写 `doubao-seed-2.1-pro`；它写 `glm-5.3`、我们写 `GLM-5.3`。三层匹配（精确 → 规范化去日期戳 → 前缀），结果写进 `catalogModel` 供计费反查。
+- **修复：退避从未生效**。原实现只把退避时长写进日志、请求照发，豆包连续失败 4 次仍在每轮重试——人机校验被越打越久。现在 `refreshAllOfficialPrices(skip)` 真正跳过退避中的供应商，被跳过的**不计入失败**。
+- **修复：E2E 巡检竞态**。套件在 beforeAll 清空 `ops:monitor:*`（含上次运行时间），应用的每分钟 cron 会在下一分钟边界抢先跑巡检、用掉告警冷却槽，导致用例随机失败（`emitted` 缺项）。E2E harness 现在关闭巡检定时器（HTTP 入口不受影响）。
+- 界面：抓取面板新增「聚合价目表（models.dev）」卡片（含来源与兜底说明），价目表来源标注新增「聚合价目表（官网抓不到，按美元折算）」。
+- 文档：`docs/DESIGN-AI计费口径.md` 重写覆盖范围/兜底边界/反爬退避；`docs/API.md`、`docs/USER_GUIDE.md`、`docs/ARCHITECTURE.md` 同步。
+- 测试：新增 28 例（`models-dev.spec.ts` 14、`pricing-priority.spec.ts` 8、`price-refresh-backoff.spec.ts` 6）。单测 410 通过 / E2E 145 通过（连跑 3 轮）/ typecheck 干净。
+
 ## v0.3.1 — 2026-10-01
 
 - 修复：抓取失败的供应商（如豆包被反爬拦截）在快照与界面中完全不留痕
