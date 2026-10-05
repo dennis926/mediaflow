@@ -773,9 +773,28 @@ export class AiService {
     return variants;
   }
 
+  /**
+   * 剥掉模型**自己加**的 AI 标识文案。
+   *
+   * 用户明确要求「不要自动加这个，默认就是没有」。系统本来就不插入标识，
+   * 但实测推理模型偶尔会自行在正文末尾加一句「（本文由 AI 辅助生成）」——
+   * 这同样不是用户的选择，所以这里只做剥离，让标识真正完全由操作者决定。
+   * 注意方向：只删不加。
+   */
+  private static stripSelfAddedDisclosure(body: string): string {
+    const patterns = [
+      /[（(]\s*本文(?:内容)?由\s*AI\s*(?:辅助|自动|生成|撰写)[^）)]*[）)]\s*$/,
+      /[（(]\s*本文(?:内容)?由\s*AI\s*(?:辅助|自动|生成|撰写)[^）)]*[）)]/g,
+      /[【\[]\s*本文(?:内容)?由\s*AI[^】\]]*[】\]]/g,
+    ];
+    let cleaned = body;
+    for (const pattern of patterns) cleaned = cleaned.replace(pattern, '');
+    return cleaned.trimEnd();
+  }
+
   private parseContentDraft(text: string, finishReason?: string): ContentDraft {
     const parsed = this.parseJson(text, finishReason);
-    const body = String(parsed.body ?? '').trim();
+    const body = AiService.stripSelfAddedDisclosure(String(parsed.body ?? '').trim());
     if (body.length < 50) throw new Error('AI 生成的正文过短，请把主题写得更具体后重试');
     const title = String(parsed.title ?? '').trim().slice(0, 60);
     return {
@@ -788,7 +807,7 @@ export class AiService {
 
   private parseKnowledgeDraft(text: string, finishReason?: string): KnowledgeDraft {
     const parsed = this.parseJson(text, finishReason);
-    const content = String(parsed.content ?? '').trim();
+    const content = AiService.stripSelfAddedDisclosure(String(parsed.content ?? '').trim());
     if (content.length < 20) throw new Error('AI 生成的条目内容过短，请补充要点后重试');
     return {
       title: String(parsed.title ?? '').trim().slice(0, 60) || content.slice(0, 24),

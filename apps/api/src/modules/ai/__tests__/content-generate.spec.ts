@@ -211,3 +211,56 @@ describe('内容中心：AI 一键生成（generateContent）', () => {
     expect(result.draft.title.length).toBeGreaterThan(0);
   });
 });
+
+describe('剥离模型自行添加的 AI 标识（用户要求默认不加标识）', () => {
+  /** 让模型返回一段"自作聪明"加了标识的正文，验证系统会把它剥掉。 */
+  function draftWithSelfAddedDisclosure(body: string): string {
+    return JSON.stringify({
+      title: '标题',
+      summary: '摘要',
+      body,
+      tags: ['标签'],
+    });
+  }
+
+  // 正文下限是 50 字（低于会被 parseContentDraft 判为过短），这里留足余量。
+  const longBody =
+    '第一段内容，讲清楚低 GI 主食怎么挑：优先选全谷物而不是精白米，每天主食总量控制在拳头大小，' +
+    '先吃蔬菜和蛋白质再吃主食，餐后散步十分钟，血糖曲线会平稳很多。';
+  const topic = '低 GI 饮食对餐后血糖的影响';
+
+  it('模型在末尾自行加了标识 → 被剥离', async () => {
+    const { service } = buildService(draftWithSelfAddedDisclosure(`${longBody}\n\n（本文由 AI 辅助生成）`));
+
+    const result = await service.generateContent({ topic }, { requestedBy: null });
+
+    expect(result.draft.body).not.toContain('本文由 AI 辅助生成');
+    expect(result.draft.body).toContain('第一段内容');
+  });
+
+  it('模型在中间加了「本文内容由 AI 生成」→ 同样剥离', async () => {
+    const { service } = buildService(draftWithSelfAddedDisclosure(`${longBody}\n\n（本文内容由 AI 生成）\n\n结尾。`));
+
+    const result = await service.generateContent({ topic }, { requestedBy: null });
+
+    expect(result.draft.body).not.toContain('本文内容由 AI 生成');
+    expect(result.draft.body).toContain('结尾');
+  });
+
+  it('模型没加标识 → 正文原样保留（不做任何改写）', async () => {
+    const { service } = buildService(draftWithSelfAddedDisclosure(`${longBody}结尾就是句号。`));
+
+    const result = await service.generateContent({ topic }, { requestedBy: null });
+
+    expect(result.draft.body).toBe(`${longBody}结尾就是句号。`);
+  });
+
+  it('正文里作为例句出现的 AI 不被误删', async () => {
+    const body = `${longBody}很多人问我 AI 能不能替代医生，答案是不能，饮食调整必须和医生配合。`;
+    const { service } = buildService(draftWithSelfAddedDisclosure(body));
+
+    const result = await service.generateContent({ topic }, { requestedBy: null });
+
+    expect(result.draft.body).toBe(body);
+  });
+});
