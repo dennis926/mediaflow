@@ -29,7 +29,7 @@ pnpm workspace 单仓多包：
 - 前端颜色 / 尺寸只能引用 CSS 变量 `var(--mf-*)`，不得硬编码
 - 所有 API 响应由 `ResponseInterceptor` 统一封装为 `{ code, message, data }`
 - 版本号单一来源：`packages/shared/src/constants/version.ts` 的 `APP_VERSION`，由 `pnpm release` 递增并打标签；组件内禁止写死版本字符串
-- AI 计费只认官方价，价格优先级「用户覆盖价 > 官网抓取价 > 聚合价目表（models.dev，仅兜底）> 预置目录价 > 全局兜底价」，禁止折扣与倍率
+- AI 计费只认官方价，价格优先级「用户覆盖价 > 官网抓取价 > 国内权威参考价（国家超算互联网，人民币）> 聚合价目表（models.dev，美元）> 预置目录价 > 全局兜底价」，禁止折扣与倍率
 
 ## 4. 平台适配层与异步发布链路
 

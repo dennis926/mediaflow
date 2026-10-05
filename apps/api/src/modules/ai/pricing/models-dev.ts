@@ -24,7 +24,14 @@ import { findCatalogProvider } from '../model-catalog';
 
 export const MODELS_DEV_URL = 'https://models.dev/api.json';
 
-/** 我们的供应商 id → models.dev 的供应商 id。 */
+/**
+ * 我们的供应商 id → models.dev 的供应商 id。
+ *
+ * 国内厂商在 models.dev 上有**两套条目**：国际版与中国区版（`-cn` 后缀，
+ * 表示国内站点入口）。两套的 cost **都是美元**（见 `currencyOfModelsDevProvider`）。
+ * 这里优先指向中国区版：它对应厂商国内站点的报价，与国内用户实际付费口径更接近；
+ * 中国区版没有可用模型时回落到国际版（见 `MODELS_DEV_PROVIDERS_FALLBACK`）。
+ */
 export const MODELS_DEV_PROVIDERS: Record<string, string> = {
   openai: 'openai',
   anthropic: 'anthropic',
@@ -32,9 +39,21 @@ export const MODELS_DEV_PROVIDERS: Record<string, string> = {
   xai: 'xai',
   deepseek: 'deepseek',
   zhipu: 'zhipuai',
+  kimi: 'moonshotai-cn',
+  qwen: 'alibaba-cn',
+  doubao: 'volcengine',
+  minimax: 'minimax-cn',
+};
+
+/**
+ * 中国版条目缺失时的回落目标。
+ *
+ * 中国版比国际版覆盖窄（例如阿里中国版 91 个模型 vs 国际版 59 个，但条目命名
+ * 不完全一致），两套都要能取到，否则某个模型会莫名没价格。
+ */
+export const MODELS_DEV_PROVIDERS_FALLBACK: Record<string, string> = {
   kimi: 'moonshotai',
   qwen: 'alibaba',
-  doubao: 'volcengine',
   minimax: 'minimax',
 };
 
@@ -100,6 +119,74 @@ function isTextPriced(model: ModelsDevModel): boolean {
 }
 
 /**
+ * models.dev 的 cost **一律是美元**，`*-cn` 条目也不例外。
+ *
+ * `-cn` 后缀表示「中国区站点」（同一个模型的国内入口），**不是**人民币计价。
+ * 这一点用官网价交叉验证过：
+ *   - `minimax-cn/MiniMax-M3` cost = 0.3/1.2 → ×7 = ￥2.1/￥8.4，与官网一致
+ *   - `moonshotai-cn/kimi-k3` cost = 3/15   → ×7 = ￥21/￥105，与官网 ￥20/￥100 一致
+ *   - `alibaba-cn/qwen3.8-max` cost = 1.78/5.33 → ×7 = ￥12.4/￥37.3，与刊例 ￥12/￥36 一致
+ * 若误判成人民币不再乘汇率，会**少收 7 倍**。因此这里恒为美元。
+ */
+export function currencyOfModelsDevProvider(_externalId: string): 'CNY' | 'USD' {
+  return 'USD';
+}
+
+/**
+ * 解析一份 models.dev 供应商条目下的模型价格。
+ *
+ * 抽成独立函数是因为国内厂商要取两套条目（中国版优先、国际版兜底），
+ * 两套的解析逻辑必须完全一致，否则兜底路径会产出不同口径的价格。
+ */
+function parseProviderModels(
+  provider: string,
+  externalId: string,
+  source: ModelsDevProvider,
+): ScrapedPrice[] {
+  const currency = currencyOfModelsDevProvider(externalId);
+  const prices: ScrapedPrice[] = [];
+
+  for (const [modelId, model] of Object.entries(source.models ?? {})) {
+    if (!isTextPriced(model)) continue;
+    const cost = model.cost;
+    if (!cost) continue;
+    const input = cost.input ?? 0;
+    const output = cost.output ?? 0;
+    if (input <= 0 && output <= 0) continue;
+
+    const catalogModel = matchCatalogModel(provider, modelId);
+    // 目录里没有的模型不进快照：界面上展示不了，只会白白撑大设置项。
+    if (!catalogModel) continue;
+
+    const contextTier = (cost.tiers ?? []).find((tier) => (tier.tier?.size ?? 0) > 0);
+    // 中国区条目要标明，否则同一模型出现两个价时用户不知道差别在哪。
+    const region = externalId.endsWith('-cn') ? '（中国区条目）' : '';
+    const notes: string[] = [`聚合价（models.dev），美元${region}`];
+    if (contextTier?.tier?.size) {
+      notes.push(`上下文超过 ${Math.round(contextTier.tier.size / 1000)}k 时价格上调，此处为基础档`);
+    }
+    if (model.status === 'deprecated') notes.push('该模型已标记为废弃');
+
+    const tier = {
+      input,
+      output,
+      cacheWrite: cost.cache_write ?? input,
+      cacheRead: cost.cache_read ?? 0,
+    };
+    prices.push({
+      model: modelId,
+      catalogModel,
+      currency,
+      // 聚合表不分峰谷，两档同价；官网抓取价（若有）会覆盖它。
+      peak: { ...tier },
+      offpeak: { ...tier },
+      note: notes.join('；'),
+    });
+  }
+  return prices;
+}
+
+/**
  * 解析 models.dev 的 api.json，产出我们认识的供应商的价目。
  *
  * 只保留目录里存在的模型：这份聚合表有 200+ 家、上万条记录，全量塞进设置项
@@ -111,38 +198,15 @@ export function parseModelsDev(raw: unknown, fetchedAt = new Date().toISOString(
   const results: ScrapeResult[] = [];
 
   for (const [provider, externalId] of Object.entries(MODELS_DEV_PROVIDERS)) {
-    const source = root[externalId];
-    if (!source?.models) continue;
+    let prices = parseProviderModels(provider, externalId, root[externalId] ?? {});
 
-    const prices: ScrapedPrice[] = [];
-    for (const [modelId, model] of Object.entries(source.models)) {
-      if (!isTextPriced(model)) continue;
-      const cost = model.cost;
-      if (!cost) continue;
-      const input = cost.input ?? 0;
-      const output = cost.output ?? 0;
-      if (input <= 0 && output <= 0) continue;
-
-      const catalogModel = matchCatalogModel(provider, modelId);
-      // 目录里没有的模型不进快照：界面上展示不了，只会白白撑大设置项。
-      if (!catalogModel) continue;
-
-      const contextTier = (cost.tiers ?? []).find((tier) => (tier.tier?.size ?? 0) > 0);
-      const notes: string[] = ['聚合价（models.dev），美元'];
-      if (contextTier?.tier?.size) {
-        notes.push(`上下文超过 ${Math.round(contextTier.tier.size / 1000)}k 时价格上调，此处为基础档`);
+    // 中国版条目没有可用模型时回落到国际版：两套条目命名不完全一致，
+    // 只认一套会让某些模型（尤其新发布的）莫名没有价格。
+    if (!prices.length) {
+      const fallbackId = MODELS_DEV_PROVIDERS_FALLBACK[provider];
+      if (fallbackId && root[fallbackId]) {
+        prices = parseProviderModels(provider, fallbackId, root[fallbackId]);
       }
-      if (model.status === 'deprecated') notes.push('该模型已标记为废弃');
-
-      prices.push({
-        model: modelId,
-        catalogModel,
-        currency: 'USD',
-        // 聚合表不分峰谷，两档同价；官网抓取价（若有）会覆盖它。
-        peak: { input, output, cacheWrite: cost.cache_write ?? input, cacheRead: cost.cache_read ?? 0 },
-        offpeak: { input, output, cacheWrite: cost.cache_write ?? input, cacheRead: cost.cache_read ?? 0 },
-        note: notes.join('；'),
-      });
     }
 
     if (prices.length) {

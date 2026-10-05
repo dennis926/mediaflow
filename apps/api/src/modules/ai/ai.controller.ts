@@ -127,7 +127,8 @@ export class AiController {
   @Post('official-prices/refresh')
   async refreshOfficialPrices(@Body() body: { provider?: string }) {
     const provider = body?.provider ? String(body.provider) : undefined;
-    const { results, failures, aggregate, aggregateError } = await this.pricingService.refreshOfficialPrices(provider);
+    const { results, failures, domestic, domesticError, aggregate, aggregateError } =
+      await this.pricingService.refreshOfficialPrices(provider);
     return {
       fetchedAt: new Date().toISOString(),
       providers: results.map((result) => ({
@@ -143,6 +144,9 @@ export class AiController {
         provider: failure.provider,
         message: failure.message,
       })),
+      // 国内权威参考价（国家超算互联网）：官网抓不到时的首选兜底（人民币）
+      domestic,
+      domesticError,
       // 聚合价目表（models.dev）：官网抓不到的供应商靠它兜底
       aggregate,
       aggregateError,

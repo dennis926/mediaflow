@@ -75,6 +75,38 @@ const OFFICIAL_SNAPSHOT = {
       },
     },
   },
+  /**
+   * 国内权威参考价（国家超算互联网）：人民币口径。
+   * 它必须**优先于**上面的美元聚合价：人民币参考价无需汇率换算，更可靠。
+   * 这里刻意让同一模型在两层都有价，用来验证优先级真的生效。
+   * 注意两层的 MiniMax 数值刻意不同（国内 ￥2.1 vs 聚合 $0.3→￥2.1 恰好相同，
+   * 故 deepseek 层用不同数值区分来源）。
+   */
+  domestic: {
+    fetchedAt: '2026-10-02T00:00:00.000Z',
+    sourceUrl: 'https://www.scnet.cn/acx/llm/api/console/model/landing',
+    providers: {
+      deepseek: {
+        'DeepSeek-V4.1-Flash': {
+          model: 'DeepSeek-V4.1-Flash',
+          catalogModel: 'deepseek-flash',
+          currency: 'CNY',
+          peak: { input: 2, output: 8, cacheWrite: 2, cacheRead: 0.2 },
+          offpeak: { input: 2, output: 8, cacheWrite: 2, cacheRead: 0.2 },
+        },
+      },
+      // 官网抓不到、聚合价是美元 → 国内权威价（人民币）应当胜出
+      minimax: {
+        'MiniMax-M3': {
+          model: 'MiniMax-M3',
+          catalogModel: 'minimax-m3',
+          currency: 'CNY',
+          peak: { input: 2.1, output: 8.4, cacheWrite: 2.1, cacheRead: 0.42 },
+          offpeak: { input: 2.1, output: 8.4, cacheWrite: 2.1, cacheRead: 0.42 },
+        },
+      },
+    },
+  },
 };
 
 /** 北京时间周四 10:00 → 高峰时段。 */
@@ -127,11 +159,37 @@ describe('价格优先级：聚合价目表只能兜底', () => {
     expect(view.tiered).toBe(false);
   });
 
-  it('MiniMax 也由聚合价兜底（官网价格页是 JS 渲染，抓不到）', async () => {
+  it('MiniMax 官网抓不到：优先用国内权威参考价（人民币），而不是美元聚合价', async () => {
     const view = await build({}, OFFICIAL_SNAPSHOT).priceFor('minimax', 'minimax-m3');
-    expect(view.source).toBe('aggregate');
+    // 两层都有价：国内权威价（￥2.1/￥8.4）与聚合价（$0.3/￥1.2 → 折算 ￥2.1/￥8.4）。
+    // 人民币口径优先，且不做汇率换算。
+    expect(view.source).toBe('domestic');
     expect(view.price.input).toBe(2.1);
     expect(view.price.output).toBe(8.4);
+  });
+
+  it('国内权威价是人民币，绝不乘汇率', async () => {
+    // 若误当美元折算，￥2.1 会变成 ￥14.7
+    const view = await build({}, OFFICIAL_SNAPSHOT).priceFor('minimax', 'minimax-m3');
+    expect(view.price.input).not.toBe(14.7);
+    expect(view.price.input).toBe(2.1);
+  });
+
+  it('国内权威价不越过官网抓取价', async () => {
+    const view = await build({ AI_PEAK_WINDOWS: PEAK_WINDOWS }, OFFICIAL_SNAPSHOT).priceFor(
+      'deepseek',
+      'deepseek-flash',
+      undefined,
+      { at: PEAK },
+    );
+    // 官网高峰 ￥2/￥8 与国内权威价数值相同，但来源必须是官网（可区分峰谷）
+    expect(view.source).toBe('official');
+    expect(view.tiered).toBe(true);
+  });
+
+  it('两层兜底都没有时回落到预置目录价', async () => {
+    const view = await build({}, OFFICIAL_SNAPSHOT).priceFor('google', 'gemini-3.8-flash');
+    expect(view.source).toBe('catalog');
   });
 
   it('用户覆盖价高于官网价与聚合价', async () => {

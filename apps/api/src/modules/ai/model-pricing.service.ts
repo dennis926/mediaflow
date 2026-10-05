@@ -18,6 +18,7 @@ import { ScrapeResult, scrapeProvider, SCRAPERS, BLOCKED_SOURCES } from './prici
 import { OfficialPriceSnapshot, OfficialPriceStore } from './pricing/official-price.store';
 import { ScrapedPrice } from './pricing/types';
 import { MODELS_DEV_URL, parseModelsDev } from './pricing/models-dev';
+import { SCNET_PRICING_URL, SCNET_SOURCE_LABEL, parseScnetPricing } from './pricing/scnet';
 import { fetchPage } from './pricing/parse-utils';
 
 /** 四段计价（人民币 / 百万 token），与中转站价目表一致。 */
@@ -43,8 +44,16 @@ export interface ModelPricingView {
   tier: PriceTier;
   /** 是否分峰谷两档计费 */
   tiered: boolean;
-  /** 价格来源：override=自定义覆盖，official=官网抓取，catalog=预置，global=全局兜底价 */
-  source: 'override' | 'official' | 'aggregate' | 'catalog' | 'global';
+  /**
+   * 价格来源：
+   *   override  = 用户自定义覆盖
+   *   official  = 供应商官网抓取
+   *   domestic  = 国内权威参考价（国家超算互联网，人民币）
+   *   aggregate = 聚合价目表（models.dev，美元）
+   *   catalog   = 预置目录价
+   *   global    = 全局兜底价
+   */
+  source: 'override' | 'official' | 'domestic' | 'aggregate' | 'catalog' | 'global';
   /** 该模型是否已被配置为可用 */
   configured: boolean;
   reference: boolean;
@@ -82,6 +91,8 @@ export interface PricingRuleView {
   unscrapable: Array<{ provider: string; label: string; url: string; reason: string }>;
   /** 聚合价目表来源（官网抓不到时的兜底，界面需说明它不是官方价） */
   aggregateSource: { url: string; note: string };
+  /** 国内权威参考价来源（官网抓不到时的首选兜底，人民币口径） */
+  domesticSource: { url: string; label: string; note: string };
 }
 
 /** 金额保留 4 位小数：再多的位数在界面上只是噪声，且会让对账看起来有差异。 */
@@ -185,7 +196,7 @@ export class ModelPricingService {
     model: string,
     rate: number,
     snapshot: OfficialPriceSnapshot | null,
-  ): { tiered: ModelPriceCnyTiered; source: 'official' | 'aggregate' | 'catalog' } | null {
+  ): { tiered: ModelPriceCnyTiered; source: 'official' | 'domestic' | 'aggregate' | 'catalog' } | null {
     // 1) 官网抓取价（优先，且它带 peak/offpeak 两档）
     const scraped = this.findScraped(provider, model, snapshot);
     if (scraped && (scraped.peak.input > 0 || scraped.peak.output > 0)) {
@@ -209,19 +220,39 @@ export class ModelPricingService {
       };
     }
 
-    // 2) 聚合价目表（models.dev）：只补官网抓不到的供应商，且只做兜底。
-    //    它是美元聚合价、峰谷已拍平，绝不允许越过上面的官网抓取价。
+    // 2) 国内权威参考价（国家超算互联网）：官网抓不到时的**首选**兜底。
+    //    它是人民币国内官方口径、无需汇率换算，比按美元折算的聚合价可靠。
+    //    它仍是平台转售刊例价、且不分峰谷，所以不能越过上面的官网抓取价。
+    const domestic = this.findDomestic(provider, model, snapshot);
+    if (domestic && (domestic.peak.input > 0 || domestic.peak.output > 0)) {
+      // 国内源只报人民币；若某天它改成美元报价，这里按币种折算，不做假设。
+      const toCny = (value: number): number =>
+        domestic.currency === 'USD' ? round4(value * rate) : value;
+      const tier: ModelPriceCnyTier = {
+        input: toCny(domestic.peak.input),
+        output: toCny(domestic.peak.output),
+        cacheRead: toCny(domestic.peak.cacheRead),
+      };
+      return { tiered: { peak: { ...tier }, offpeak: { ...tier } }, source: 'domestic' };
+    }
+
+    // 3) 聚合价目表（models.dev）：只补官网抓不到的供应商，且只做兜底。
+    //    它的 cost 一律是美元（含中国区条目），按汇率折算；峰谷已拍平。
+    //    绝不允许越过上面的官网抓取价与国内权威价。
     const aggregated = this.findAggregated(provider, model, snapshot);
     if (aggregated && (aggregated.peak.input > 0 || aggregated.peak.output > 0)) {
+      // 按币种折算：models.dev 一律给美元，但这里不写死，避免将来口径变化时静默算错。
+      const toCny = (value: number): number =>
+        aggregated.currency === 'USD' ? round4(value * rate) : value;
       const tier: ModelPriceCnyTier = {
-        input: round4(aggregated.peak.input * rate),
-        output: round4(aggregated.peak.output * rate),
-        cacheRead: round4(aggregated.peak.cacheRead * rate),
+        input: toCny(aggregated.peak.input),
+        output: toCny(aggregated.peak.output),
+        cacheRead: toCny(aggregated.peak.cacheRead),
       };
       return { tiered: { peak: { ...tier }, offpeak: { ...tier } }, source: 'aggregate' };
     }
 
-    // 3) 预置目录价
+    // 4) 预置目录价
     const catalogModel = findCatalogModel(provider, model);
     if (!catalogModel) return null;
 
@@ -261,6 +292,29 @@ export class ModelPricingService {
     for (const candidate of Object.values(models)) {
       if (candidate.catalogModel === model) return candidate;
       // 大小写不敏感兜底：GLM-5.3 vs glm-5.3
+      if (candidate.catalogModel?.toLowerCase() === model.toLowerCase()) return candidate;
+    }
+    return null;
+  }
+
+  /**
+   * 在国内权威参考价（国家超算互联网）里找某个模型的价。
+   *
+   * 匹配顺序与官网快照一致：先按目录模型 id 精确匹配，再按抓取记录里的
+   * `catalogModel` 反查。平台模型名（`DeepSeek-V4.1-Flash`）与目录 id
+   * （`deepseek-flash`）差异较大，解析时已写入 `catalogModel`，反查是主路径。
+   */
+  private findDomestic(
+    provider: string,
+    model: string,
+    snapshot: OfficialPriceSnapshot | null,
+  ): ScrapedPrice | null {
+    const models = snapshot?.domestic?.providers?.[provider];
+    if (!models) return null;
+    const direct = models[model];
+    if (direct) return direct;
+    for (const candidate of Object.values(models)) {
+      if (candidate.catalogModel === model) return candidate;
       if (candidate.catalogModel?.toLowerCase() === model.toLowerCase()) return candidate;
     }
     return null;
@@ -480,7 +534,12 @@ export class ModelPricingService {
       aggregateSource: {
         url: MODELS_DEV_URL,
         // 说明它为什么只能做兜底，避免用户以为它比官网价更权威
-        note: '聚合价目表，仅在官网抓不到时兜底使用；它只有美元价，且不区分峰谷',
+        note: '聚合价目表，仅在官网抓不到时兜底使用；它只有美元价，且不区分峰谷；国内供应商优先取中国区条目，价格更贴近国内实际',
+      },
+      domesticSource: {
+        url: SCNET_PRICING_URL,
+        label: SCNET_SOURCE_LABEL,
+        note: '国内权威参考价：国家超算互联网（科技部指导的国家级算力平台）公开刊例价，人民币、不分峰谷；仅在厂商官网抓不到时使用',
       },
     };
   }
@@ -551,6 +610,8 @@ export class ModelPricingService {
   async refreshOfficialPrices(provider?: string): Promise<{
     results: ScrapeResult[];
     failures: Array<{ provider: string; message: string }>;
+    domestic: { providers: number; models: number } | null;
+    domesticError: string | null;
     aggregate: { providers: number; models: number } | null;
     aggregateError: string | null;
   }> {
@@ -601,10 +662,17 @@ export class ModelPricingService {
       throw new Error(failures[0]?.message ?? '未解析到任何价格');
     }
 
-    // 抓全部时顺带刷新聚合价目表（它是官网抓不到的供应商的唯一兜底）。
+    // 抓全部时顺带刷新两层兜底价：国内权威价（人民币，优先）+ 聚合价目表（美元/中国版）。
+    let domestic: { providers: number; models: number } | null = null;
+    let domesticError: string | null = null;
     let aggregate: { providers: number; models: number } | null = null;
     let aggregateError: string | null = null;
     if (!provider) {
+      try {
+        domestic = await this.refreshDomesticPrices();
+      } catch (error) {
+        domesticError = error instanceof Error ? error.message : String(error);
+      }
       try {
         aggregate = await this.refreshAggregatePrices();
       } catch (error) {
@@ -612,7 +680,7 @@ export class ModelPricingService {
       }
     }
 
-    return { results, failures, aggregate, aggregateError };
+    return { results, failures, domestic, domesticError, aggregate, aggregateError };
   }
 
   /**
@@ -646,8 +714,14 @@ export class ModelPricingService {
     }
     if (succeeded.length) await this.officialPrices.saveMany(succeeded);
 
-    // 聚合价目表跟着一轮抓取一起刷新：它是官网抓取价的兜底，晚一轮就有一段时间
-    // 出现「官网抓不到、兜底也没有」的空档。它失败不影响上面的成功结果。
+    // 两层兜底价跟着一轮抓取一起刷新：晚一轮就会出现「官网抓不到、兜底也没有」的空档。
+    // 它们各自失败不影响上面的成功结果，也不互相影响（人民币参考价与美元聚合价是两条独立来源）。
+    try {
+      await this.refreshDomesticPrices();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      failed.push({ provider: `${SCNET_SOURCE_LABEL}（国内权威参考价）`, message });
+    }
     try {
       await this.refreshAggregatePrices();
     } catch (error) {
@@ -655,6 +729,46 @@ export class ModelPricingService {
       failed.push({ provider: 'models.dev（聚合价目表）', message });
     }
     return { succeeded, failed };
+  }
+
+  /**
+   * 抓取国内权威参考价（国家超算互联网）。
+   *
+   * 一次请求拿全（平台把首页展示的模型放在一个 JSON 里），比按厂商分别请求简单。
+   * 失败时保留上一份并写原因，不影响官网价与聚合价。
+   */
+  async refreshDomesticPrices(): Promise<{ providers: number; models: number }> {
+    try {
+      const response = await fetchPage(
+        SCNET_PRICING_URL,
+        fetch,
+        20_000,
+        { Accept: 'application/json', Referer: 'https://www.scnet.cn/ui/mall/service/llm' },
+      );
+      if (!response.ok) {
+        throw new Error(`${SCNET_SOURCE_LABEL}返回 HTTP ${response.status}`);
+      }
+      let raw: unknown;
+      try {
+        raw = JSON.parse(response.text);
+      } catch {
+        throw new Error(`${SCNET_SOURCE_LABEL}返回的不是合法 JSON`);
+      }
+      const results = parseScnetPricing(raw);
+      if (!results.length) {
+        // 平台只公开首页展示的模型；匹配不到不算故障，但必须留痕，
+        // 否则界面上会表现为「这个来源压根不存在」。
+        throw new Error(`${SCNET_SOURCE_LABEL}当前公开的模型里没有匹配到我们目录中的模型`);
+      }
+      await this.officialPrices.saveDomestic(results);
+      const models = results.reduce((sum, item) => sum + item.prices.length, 0);
+      this.logger.log(`已抓取国内权威参考价：${results.length} 家供应商、${models} 个模型`);
+      return { providers: results.length, models };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      await this.officialPrices.recordDomesticFailure(message, SCNET_PRICING_URL);
+      throw error;
+    }
   }
 
   /**

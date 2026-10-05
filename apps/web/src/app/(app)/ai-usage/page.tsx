@@ -108,6 +108,11 @@ export default function AiUsagePage() {
       // 逐个供应商汇总：只报"更新了 N 个模型"会掩盖某家抓取失败。
       const summary = result.providers.map((item) => `${item.provider} ${item.count} 个`).join('、');
       const failures = result.failures ?? [];
+      const domestic = result.domestic
+        ? `；国内权威参考价更新 ${result.domestic.providers} 家 / ${result.domestic.models} 个模型`
+        : result.domesticError
+          ? `；国内权威参考价抓取失败（${result.domesticError}）`
+          : '';
       const aggregate = result.aggregate
         ? `；兜底价目表更新 ${result.aggregate.providers} 家 / ${result.aggregate.models} 个模型`
         : result.aggregateError
@@ -117,7 +122,7 @@ export default function AiUsagePage() {
         tone: failures.length ? 'warning' : 'success',
         text: !result.providers.length
           ? `抓取失败：${failures[0]?.message ?? result.warning ?? '未抓取到任何价格'}`
-          : `已从官网更新：${summary}${failures.length ? `；未抓到：${failures.map((item) => item.provider).join('、')}` : ''}${aggregate}`,
+          : `已从官网更新：${summary}${failures.length ? `；未抓到：${failures.map((item) => item.provider).join('、')}` : ''}${domestic}${aggregate}`,
       });
       void queryClient.invalidateQueries({ queryKey: ['ai'] });
     },
@@ -171,11 +176,13 @@ export default function AiUsagePage() {
               ? '已按官方调价'
               : row.source === 'official'
                 ? '官网自动抓取价'
-                : row.source === 'aggregate'
-                  ? '聚合价目表（官网抓不到，按美元折算）'
-                  : row.source === 'catalog'
-                    ? '官方价（预置）'
-                    : '全局兜底价'}
+                : row.source === 'domestic'
+                  ? '国内权威参考价（国家超算互联网）'
+                  : row.source === 'aggregate'
+                    ? '聚合价目表（官网抓不到时的兜底）'
+                    : row.source === 'catalog'
+                      ? '官方价（预置）'
+                      : '全局兜底价'}
           </span>
         </div>
       ),
@@ -486,6 +493,45 @@ export default function AiUsagePage() {
                     </div>
                   );
                 })}
+                {/* 国内权威参考价（国家超算互联网）：官网抓不到时的首选兜底（人民币） */}
+                {data.rules.domesticSource ? (
+                  <div
+                    className={`${styles.scrapeItem} ${
+                      official.data?.domestic?.error ? styles.scrapeItemFailed : ''
+                    }`}
+                  >
+                    <div className={styles.scrapeHead}>
+                      <span className={styles.scrapeName}>国内权威参考价（国家超算互联网）</span>
+                      <Tag
+                        tone={
+                          official.data?.domestic?.error
+                            ? 'danger'
+                            : official.data?.domestic?.fetchedAt
+                              ? 'success'
+                              : 'default'
+                        }
+                      >
+                        {official.data?.domestic?.error
+                          ? '兜底抓取失败'
+                          : official.data?.domestic?.fetchedAt
+                            ? `${Object.keys(official.data.domestic.providers ?? {}).length} 家兜底`
+                            : '尚未抓取'}
+                      </Tag>
+                    </div>
+                    {official.data?.domestic?.fetchedAt ? (
+                      <span className={styles.scrapeMeta}>
+                        上次成功 {formatDateTime(official.data.domestic.fetchedAt)}
+                        <br />
+                        {data.rules.domesticSource.url}
+                      </span>
+                    ) : (
+                      <span className={styles.scrapeMeta}>官网抓不到时优先用它兜底，点「立即抓取官网价」一并刷新</span>
+                    )}
+                    <span className={styles.scrapeReason}>
+                      {official.data?.domestic?.error ?? data.rules.domesticSource.note}
+                    </span>
+                  </div>
+                ) : null}
                 {/* 聚合价目表（models.dev）：官网抓不到的供应商靠它兜底 */}
                 {data.rules.aggregateSource ? (
                   <div
@@ -567,11 +613,13 @@ export default function AiUsagePage() {
                         ? '已按官方调价'
                         : selectedModel.source === 'official'
                           ? '官网抓取价'
-                          : selectedModel.source === 'aggregate'
-                            ? '聚合价目表'
-                            : selectedModel.source === 'catalog'
-                              ? '官方价'
-                              : '全局兜底价'
+                          : selectedModel.source === 'domestic'
+                            ? '国内权威参考价'
+                            : selectedModel.source === 'aggregate'
+                              ? '聚合价目表'
+                              : selectedModel.source === 'catalog'
+                                ? '官方价'
+                                : '全局兜底价'
                     }）`
                   : data?.pricing
                     ? `当前模型：${data.pricing.model}`

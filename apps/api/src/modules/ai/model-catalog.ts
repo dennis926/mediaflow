@@ -106,8 +106,12 @@ export const DEFAULT_MODEL_CATALOG: CatalogProvider[] = [
     defaultBaseUrl: 'https://api.openai.com/v1',
     protocol: 'openai-compatible',
     models: [
-      { model: 'gpt-5.5', label: 'GPT-5.5', officialUsd: { input: 1.25, output: 10, cacheWrite: 0, cacheRead: 0.125 }, reference: true },
-      { model: 'gpt-5.6-sol', label: 'GPT-5.6 SOL', officialUsd: { input: 2.5, output: 20, cacheWrite: 0, cacheRead: 0.25 }, reference: true },
+      { model: 'gpt-6.1-sol', label: 'GPT-6.1 SOL', officialUsd: { input: 2, output: 10, cacheWrite: 2.5, cacheRead: 0.1 }, reference: true, note: '上下文超过 272k token 时翻倍（输入 $4 / 输出 $15）' },
+      { model: 'gpt-6-sol', label: 'GPT-6 SOL', officialUsd: { input: 2, output: 10, cacheWrite: 2.5, cacheRead: 0.2 }, reference: true, note: '上下文超过 272k token 时翻倍（输入 $4 / 输出 $15）' },
+      { model: 'gpt-6-luna', label: 'GPT-6 Luna', officialUsd: { input: 0.1, output: 0.5, cacheWrite: 0.125, cacheRead: 0.01 }, reference: true, note: '上下文超过 272k token 时翻倍（输入 $0.2 / 输出 $0.75）' },
+      { model: 'gpt-6-astra', label: 'GPT-6 Astra', officialUsd: { input: 10, output: 50, cacheWrite: 12.5, cacheRead: 1 }, reference: true, note: '上下文超过 272k token 时翻倍（输入 $20 / 输出 $75）' },
+      { model: 'gpt-5.5', label: 'GPT-5.5', officialUsd: { input: 5, output: 30, cacheWrite: 0, cacheRead: 0.5 }, reference: true, note: '上下文超过 272k token 时翻倍' },
+      { model: 'gpt-5.6-sol', label: 'GPT-5.6 SOL', officialUsd: { input: 4, output: 20, cacheWrite: 0, cacheRead: 0.4 }, reference: true, note: '上下文超过 272k token 时翻倍' },
       { model: 'gpt-5-mini', label: 'GPT-5 mini', officialUsd: { input: 0.25, output: 2, cacheWrite: 0, cacheRead: 0.025 }, reference: true },
     ],
   },
@@ -253,6 +257,6 @@ export function isScrapable(provider: string): boolean {
  * 官方页面本身对中国香港出口封锁，只能手工改价。
  */
 export const UNSCRAPABLE_REASONS: Record<string, string> = {
-  openai: '官网对本站出口 IP 返回 403（Cloudflare 拦截），无法直接抓取；已由聚合价目表（models.dev）兜底',
-  minimax: '官网价格页为纯 JS 渲染（页面不含任何价格数字），无法直接抓取；已由聚合价目表（models.dev）兜底',
+  openai: '官网对本站出口 IP 返回 403（Cloudflare 拦截），无法直接抓取；已由聚合价目表（models.dev）兜底，含 GPT-6 系列',
+  minimax: '官网价格页为纯 JS 渲染（页面不含任何价格数字），无法直接抓取；已由聚合价目表（models.dev 中国版，人民币价）兜底',
 };

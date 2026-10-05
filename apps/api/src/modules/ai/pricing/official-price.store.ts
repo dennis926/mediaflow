@@ -57,6 +57,20 @@ export interface OfficialPriceSnapshot {
     providers: Record<string, Record<string, ScrapedPrice>>;
     error?: string;
   };
+  /**
+   * 国内权威参考价（国家超算互联网）。
+   *
+   * 与 `aggregate` 分开一层的原因：这一层是**人民币、国内官方口径**，不涉及
+   * 币种换算；它单独存在是为了在「官网抓不到」时优先于美元聚合价——对国内
+   * 供应商来说，人民币参考价远比按汇率折算的美元价可靠（少了汇率这一层误差）。
+   * 但它仍是平台转售刊例价，不是厂商官网价，所以排在官网抓取价之后。
+   */
+  domestic?: {
+    fetchedAt: string;
+    sourceUrl: string;
+    providers: Record<string, Record<string, ScrapedPrice>>;
+    error?: string;
+  };
   warnings?: string[];
 }
 
@@ -130,6 +144,8 @@ export class OfficialPriceStore {
       sources,
       providers,
       detail,
+      aggregate: current?.aggregate,
+      domestic: current?.domestic,
       warnings: warnings.length ? [...(current?.warnings ?? []), ...warnings] : current?.warnings,
     };
     await this.settings.updateMany([{ key: SETTING_KEY, value: JSON.stringify(next) }], {
@@ -166,6 +182,8 @@ export class OfficialPriceStore {
       sources: current?.sources ?? {},
       providers: current?.providers ?? {},
       detail,
+      aggregate: current?.aggregate,
+      domestic: current?.domestic,
       warnings: current?.warnings,
     };
     await this.settings.updateMany([{ key: SETTING_KEY, value: JSON.stringify(next) }], {
@@ -200,6 +218,7 @@ export class OfficialPriceStore {
       providers: current?.providers ?? {},
       detail: current?.detail,
       aggregate: { fetchedAt, sourceUrl, providers },
+      domestic: current?.domestic,
       warnings: current?.warnings,
     };
     await this.settings.updateMany([{ key: SETTING_KEY, value: JSON.stringify(next) }], {
@@ -220,6 +239,65 @@ export class OfficialPriceStore {
         fetchedAt: current?.aggregate?.fetchedAt ?? '',
         sourceUrl: current?.aggregate?.sourceUrl || sourceUrl,
         providers: current?.aggregate?.providers ?? {},
+        error,
+      },
+      domestic: current?.domestic,
+      warnings: current?.warnings,
+    };
+    await this.settings.updateMany([{ key: SETTING_KEY, value: JSON.stringify(next) }], {
+      id: null,
+      name: '系统',
+    });
+  }
+
+  /**
+   * 保存国内权威参考价（国家超算互联网）。
+   *
+   * 与 `saveAggregate` 一样只覆盖自己这一层：国内参考价与美元聚合价的优先级
+   * 不同（人民币参考价优先），混进同一层就没法区分了。
+   */
+  async saveDomestic(results: ScrapeResult[]): Promise<void> {
+    const current = await this.read();
+    const providers: Record<string, Record<string, ScrapedPrice>> = { ...(current?.domestic?.providers ?? {}) };
+    let fetchedAt = current?.domestic?.fetchedAt ?? '';
+    let sourceUrl = current?.domestic?.sourceUrl ?? '';
+
+    for (const result of results) {
+      const models: Record<string, ScrapedPrice> = {};
+      for (const price of result.prices) models[price.model] = price;
+      providers[result.provider] = models;
+      sourceUrl = result.sourceUrl;
+      if (result.fetchedAt > fetchedAt) fetchedAt = result.fetchedAt;
+    }
+
+    const next: OfficialPriceSnapshot = {
+      fetchedAt: current?.fetchedAt ?? new Date().toISOString(),
+      sources: current?.sources ?? {},
+      providers: current?.providers ?? {},
+      detail: current?.detail,
+      aggregate: current?.aggregate,
+      domestic: { fetchedAt, sourceUrl, providers },
+      warnings: current?.warnings,
+    };
+    await this.settings.updateMany([{ key: SETTING_KEY, value: JSON.stringify(next) }], {
+      id: null,
+      name: '系统',
+    });
+  }
+
+  /** 记录国内权威参考价抓取失败（保留上一份，只写原因）。 */
+  async recordDomesticFailure(error: string, sourceUrl = ''): Promise<void> {
+    const current = await this.read();
+    const next: OfficialPriceSnapshot = {
+      fetchedAt: current?.fetchedAt ?? new Date().toISOString(),
+      sources: current?.sources ?? {},
+      providers: current?.providers ?? {},
+      detail: current?.detail,
+      aggregate: current?.aggregate,
+      domestic: {
+        fetchedAt: current?.domestic?.fetchedAt ?? '',
+        sourceUrl: current?.domestic?.sourceUrl || sourceUrl,
+        providers: current?.domestic?.providers ?? {},
         error,
       },
       warnings: current?.warnings,

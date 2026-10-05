@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   MODELS_DEV_PROVIDERS,
+  MODELS_DEV_PROVIDERS_FALLBACK,
   MODELS_DEV_URL,
+  currencyOfModelsDevProvider,
   matchCatalogModel,
   normalizeModelName,
   parseModelsDev,
@@ -195,10 +197,17 @@ describe('聚合价目表：解析', () => {
 describe('聚合价目表：供应商映射', () => {
   it('每家都映射到 models.dev 的供应商 id', () => {
     expect(MODELS_DEV_PROVIDERS.openai).toBe('openai');
-    // 智谱在 models.dev 叫 zhipuai，Kimi 叫 moonshotai，千问叫 alibaba
+    // 智谱在 models.dev 叫 zhipuai，豆包叫 volcengine
     expect(MODELS_DEV_PROVIDERS.zhipu).toBe('zhipuai');
-    expect(MODELS_DEV_PROVIDERS.kimi).toBe('moonshotai');
-    expect(MODELS_DEV_PROVIDERS.qwen).toBe('alibaba');
     expect(MODELS_DEV_PROVIDERS.doubao).toBe('volcengine');
+    // 国内厂商优先取中国区条目（-cn），缺失时由 FALLBACK 回落到国际版
+    expect(MODELS_DEV_PROVIDERS.kimi).toBe('moonshotai-cn');
+    expect(MODELS_DEV_PROVIDERS.qwen).toBe('alibaba-cn');
+    expect(MODELS_DEV_PROVIDERS.minimax).toBe('minimax-cn');
+    expect(MODELS_DEV_PROVIDERS_FALLBACK.kimi).toBe('moonshotai');
+    expect(MODELS_DEV_PROVIDERS_FALLBACK.qwen).toBe('alibaba');
+    expect(MODELS_DEV_PROVIDERS_FALLBACK.minimax).toBe('minimax');
+    // 中国区条目也是美元，不能被当成人民币
+    expect(currencyOfModelsDevProvider('moonshotai-cn')).toBe('USD');
   });
 });

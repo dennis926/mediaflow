@@ -83,8 +83,9 @@ describe('模型计价（官方人民币峰谷价 + 覆盖价）', () => {
     const view = await build().priceFor('openai', 'gpt-5.5');
     expect(view.tier).toBe('offpeak');
     expect(view.tiered).toBe(false);
-    expect(view.price.input).toBeCloseTo(8.75, 4);
-    expect(view.price.output).toBeCloseTo(70, 4);
+    // 目录价 $5/$30 × 汇率 7
+    expect(view.price.input).toBeCloseTo(35, 4);
+    expect(view.price.output).toBeCloseTo(210, 4);
   });
 
   it('官网抓取价优先于预置目录价', async () => {

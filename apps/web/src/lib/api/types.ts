@@ -374,8 +374,8 @@ export interface ProviderPricingView {
   models: ModelPricingView[];
 }
 
-/** 价格来源：用户覆盖价 / 官网抓取价 / 聚合价目表 / 预置目录价 / 全局兜底价 */
-export type PriceSource = 'override' | 'official' | 'aggregate' | 'catalog' | 'global';
+/** 价格来源：用户覆盖价 / 官网抓取价 / 国内权威参考价 / 聚合价目表 / 预置目录价 / 全局兜底价 */
+export type PriceSource = 'override' | 'official' | 'domestic' | 'aggregate' | 'catalog' | 'global';
 
 export interface PricingRulesView {
   usdToCny: number;
@@ -389,6 +389,8 @@ export interface PricingRulesView {
   unscrapable: Array<{ provider: string; label: string; url: string; reason: string }>;
   /** 聚合价目表来源（官网抓不到时的兜底，界面需说明它不是官方价） */
   aggregateSource: { url: string; note: string };
+  /** 国内权威参考价来源（官网抓不到时的首选兜底，人民币口径） */
+  domesticSource: { url: string; label: string; note: string };
 }
 
 export interface OfficialPriceProviderSnapshotView {
@@ -425,6 +427,8 @@ export interface OfficialPriceSnapshotView {
   sources: Record<string, string>;
   /** 聚合价目表（models.dev）：只在官网抓取价缺失时使用 */
   aggregate?: OfficialPriceAggregateView;
+  /** 国内权威参考价（国家超算互联网）：官网抓不到时的首选兜底，人民币口径、不换算 */
+  domestic?: OfficialPriceAggregateView;
   providers: Record<
     string,
     Record<string, { model: string; version?: string; peak: ModelPriceCnyTierView; offpeak: ModelPriceCnyTierView }>
@@ -448,6 +452,9 @@ export interface OfficialPriceRefreshResultView {
   /** 聚合价目表（models.dev）本次刷新结果 */
   aggregate?: { providers: number; models: number } | null;
   aggregateError?: string | null;
+  /** 国内权威参考价（国家超算互联网）本次刷新结果 */
+  domestic?: { providers: number; models: number } | null;
+  domesticError?: string | null;
   warning: string | null;
 }
 
