@@ -17,6 +17,8 @@ export interface AiConnectionView {
   hasApiKey: boolean;
   /** 当前使用的是离线占位还是真实供应商 */
   offline: boolean;
+  /** 当前生效渠道的接入方式：官方直连 / 第三方中转 */
+  kind: 'official' | 'relay';
   /** 预置供应商目录，界面上的"选择供应商"下拉用 */
   catalog: Array<{
     provider: string;
@@ -75,6 +77,8 @@ export class AiConfigController {
 
     const saved = await this.providerConfigs.listMasked();
     const savedForProvider = saved.find((item) => item.provider === provider);
+    // 已保存渠道的接入方式（决定计费是否查官方价），未保存时按官方直连处理
+    const activeConfig = savedForProvider ?? (await this.providerConfigs.find(provider));
 
     return {
       provider,
@@ -82,6 +86,7 @@ export class AiConfigController {
       baseUrl,
       apiKeyMasked: savedForProvider?.apiKeyMasked || (apiKey ? `${apiKey.slice(0, 6)}***${apiKey.slice(-4)}` : ''),
       hasApiKey: Boolean(savedForProvider?.hasApiKey || apiKey),
+      kind: activeConfig?.kind === 'relay' ? 'relay' : 'official',
       offline: provider === 'mock' || (!apiKey && !savedForProvider?.hasApiKey),
       catalog: DEFAULT_MODEL_CATALOG.map((item) => ({
         provider: item.provider,
@@ -120,7 +125,17 @@ export class AiConfigController {
   @Capability('settings.write')
   @Put('default')
   async saveDefault(
-    @Body() body: { provider?: string; model?: string; baseUrl?: string; apiKey?: string; models?: string[] },
+    @Body() body: {
+      provider?: string;
+      model?: string;
+      baseUrl?: string;
+      apiKey?: string;
+      models?: string[];
+      /** 接入方式：官方直连（默认）/ 第三方中转 */
+      kind?: 'official' | 'relay';
+      /** 中转渠道的自定义名称，如「某聚合中转」 */
+      channelLabel?: string;
+    },
     @CurrentUser() user?: AuthUser,
   ) {
     const provider = String(body?.provider ?? '').trim();
@@ -137,9 +152,12 @@ export class AiConfigController {
 
     // 多供应商凭据表：把这次测试通过的凭据存下来，方便以后一键切换
     if (apiKey && !apiKey.includes('***')) {
+      const kind = body?.kind === 'relay' ? 'relay' : 'official';
       await this.providerConfigs.upsert({
         provider,
-        label: catalog?.label ?? provider,
+        kind,
+        // 中转渠道用用户起的名字；官方渠道用目录里的名称
+        label: (kind === 'relay' ? body?.channelLabel?.trim() : '') || catalog?.label || provider,
         baseUrl: baseUrl || catalog?.defaultBaseUrl || '',
         apiKey,
         models: [...new Set([model, ...models])],

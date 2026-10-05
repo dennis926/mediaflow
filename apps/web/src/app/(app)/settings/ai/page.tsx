@@ -7,6 +7,7 @@ import { Button } from '../../../../components/ui/Button';
 import { Card } from '../../../../components/ui/Card';
 import { Input, Select } from '../../../../components/ui/Field';
 import { SkeletonRows } from '../../../../components/ui/Skeleton';
+import { Switch } from '../../../../components/ui/Switch';
 import { Tag } from '../../../../components/ui/Tag';
 import { ApiError } from '../../../../lib/api/client';
 import { aiConfigApi } from '../../../../lib/api/endpoints';
@@ -14,6 +15,14 @@ import type { AiConfigView } from '../../../../lib/api/types';
 import styles from '../page.module.css';
 
 type Step = 'idle' | 'tested' | 'fetched';
+
+/**
+ * 接入方式：官方直连（地址自动填、价目表自动查）/ 第三方中转（地址与价格都自己填）。
+ *
+ * 这不是可有可无的分类：中转常有倍率，一个渠道还常同时代理多家模型，
+ * 若按官方价计费会静默算错账——不报错，用户却拿到偏低的成本。
+ */
+type AccessKind = 'official' | 'relay';
 
 /**
  * AI 配置（独立模块）。
@@ -33,6 +42,8 @@ export default function AiConfigPage() {
   const [model, setModel] = useState('');
   const [models, setModels] = useState<string[]>([]);
   const [step, setStep] = useState<Step>('idle');
+  const [kind, setKind] = useState<AccessKind>('official');
+  const [channelLabel, setChannelLabel] = useState('');
   const [feedback, setFeedback] = useState<{ tone: 'success' | 'danger' | 'info' | 'warning'; text: string } | null>(null);
 
   useEffect(() => {
@@ -42,6 +53,7 @@ export default function AiConfigPage() {
     setModel(config.data.model);
     setApiKey(config.data.apiKeyMasked);
     setModels(config.data.model ? [config.data.model] : []);
+    setKind(config.data.kind === 'relay' ? 'relay' : 'official');
     setStep('idle');
   }, [config.data]);
 
@@ -50,7 +62,14 @@ export default function AiConfigPage() {
 
   /** 表单里是否填了"新"密钥（打码值代表沿用已保存的）。 */
   const typedKey = apiKey && !apiKey.includes('***') ? apiKey : undefined;
-  const payload = { provider, apiKey: typedKey, baseUrl: baseUrl || undefined, model: model || undefined };
+  // 中转代理的就是某家的模型（如中转 GPT），所以供应商照常选 OpenAI，
+  // 只是把地址与价格换成中转商的——不需要为中转另造一套命名空间。
+  const payload = {
+    provider,
+    apiKey: typedKey || undefined,
+    baseUrl: baseUrl || undefined,
+    model: model || undefined,
+  };
 
   const test = useMutation({
     mutationFn: () => aiConfigApi.test(payload),
@@ -87,7 +106,16 @@ export default function AiConfigPage() {
   });
 
   const save = useMutation({
-    mutationFn: () => aiConfigApi.saveDefault({ provider, model, baseUrl: baseUrl || undefined, apiKey: typedKey, models }),
+    mutationFn: () =>
+      aiConfigApi.saveDefault({
+        provider,
+        model,
+        baseUrl: baseUrl || undefined,
+        apiKey: typedKey || undefined,
+        models,
+        kind,
+        channelLabel: kind === 'relay' ? channelLabel || undefined : undefined,
+      }),
     onSuccess: (view: AiConfigView) => {
       setFeedback({ tone: 'success', text: `已保存并生效：${view.provider} / ${view.model}` });
       setApiKey(view.apiKeyMasked);
@@ -112,6 +140,7 @@ export default function AiConfigPage() {
     (provider !== config.data?.provider ||
       model !== config.data?.model ||
       baseUrl !== config.data?.baseUrl ||
+      kind !== (config.data?.kind ?? 'official') ||
       Boolean(typedKey));
 
   return (
@@ -140,11 +169,22 @@ export default function AiConfigPage() {
             <div className={styles.summaryGrid}>
               <div className={styles.summaryItem}>
                 <span className={styles.summaryLabel}>供应商</span>
-                <span className={styles.summaryValue}>{currentCatalog?.label ?? provider ?? '—'}</span>
+                <span className={styles.summaryValue}>
+                  {currentCatalog?.label ?? provider ?? '—'}
+                  {config.data?.kind === 'relay' ? (
+                    <Tag tone="warning">第三方中转</Tag>
+                  ) : null}
+                </span>
               </div>
               <div className={styles.summaryItem}>
                 <span className={styles.summaryLabel}>默认模型</span>
                 <span className={styles.summaryValue}>{config.data?.model || '未设置'}</span>
+              </div>
+              <div className={styles.summaryItem}>
+                <span className={styles.summaryLabel}>接入方式</span>
+                <span className={styles.summaryValue}>
+                  {config.data?.kind === 'relay' ? '第三方中转' : '官方直连'}
+                </span>
               </div>
               <div className={styles.summaryItem}>
                 <span className={styles.summaryLabel}>接口地址</span>
@@ -173,6 +213,32 @@ export default function AiConfigPage() {
               <span className={`${styles.stepChip} ${dirty ? '' : styles.stepChipDone}`}>4 保存生效</span>
             </div>
 
+            <div className={styles.accessRow}>
+              <Switch
+                checked={kind === 'relay'}
+                onChange={(checked) => {
+                  setKind(checked ? 'relay' : 'official');
+                  setStep('idle');
+                  setFeedback(
+                    checked
+                      ? {
+                          tone: 'info',
+                          text:
+                            '已切换为第三方中转：接口地址与价格都由中转商决定，请填写中转商提供的地址；' +
+                            '价格请到「AI 用量」里按该渠道填写，系统不会拿官方价冒充中转价。',
+                        }
+                      : null,
+                  );
+                }}
+                label="第三方中转（接口地址与价格都自己填）"
+                hint={
+                  kind === 'relay'
+                    ? '当前按中转价计费，不套用官方价'
+                    : '当前按官方价计费，价目表自动同步'
+                }
+              />
+            </div>
+
             <div className={styles.formGrid}>
               <Select
                 label="供应商"
@@ -189,7 +255,8 @@ export default function AiConfigPage() {
                   const next = event.target.value;
                   setProvider(next);
                   const found = catalog.find((item) => item.provider === next);
-                  setBaseUrl(found?.defaultBaseUrl ?? '');
+                  // 中转模式下接口地址属于中转商，换供应商时不能拿官方地址覆盖掉
+                  if (kind === 'official') setBaseUrl(found?.defaultBaseUrl ?? '');
                   setModels(found?.models ?? []);
                   setModel(found?.models[0] ?? '');
                   setStep('idle');
@@ -204,10 +271,26 @@ export default function AiConfigPage() {
               <Input
                 label="接口地址"
                 name="baseUrl"
-                placeholder={currentCatalog?.defaultBaseUrl ?? 'https://api.deepseek.com'}
+                placeholder={
+                  kind === 'relay'
+                    ? 'https://中转站域名/v1'
+                    : (currentCatalog?.defaultBaseUrl ?? 'https://api.deepseek.com')
+                }
                 value={baseUrl}
-                onChange={(event) => setBaseUrl(event.target.value)}
+                onChange={(event) => {
+                  setBaseUrl(event.target.value);
+                  setStep('idle');
+                }}
               />
+              {kind === 'relay' ? (
+                <Input
+                  label="中转渠道名称"
+                  name="channelLabel"
+                  placeholder="例如：某聚合中转（仅用于在用量页区分，不影响调用）"
+                  value={channelLabel}
+                  onChange={(event) => setChannelLabel(event.target.value)}
+                />
+              ) : null}
               <Input
                 label="API Key"
                 name="apiKey"
@@ -244,6 +327,15 @@ export default function AiConfigPage() {
             {step === 'idle' && provider !== 'mock' ? (
               <Banner tone="warning">
                 <span>请先点「测试连接」。测试通过后「获取模型」才会启用——这样能确保模型列表来自真正可用的凭据。</span>
+              </Banner>
+            ) : null}
+
+            {kind === 'relay' ? (
+              <Banner tone="info">
+                <span>
+                  第三方中转模式下，系统不会拿官方价冒充中转价——中转通常有倍率，按官方价算会低估成本。
+                  请到「AI 用量」页找到这个渠道，为它的每个模型填写实际单价（留空则回落到全局兜底价）。
+                </span>
               </Banner>
             ) : null}
 

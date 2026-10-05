@@ -450,8 +450,17 @@ export const aiConfigApi = {
   models: (payload: { provider?: string; apiKey?: string; baseUrl?: string; model?: string }) =>
     api.post<AiModelsResult>('/ai-config/models', payload),
   /** 第三步：保存并设为默认 */
-  saveDefault: (payload: { provider: string; model: string; baseUrl?: string; apiKey?: string; models?: string[] }) =>
-    api.put<AiConfigView>('/ai-config/default', payload),
+  saveDefault: (payload: {
+    provider: string;
+    model: string;
+    baseUrl?: string;
+    apiKey?: string;
+    models?: string[];
+    /** 接入方式：官方直连 / 第三方中转（决定计费是否套用官方价） */
+    kind?: 'official' | 'relay';
+    /** 中转渠道的自定义名称 */
+    channelLabel?: string;
+  }) => api.put<AiConfigView>('/ai-config/default', payload),
   /** 切到离线占位（不消耗额度） */
   offline: () => api.put<AiConfigView>('/ai-config/offline', {}),
 };

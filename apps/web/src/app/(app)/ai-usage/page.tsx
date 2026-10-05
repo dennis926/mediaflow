@@ -182,7 +182,9 @@ export default function AiUsagePage() {
                     ? '聚合价目表（官网抓不到时的兜底）'
                     : row.source === 'catalog'
                       ? '官方价（预置）'
-                      : '全局兜底价'}
+                      : row.source === 'relay'
+                        ? '中转价（请填写实际单价）'
+                        : '全局兜底价'}
           </span>
         </div>
       ),
@@ -397,6 +399,7 @@ export default function AiUsagePage() {
                   }}
                 >
                   {item.label}
+                  {item.kind === 'relay' ? <span className={styles.tabBadge}>中转</span> : null}
                   {item.configured ? null : <span className={styles.tabBadge}>未配置</span>}
                 </button>
               ))}
@@ -405,7 +408,17 @@ export default function AiUsagePage() {
               <div className={styles.providerBar}>
                 <span className={styles.meta}>
                   地址 {activeProvider.baseUrl || '（未填写）'} · 模型 {activeProvider.models.length} 个
+                  {activeProvider.kind === 'relay' ? ' · 第三方中转（不套用官方价）' : ''}
                 </span>
+                {activeProvider.kind === 'relay' ? (
+                  <Banner tone="warning">
+                    <span>
+                      这是第三方中转渠道，价格由中转商决定（常有倍率），系统不会拿官方价代替。
+                      请点下方模型行的「改价」填写该渠道的实际单价；未填写的模型会回落到全局兜底价，
+                      成本数字仅供估算。
+                    </span>
+                  </Banner>
+                ) : null}
                 {activeProvider.configured ? (
                   <>
                     <Button variant="text" size="sm" onClick={() => setProviderDialog(activeProvider)}>
@@ -619,7 +632,9 @@ export default function AiUsagePage() {
                               ? '聚合价目表'
                               : selectedModel.source === 'catalog'
                                 ? '官方价'
-                                : '全局兜底价'
+                                : selectedModel.source === 'relay'
+                                  ? '中转价'
+                                  : '全局兜底价'
                     }）`
                   : data?.pricing
                     ? `当前模型：${data.pricing.model}`

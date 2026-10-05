@@ -1,6 +1,6 @@
 {
   "name": "mediaflow",
-  "version": "0.7.4",
+  "version": "0.8.0",
   "private": true,
   "description": "MediaFlow - social media content distribution and matrix operation platform",
   "packageManager": "pnpm@9.15.9",

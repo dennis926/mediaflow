@@ -126,6 +126,21 @@
   font-size: var(--mf-font-size-md);
   font-weight: var(--mf-font-weight-medium);
   word-break: break-all;
+  /* 「供应商」这类值可能带一个「第三方中转」标签，需要留出间距 */
+  display: flex;
+  align-items: center;
+  gap: var(--mf-space-2);
+  flex-wrap: wrap;
+}
+
+/* 接入方式（官方直连 / 第三方中转）开关所在行。
+   这是一个语义分水岭，用浅底 + 边框单独框出来，避免用户在"地址是自动填还是自己填"上产生歧义。 */
+.accessRow {
+  margin-bottom: var(--mf-space-4);
+  padding: var(--mf-space-3) var(--mf-space-4);
+  border: 1px solid var(--mf-color-border-subtle);
+  border-radius: var(--mf-radius-md);
+  background: var(--mf-color-bg-surface);
 }
 
 .steps {

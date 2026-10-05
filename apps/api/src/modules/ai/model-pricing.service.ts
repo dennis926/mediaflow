@@ -53,7 +53,7 @@ export interface ModelPricingView {
    *   catalog   = 预置目录价
    *   global    = 全局兜底价
    */
-  source: 'override' | 'official' | 'domestic' | 'aggregate' | 'catalog' | 'global';
+  source: 'override' | 'official' | 'domestic' | 'aggregate' | 'catalog' | 'global' | 'relay';
   /** 该模型是否已被配置为可用 */
   configured: boolean;
   reference: boolean;
@@ -63,6 +63,8 @@ export interface ModelPricingView {
 export interface ProviderPricingView {
   provider: string;
   label: string;
+  /** 官方直连 / 第三方中转；界面据此标注，并禁止对中转渠道抓官网价 */
+  kind?: 'official' | 'relay';
   /** 是否已在「AI 服务」里配置了密钥 */
   configured: boolean;
   /** 是否已填密钥（用于界面提示"留空不修改"） */
@@ -364,7 +366,15 @@ export class ModelPricingService {
     const catalogModel = findCatalogModel(provider, model);
     const tier: PriceTier = peakConfig.windows.length ? tierAt(at, peakConfig) : 'offpeak';
 
-    const official = this.resolveOfficial(provider, model, rate, snapshot);
+    /**
+     * 第三方中转：一律不查官方价。
+     *
+     * 中转站常有倍率（1:1、1:5 等），且一个渠道常同时代理多家模型，若继续套官方价
+     * 会**静默算错账**——不报错，用户却拿到偏低的成本数字。用户的规矩是「禁止猜价」，
+     * 所以这里只认用户在「AI 用量」里为该渠道填的价格，没填才回落到全局兜底价。
+     */
+    const isRelay = config?.kind === 'relay';
+    const official = isRelay ? null : this.resolveOfficial(provider, model, rate, snapshot);
     const officialUsd = catalogModel?.officialUsd ?? null;
     const officialCny = official?.tiered ?? null;
     const tiered = Boolean(
@@ -412,7 +422,7 @@ export class ModelPricingService {
       source = official?.source ?? 'catalog';
     } else {
       price = fallback;
-      source = 'global';
+      source = isRelay ? 'relay' : 'global';
     }
 
     return {
@@ -446,11 +456,13 @@ export class ModelPricingService {
       providers.push({
         provider: config.provider,
         label: config.label,
+        kind: config.kind === 'relay' ? ('relay' as const) : ('official' as const),
         configured: true,
         hasApiKey: Boolean(config.apiKey),
         baseUrl: config.baseUrl,
         protocol: config.protocol,
-        scrapable: isScrapable(config.provider),
+        // 中转站的地址不是官方域名，抓官网价格没有意义，也抓不到
+        scrapable: config.kind !== 'relay' && isScrapable(config.provider),
         models,
       });
     }
@@ -478,10 +490,19 @@ export class ModelPricingService {
     return providers;
   }
 
-  /** 某供应商下的模型：用户配置的模型列表优先，预置目录补充（去重）。 */
+  /**
+   * 某供应商下的模型。
+   *
+   * 官方直连：用户配置的模型优先，预置目录补充（去重）——目录能帮用户少漏填可用模型。
+   * 第三方中转：**只列用户填的模型**。中转站的模型名常带后缀或自定义，
+   * 混进官方目录只会让用户看到一堆这个渠道根本调不通的模型。
+   */
   private async modelsFor(config: ProviderConfig): Promise<ModelPricingView[]> {
     const catalog = findCatalogProvider(config.provider);
-    const names = [...new Set([...config.models, ...(catalog?.models ?? []).map((model) => model.model)])];
+    const names =
+      config.kind === 'relay'
+        ? [...new Set(config.models)]
+        : [...new Set([...config.models, ...(catalog?.models ?? []).map((model) => model.model)])];
     return Promise.all(names.map((model) => this.priceFor(config.provider, model)));
   }
 

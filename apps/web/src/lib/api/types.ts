@@ -374,6 +374,8 @@ export interface ModelPricingView {
 export interface ProviderPricingView {
   provider: string;
   label: string;
+  /** 官方直连 / 第三方中转；中转渠道不套用官方价 */
+  kind?: 'official' | 'relay';
   configured: boolean;
   hasApiKey: boolean;
   baseUrl: string;
@@ -383,8 +385,11 @@ export interface ProviderPricingView {
   models: ModelPricingView[];
 }
 
-/** 价格来源：用户覆盖价 / 官网抓取价 / 国内权威参考价 / 聚合价目表 / 预置目录价 / 全局兜底价 */
-export type PriceSource = 'override' | 'official' | 'domestic' | 'aggregate' | 'catalog' | 'global';
+/**
+ * 价格来源：用户覆盖价 / 官网抓取价 / 国内权威参考价 / 聚合价目表 / 预置目录价 /
+ * 中转渠道（未填价，回落到全局兜底）/ 全局兜底价。
+ */
+export type PriceSource = 'override' | 'official' | 'domestic' | 'aggregate' | 'catalog' | 'relay' | 'global';
 
 export interface PricingRulesView {
   usdToCny: number;
@@ -698,6 +703,20 @@ export interface WorkspaceExportJobItem {
 }
 
 /* ---------- AI 配置模块 ---------- */
+/** 价目表里的供应商视图 */
+export interface AiPricingProviderView {
+  provider: string;
+  label: string;
+  /** 官方直连 / 第三方中转 */
+  kind?: 'official' | 'relay';
+  configured: boolean;
+  hasApiKey?: boolean;
+  baseUrl?: string;
+  protocol?: string;
+  scrapable?: boolean;
+  models?: unknown[];
+}
+
 export interface AiConfigCatalogItem {
   provider: string;
   label: string;
@@ -716,8 +735,13 @@ export interface AiConfigView {
   hasApiKey: boolean;
   /** true = 当前是离线占位，不会真实调用外部接口 */
   offline: boolean;
+  /** 当前生效渠道的接入方式 */
+  kind?: 'official' | 'relay';
   catalog: AiConfigCatalogItem[];
 }
+
+/** 接入方式：官方直连 / 第三方中转 */
+export type AiAccessKind = 'official' | 'relay';
 
 export interface AiModelsResult {
   ok: boolean;

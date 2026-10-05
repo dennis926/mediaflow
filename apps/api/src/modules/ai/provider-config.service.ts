@@ -4,10 +4,25 @@ import { DEFAULT_MODEL_CATALOG, findCatalogProvider } from './model-catalog';
 
 export const PROVIDER_CONFIGS_KEY = 'AI_PROVIDER_CONFIGS';
 
+/**
+ * 接入方式。
+ *
+ * - official：官方直连。地址自动填官方域名，价目表自动查官方价。
+ * - relay：第三方中转站。地址与价格都由用户填——中转通常有倍率（1:1、1:5 等），
+ *   且一个中转渠道常同时代理多家模型，若继续按官方价计算会**静默算错账**，
+ *   所以 relay 渠道一律不查官方价，只用渠道自己填的价格。
+ *
+ * 这层区分是必须的：仅靠"选官方后手改地址"无法表达"我其实已经切到中转了"，
+ * 系统仍会按官方价记账，而用户不会知道自己算错了。
+ */
+export type ProviderKind = 'official' | 'relay';
+
 export interface ProviderConfig {
-  /** 供应商标识，与价目表 catalog 的 provider 对齐（deepseek / openai / anthropic / ...） */
+  /** 供应商标识，与价目表 catalog 的 provider 对齐（deepseek / openai / anthropic, ...） */
   provider: string;
   label: string;
+  /** 接入方式；旧数据没有该字段时按 official 处理 */
+  kind?: ProviderKind;
   /** OpenAI 兼容地址或 Anthropic 原生地址 */
   baseUrl: string;
   /** 密钥（只在服务端保存，接口返回时打码） */
@@ -68,6 +83,7 @@ export class ProviderConfigService {
     return configs.map((config) => ({
       provider: config.provider,
       label: config.label,
+      kind: config.kind === 'relay' ? 'relay' : 'official',
       baseUrl: config.baseUrl,
       models: config.models,
       protocol: config.protocol,
@@ -82,7 +98,20 @@ export class ProviderConfigService {
     const configs = await this.list();
     const index = configs.findIndex((item) => item.provider === input.provider);
     const existing = index >= 0 ? configs[index] : undefined;
+    // 中转渠道不在预置目录里，catalog 为空是正常的——它的一切都由用户填
     const catalog = findCatalogProvider(input.provider);
+    const kind: ProviderKind = input.kind ?? existing?.kind ?? 'official';
+
+    if (kind === 'relay') {
+      // 中转站必须自己给地址：查不到目录默认值时如果留空，运行时只会拼出非法 URL，
+      // 用户看到的错误还会被误当成 Key 问题。
+      if (!input.baseUrl?.trim() && !existing?.baseUrl) {
+        throw new BadRequestException('第三方中转必须填写接口地址');
+      }
+      if (!/^https?:\/\//i.test((input.baseUrl?.trim() || existing?.baseUrl || ''))) {
+        throw new BadRequestException('接口地址需以 http:// 或 https:// 开头');
+      }
+    }
 
     const apiKey = input.apiKey && !input.apiKey.includes('***') ? input.apiKey : (existing?.apiKey ?? '');
     const models = (input.models ?? existing?.models ?? catalog?.models.map((model) => model.model) ?? []).filter(Boolean);
@@ -90,6 +119,7 @@ export class ProviderConfigService {
 
     const next: ProviderConfig = {
       provider: input.provider,
+      kind,
       label: input.label?.trim() || existing?.label || catalog?.label || input.provider,
       baseUrl: input.baseUrl?.trim() || existing?.baseUrl || catalog?.defaultBaseUrl || '',
       apiKey,
@@ -104,7 +134,9 @@ export class ProviderConfigService {
       [{ key: PROVIDER_CONFIGS_KEY, value: JSON.stringify(configs) }],
       { id: null, name: '系统' },
     );
-    this.logger.log(`AI 供应商配置已更新：${next.provider}（${next.models.length} 个模型）`);
+    this.logger.log(
+      `AI 供应商配置已更新：${next.provider}（${kind === 'relay' ? '第三方中转' : '官方直连'}，${next.models.length} 个模型）`,
+    );
     return this.listMasked();
   }
 
@@ -137,6 +169,7 @@ export class ProviderConfigService {
         .map((item) => ({
           provider: item.provider,
           label: item.label ?? item.provider,
+          kind: item.kind === 'relay' ? ('relay' as const) : ('official' as const),
           baseUrl: item.baseUrl ?? '',
           apiKey: item.apiKey ?? '',
           models: Array.isArray(item.models) ? item.models : [],
