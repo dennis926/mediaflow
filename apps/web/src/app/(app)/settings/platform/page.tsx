@@ -85,7 +85,7 @@ export default function PlatformChannelsPage() {
           <Card title="平台密钥" extra={<Tag tone={activeCount > 0 ? 'success' : 'default'}>已启用 {activeCount} 个平台</Tag>}>
             <Banner tone="info">
               <span>
-                打开开关表示"这个平台要接入"。打开后展开填写该平台的凭据（加密存储，界面只显示后四位）。
+                打开开关表示「这个平台要接入」。打开后展开填写该平台的凭据（加密存储，界面只显示后四位）。
                 没有官方发布接口的平台（视频号、知乎、头条等）不需要填凭据，用浏览器插件半自动发布。
                 实际账号授权在「账号管理」里完成。
               </span>

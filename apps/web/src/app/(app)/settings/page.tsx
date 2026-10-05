@@ -108,7 +108,7 @@ export default function SettingsPage() {
       }
     }
     return items;
-  }, [groups, draft]);
+  }, [settings.data, groups, draft]);
 
   const save = useMutation({
     mutationFn: () => settingsApi.update(dirtyItems),
