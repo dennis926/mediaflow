@@ -145,6 +145,36 @@ export class AiConfigController {
 
     const apiKey = body?.apiKey?.trim();
     const baseUrl = body?.baseUrl?.trim();
+
+    // 中转渠道必须给出可用的接口地址。校验放在这一层而不是 ProviderConfigService：
+    // 后者只在"填了新密钥"时才被调用，沿用已保存密钥的保存请求会整个绕过它。
+    if (body?.kind === 'relay') {
+      const effectiveBase = (baseUrl || '').trim() || (findCatalogProvider(provider)?.defaultBaseUrl ?? '');
+      if (!effectiveBase) throw new BadRequestException('第三方中转必须填写接口地址');
+      if (!/^https?:\/\//i.test(effectiveBase)) {
+        throw new BadRequestException('接口地址需以 http:// 或 https:// 开头');
+      }
+    }
+
+    /**
+     * 拒绝保存明显是占位符的密钥。
+     *
+     * 真实事故：恢复测试配置时从 .env 读 AI_API_KEY 写回生产，而 .env 里是模板占位符
+     * `sk-your-deepseek-api-key`，结果把数据库里的真实密钥覆盖成假值，AI 功能全线 401。
+     * 这类值不需要联网就能认出来，不该等到调用时才失败。
+     */
+    if (apiKey && !apiKey.includes('***')) {
+      const looksPlaceholder =
+        /^sk-your/i.test(apiKey) ||
+        /^your[-_]/i.test(apiKey) ||
+        /example|placeholder|changeme|xxxx/i.test(apiKey);
+      if (looksPlaceholder) {
+        throw new BadRequestException(
+          '这看起来是示例密钥（例如 .env 模板里的 sk-your-...）。为避免覆盖正在使用的真实密钥，已拒绝保存。' +
+            '请直接到供应商后台复制真实密钥，或把 .env 里的占位符改掉。',
+        );
+      }
+    }
     const catalog = findCatalogProvider(provider);
     const models = Array.isArray(body?.models) && body.models.length > 0
       ? body.models.map((item) => String(item).trim()).filter(Boolean)
