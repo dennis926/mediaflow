@@ -14,7 +14,7 @@ import { Content } from './entities/content.entity';
 import { ContentReview } from './entities/content-review.entity';
 import { PublishTask } from '../publish/entities/publish-task.entity';
 import type { KnowledgeMatch } from './knowledge.service';
-import { AiFlagCheckDto, CreateContentDto, QueryContentDto, UpdateContentDto } from './dto/content.dto';
+import { AiFlagCheckDto, AiGenerateContentDto, CreateContentDto, QueryContentDto, UpdateContentDto } from './dto/content.dto';
 
 export interface ContentActor {
   id?: string | null;
@@ -35,6 +35,14 @@ export interface AdaptResult {
   variants: ContentVariant[];
   skipped: PlatformCode[];
   /** 本次生成引用的品牌资料（可解释 AI 为什么这么写）。 */
+  knowledgeUsed: KnowledgeMatch[];
+}
+
+export interface ContentDraftResult {
+  draft: { title: string; summary: string; body: string; tags: string[] };
+  generationId: string;
+  model: string;
+  /** 本次生成引用的品牌资料；为空说明知识库里没有匹配资料（AI 会更自由发挥）。 */
   knowledgeUsed: KnowledgeMatch[];
 }
 
@@ -441,6 +449,75 @@ export class ContentService {
   }
 
   /** Calls the AI service and persists one variant per requested platform. */
+  /**
+   * 「AI 一键生成」：给一个主题，AI 从零起草一篇内容，直接填进编辑器由人工确认。
+   *
+   * 与 `aiAdapt` 的分工：`aiAdapt` 改写**已保存**的正文成各平台版本；这里是从零起草，
+   * 产物尚未入库（用户在编辑器里改完再点保存）。
+   *
+   * 品牌锚定与 `aiAdapt` 走同一条路（`findRelevant` + `buildPromptSection`）：
+   * 让 AI 照着品牌资料写，而不是自由发挥；引用了哪些资料会一并返回，便于解释。
+   */
+  async aiGenerateDraft(dto: AiGenerateContentDto, actor: ContentActor): Promise<ContentDraftResult> {
+    // 用主题 + 关键词做检索，命中品牌资料后作为硬约束注入 prompt
+    const matches = await this.knowledgeService.findRelevant({
+      title: dto.topic,
+      tags: dto.keywords,
+      brand: dto.brand,
+      platform: dto.platform,
+    });
+    const knowledge = matches.length
+      ? { ids: matches.map((match) => match.id), section: this.knowledgeService.buildPromptSection(matches) }
+      : undefined;
+
+    const generated = await this.aiService.generateContent(
+      {
+        topic: dto.topic,
+        platform: dto.platform,
+        tone: dto.tone,
+        wordCount: dto.wordCount,
+        keywords: dto.keywords,
+        brand: dto.brand,
+        knowledge,
+      },
+      {
+        requestedBy: actor.id ?? null,
+        inputRefs: {
+          topic: dto.topic,
+          ...(dto.platform ? { platforms: [dto.platform] } : {}),
+          ...(knowledge?.ids.length ? { knowledgeIds: knowledge.ids } : {}),
+        },
+      },
+    );
+    await this.knowledgeService.markUsed(knowledge?.ids ?? []);
+
+    const scope = await this.workspaceContext.current();
+    await this.audit.record({
+      action: 'content.ai_draft',
+      resourceType: 'content',
+      resourceId: null,
+      tenantId: scope.tenantId,
+      workspaceId: scope.workspaceId,
+      actorId: actor.id ?? null,
+      actorName: actor.name ?? null,
+      ip: actor.ip ?? null,
+      userAgent: actor.userAgent ?? null,
+      payload: {
+        topic: dto.topic,
+        platform: dto.platform ?? null,
+        generationId: generated.generationId,
+        knowledgeUsed: matches.map((match) => match.title),
+      },
+    });
+
+    return {
+      draft: generated.draft,
+      generationId: generated.generationId,
+      model: generated.model,
+      knowledgeUsed: matches,
+    };
+  }
+
   async aiAdapt(contentId: string, dto: AiAdaptDto, actor: ContentActor): Promise<AdaptResult> {
     const content = await this.get(contentId);
     const platforms = [...new Set(dto.platforms)];

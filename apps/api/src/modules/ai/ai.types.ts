@@ -1,5 +1,13 @@
 import { PlatformCode } from '@mediaflow/shared';
-export type AiTaskType = 'generate' | 'adapt' | 'optimize_title' | 'compliance_check' | 'knowledge_generate' | 'knowledge_polish';
+export type AiTaskType =
+  | 'generate'
+  | 'adapt'
+  | 'optimize_title'
+  | 'compliance_check'
+  | 'knowledge_generate'
+  | 'knowledge_polish'
+  /** 内容中心「AI 一键生成」：按主题 + 品牌资料从零写一篇可发布内容 */
+  | 'content_generate';
 
 export interface AiCompletionRequest {
   task: AiTaskType;
@@ -77,4 +85,28 @@ export interface KnowledgePolishInput {
   category: string;
   content: string;
   instruction?: string;
+}
+
+/** 内容中心「AI 一键生成」的输入：主题 + 可选要求 + 品牌资料锚定。 */
+export interface ContentDraftInput {
+  topic: string;
+  /** 目标平台（决定语气与长度；不传按通用写）。 */
+  platform?: PlatformCode;
+  tone?: string;
+  /** 期望字数区间，缺省按平台指引。 */
+  wordCount?: number;
+  /** 必须覆盖的关键词。 */
+  keywords?: string[];
+  /** 品牌名，用于让 AI 对齐口径。 */
+  brand?: string;
+  /** 已检索到的品牌资料，拼进 prompt 并记入 inputRefs。 */
+  knowledge?: { ids: string[]; section: string };
+}
+
+/** 一键生成的结果：直接可填进编辑器表单。 */
+export interface ContentDraft {
+  title: string;
+  summary: string;
+  body: string;
+  tags: string[];
 }

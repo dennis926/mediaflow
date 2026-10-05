@@ -16,6 +16,7 @@ import type {
   CommitImportResult,
   ComplianceReport,
   Content,
+  ContentDraftResult,
   ContentRevisionItem,
   ContentTemplateItem,
   ContentVariant,
@@ -130,6 +131,15 @@ export const contentApi = {
   /** 归档 / 取消归档：保留历史，不再参与发布与检索 */
   archive: (id: string, archived: boolean) => api.patch<Content>(`/contents/${id}/archive`, { archived }),
   variants: (id: string) => api.get<ContentVariant[]>(`/contents/${id}/variants`),
+  /** AI 一键生成：给主题从零起草一篇内容（不入库，由编辑器确认后保存） */
+  aiDraft: (payload: {
+    topic: string;
+    platform?: PlatformCode;
+    tone?: string;
+    wordCount?: number;
+    keywords?: string[];
+    brand?: string;
+  }) => api.post<ContentDraftResult>('/contents/ai-draft', payload),
   aiAdapt: (id: string, payload: { platforms: PlatformCode[]; tone?: string; keywords?: string[]; overwrite?: boolean }) =>
     api.post<AdaptResult>(`/contents/${id}/ai-adapt`, payload),
   /** 批量归档/取消归档/删除（逐条返回失败原因） */

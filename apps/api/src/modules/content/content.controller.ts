@@ -4,8 +4,8 @@ import { Capability } from '../auth/capabilities';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { toActor } from '../auth/actor.util';
 import { Content } from './entities/content.entity';
-import { AiFlagCheckDto, ArchiveContentDto, BatchContentDto, CreateContentDto, QueryContentDto, UpdateContentDto } from './dto/content.dto';
-import { ContentPage, ContentService } from './content.service';
+import { AiFlagCheckDto, AiGenerateContentDto, ArchiveContentDto, BatchContentDto, CreateContentDto, QueryContentDto, UpdateContentDto } from './dto/content.dto';
+import { ContentDraftResult, ContentPage, ContentService } from './content.service';
 
 @Controller('contents')
 export class ContentController {
@@ -39,6 +39,18 @@ export class ContentController {
 
   /** 批量操作：归档/取消归档/删除（逐条返回失败原因，不整批中断） */
   @Capability('content.write')
+  /**
+   * 「AI 一键生成」：给主题，AI 从零起草一篇内容（不入库，由编辑器人工确认后保存）。
+   *
+   * 路由必须声明在 `@Post()` 与 `@Get(':id')` **之前**的静态路径上，
+   * 否则会被 `:id` 捕获当成 UUID 解析而报 400。
+   */
+  @Capability('content.write')
+  @Post('ai-draft')
+  aiDraft(@Body() dto: AiGenerateContentDto, @CurrentUser() user?: AuthUser): Promise<ContentDraftResult> {
+    return this.contentService.aiGenerateDraft(dto, toActor(user));
+  }
+
   @Post('batch')
   batch(
     @Body() dto: BatchContentDto,

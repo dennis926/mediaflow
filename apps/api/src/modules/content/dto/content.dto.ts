@@ -120,3 +120,42 @@ export class AiFlagCheckDto {
   @Length(1, 500)
   note?: string;
 }
+
+/**
+ * 内容中心「AI 一键生成」入参。
+ *
+ * 只收主题与要求，不收任何已生成文本——正文必须由 AI 产出，
+ * 否则「一键生成」就退化成了「用户自己写完再让 AI 改」。
+ */
+export class AiGenerateContentDto {
+  @IsString()
+  @Length(4, 300, { message: '主题需在 4-300 字之间，写具体一点效果更好' })
+  topic!: string;
+
+  @IsOptional()
+  @IsIn(Object.values(PlatformCode))
+  platform?: PlatformCode;
+
+  @IsOptional()
+  @IsString()
+  @Length(1, 40)
+  tone?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(100)
+  @Max(3000)
+  wordCount?: number;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  @ArrayMaxSize(10)
+  keywords?: string[];
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  brand?: string;
+}

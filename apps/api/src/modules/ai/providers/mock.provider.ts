@@ -21,6 +21,8 @@ export class MockAiProvider implements AiProvider {
         return JSON.stringify({ variants: this.buildVariants(request.user) });
       case 'optimize_title':
         return JSON.stringify({ titles: this.buildTitles(request.user) });
+      case 'content_generate':
+        return JSON.stringify(this.buildContentDraft(request.user));
       case 'knowledge_generate':
         return JSON.stringify(this.buildKnowledgeDraft(request.user));
       case 'knowledge_polish':
@@ -42,6 +44,30 @@ export class MockAiProvider implements AiProvider {
       body: `${body}\n\n（本段为 ${platform} 平台适配版本，离线模式生成）`,
       tags: platform === 'xiaohongshu' ? ['健康生活', '日常分享'] : ['健康', '科普'],
     }));
+  }
+
+  /** 内容中心「AI 一键生成」的离线占位产物：结构与真实返回一致，正文明确标注为占位。 */
+  private buildContentDraft(user: string): { title: string; summary: string; body: string; tags: string[] } {
+    const pick = (key: string): string => user.match(new RegExp(`${key}=([^\\n]+)`))?.[1] ?? '';
+    const topic = pick('主题') || '未命名主题';
+    const keywords = (pick('必须覆盖的关键词') || '')
+      .split(/[,，、]/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+    const tags = keywords.length > 0 ? keywords.slice(0, 6) : ['待补充'];
+    return {
+      title: `（离线占位）${topic}`.slice(0, 60),
+      summary: `（离线占位摘要）主题：${topic}`.slice(0, 120),
+      body: [
+        '（离线占位正文）当前未配置真实 AI Key，这一段是按模板拼出的占位文本，仅用于打通「一键生成 → 编辑 → 保存」流程，不代表模型真实产出。',
+        `主题原文：${topic}`,
+        keywords.length > 0 ? `需覆盖关键词：${keywords.join('、')}` : '',
+        '配置「设置 → AI」里的 Key 后，这里会变成模型生成的可用正文。',
+      ]
+        .filter(Boolean)
+        .join('\n'),
+      tags,
+    };
   }
 
   private buildKnowledgeDraft(user: string): { title: string; content: string; tags: string[]; keywords: string[] } {

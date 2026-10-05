@@ -203,6 +203,15 @@ export interface KnowledgeItem {
   updatedAt: string;
 }
 
+/** 「AI 一键生成」的结果：直接填进编辑器表单，由人工确认后保存。 */
+export interface ContentDraftResult {
+  draft: { title: string; summary: string; body: string; tags: string[] };
+  generationId: string;
+  model: string;
+  /** 本次生成引用的品牌资料；为空说明知识库没有匹配资料，AI 会更自由发挥。 */
+  knowledgeUsed?: KnowledgeMatchItem[];
+}
+
 export interface KnowledgeMatchItem {
   id: string;
   brand: string;

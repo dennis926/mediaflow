@@ -19,7 +19,7 @@ import { SkeletonRows } from '../ui/Skeleton';
 import { Tag } from '../ui/Tag';
 import { ApiError } from '../../lib/api/client';
 import { aiApi, contentApi, knowledgeApi, publishApi, reviewsApi } from '../../lib/api/endpoints';
-import type { ComplianceReport } from '../../lib/api/types';
+import type { ComplianceReport, KnowledgeMatchItem } from '../../lib/api/types';
 import { AI_FLAG_LABELS, CONTENT_STATUS_LABELS, formatDateTime } from '../../lib/format';
 import { MediaPicker } from '../media/MediaPicker';
 import { templatesApi } from '../../lib/api/endpoints';
@@ -114,6 +114,14 @@ export function ContentEditor({ mode, templateId }: { mode: 'new' | 'edit'; temp
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [feedback, setFeedback] = useState<{ tone: 'info' | 'success' | 'danger'; text: string } | null>(null);
   const [previewPlatform, setPreviewPlatform] = useState<PlatformCode>(PlatformCode.WechatMp);
+  const [generateOpen, setGenerateOpen] = useState(false);
+  const [genTopic, setGenTopic] = useState('');
+  const [genPlatform, setGenPlatform] = useState<PlatformCode | ''>('');
+  const [genTone, setGenTone] = useState('');
+  const [genKeywords, setGenKeywords] = useState('');
+  const [genBrand, setGenBrand] = useState('');
+  // 生成后展示引用了哪些品牌资料，让运营知道 AI 的依据
+  const [genUsed, setGenUsed] = useState<KnowledgeMatchItem[] | null>(null);
   const [adaptOpen, setAdaptOpen] = useState(false);
   const [adaptPlatforms, setAdaptPlatforms] = useState<PlatformCode[]>([PlatformCode.WechatMp]);
   const [adaptTone, setAdaptTone] = useState('');
@@ -223,6 +231,47 @@ export function ContentEditor({ mode, templateId }: { mode: 'new' | 'edit'; temp
       setFeedback({ tone: 'success', text: 'AI 标识已复核，可创建发布任务' });
       void queryClient.invalidateQueries({ queryKey: ['content', contentId] });
     },
+  });
+
+  /**
+   * AI 一键生成：从零起草，成功后直接填进表单。
+   *
+   * 只填表单、不自动保存——AI 产物必须经人工确认（AGENTS.md 第 5 节），
+   * 且保存时后端还会做 AI 标识一致性校验。
+   */
+  const generate = useMutation({
+    mutationFn: () =>
+      contentApi.aiDraft({
+        topic: genTopic.trim(),
+        platform: genPlatform || undefined,
+        tone: genTone.trim() || undefined,
+        keywords: genKeywords
+          .split(/[、,，\s]+/)
+          .map((item) => item.trim())
+          .filter(Boolean),
+        brand: genBrand.trim() || undefined,
+      }),
+    onSuccess: (result) => {
+      setGenerateOpen(false);
+      setGenUsed(result.knowledgeUsed ?? []);
+      setForm((prev) => ({
+        ...prev,
+        title: result.draft.title,
+        summary: result.draft.summary || prev.summary,
+        body: result.draft.body,
+        tagsText: result.draft.tags.join('、'),
+        // AI 产物默认标记为「AI 辅助生成」，避免用户忘记填而导致保存时被强制回填
+        aiFlagType: prev.aiFlagType === AiFlagType.None ? AiFlagType.Assisted : prev.aiFlagType,
+      }));
+      setFeedback({
+        tone: 'success',
+        text: `AI 已起草，请核对事实后再保存（模型：${result.model}${
+          result.knowledgeUsed?.length ? `，引用品牌资料 ${result.knowledgeUsed.length} 条` : '，未引用品牌资料'
+        }）`,
+      });
+    },
+    onError: (error: unknown) =>
+      setFeedback({ tone: 'danger', text: error instanceof ApiError ? error.message : 'AI 生成失败' }),
   });
 
   const adapt = useMutation({
@@ -421,6 +470,13 @@ export function ContentEditor({ mode, templateId }: { mode: 'new' | 'edit'; temp
             </div>
 
             <div className={styles.actions} style={{ marginTop: 'var(--mf-space-5)' }}>
+              <Button
+                variant="primary"
+                icon={<SparkleIcon width={16} height={16} />}
+                onClick={() => setGenerateOpen(true)}
+              >
+                AI 一键生成
+              </Button>
               <Button loading={save.isPending} onClick={() => save.mutate()} disabled={!form.title.trim() || !form.body.trim()}>
                 保存内容
               </Button>
@@ -463,6 +519,37 @@ export function ContentEditor({ mode, templateId }: { mode: 'new' | 'edit'; temp
               </Banner>
             ) : null}
           </Card>
+
+          {genUsed !== null ? (
+            <Card
+              title="本次生成引用的品牌资料"
+              extra={
+                <Button variant="text" size="sm" onClick={() => setGenUsed(null)}>
+                  收起
+                </Button>
+              }
+            >
+              {genUsed.length > 0 ? (
+                <div className={styles.variantList}>
+                  {genUsed.map((match) => (
+                    <div key={match.id} className={styles.variantItem}>
+                      <div style={{ display: 'flex', gap: 'var(--mf-space-2)', alignItems: 'center', flexWrap: 'wrap' }}>
+                        <Tag tone="brand">{match.brand}</Tag>
+                        <span className={styles.variantTitle}>{match.title}</span>
+                      </div>
+                      <span className={styles.variantBody}>{match.matchedBy.join('；')}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <Banner tone="warning">
+                  <span>
+                    没有匹配到品牌资料，AI 是凭主题自由发挥的。建议到「知识库管理」补充该主题的资料后再生成，内容会更贴合品牌口径。
+                  </span>
+                </Banner>
+              )}
+            </Card>
+          ) : null}
 
           {titleSuggestions.length > 0 ? (
             <Card
@@ -649,6 +736,71 @@ export function ContentEditor({ mode, templateId }: { mode: 'new' | 'edit'; temp
           </Card>
         </div>
       </div>
+
+      <Dialog
+        open={generateOpen}
+        title="AI 一键生成内容"
+        onClose={() => setGenerateOpen(false)}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setGenerateOpen(false)}>
+              取消
+            </Button>
+            <Button
+              loading={generate.isPending}
+              disabled={genTopic.trim().length < 4}
+              onClick={() => generate.mutate()}
+              icon={<SparkleIcon width={16} height={16} />}
+            >
+              开始生成
+            </Button>
+          </>
+        }
+      >
+        <Textarea
+          label="主题（必填）"
+          name="topic"
+          required
+          value={genTopic}
+          placeholder="例如：秋季肠道健康科普，面向 30-50 岁关注肠道健康的人群，讲清膳食纤维的作用与日常补充方式"
+          onChange={(event) => setGenTopic(event.target.value)}
+        />
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--mf-space-3)' }}>
+          <Select
+            label="目标平台（可选）"
+            name="genPlatform"
+            options={[{ value: '', label: '通用（不限平台）' }, ...Object.values(PlatformCode).map((platform) => ({ value: platform, label: PLATFORM_LABELS[platform] }))]}
+            value={genPlatform}
+            onChange={(event) => setGenPlatform(event.target.value as PlatformCode | '')}
+          />
+          <Input
+            label="品牌（可选）"
+            name="genBrand"
+            placeholder="例如：卿尔美"
+            value={genBrand}
+            onChange={(event) => setGenBrand(event.target.value)}
+          />
+        </div>
+        <Input
+          label="语气要求（可选）"
+          name="genTone"
+          placeholder="例如：通俗易懂、专业克制"
+          value={genTone}
+          onChange={(event) => setGenTone(event.target.value)}
+        />
+        <Input
+          label="必须覆盖的关键词（可选）"
+          name="genKeywords"
+          placeholder="用顿号或逗号分隔，例如：膳食纤维、肠道菌群"
+          value={genKeywords}
+          onChange={(event) => setGenKeywords(event.target.value)}
+        />
+        <Banner tone="info">
+          <span>
+            系统会先按主题检索品牌资料，让 AI 照着品牌口径写（不编造成分与功效）；生成结果只填入编辑器，<strong>需您核对事实后手动保存</strong>。
+          </span>
+        </Banner>
+      </Dialog>
 
       <Dialog
         open={adaptOpen}

@@ -9,6 +9,8 @@ import {
   AiCompletionResult,
   AiTaskType,
   ComplianceReport,
+  ContentDraft,
+  ContentDraftInput,
   KnowledgeDraft,
   KnowledgeDraftInput,
   KnowledgePolishInput,
@@ -123,6 +125,53 @@ export class AiService {
     });
 
     return { variants: invocation.result, generationId: invocation.generationId, model: invocation.model };
+  }
+
+  /**
+   * 内容中心「AI 一键生成」：运营给一个主题，AI 从零写出一篇可发布的内容。
+   *
+   * 与 `adapt` 的区别：`adapt` 是**改写已有正文**成各平台版本，这个是**从零起草**。
+   * 与知识库起草的区别：产物是内容（标题/摘要/正文/标签），不是品牌资料。
+   *
+   * 品牌资料通过 `input.knowledge` 锚定——AI 只能引用资料里的事实，
+   * 不得编造成分、功效或认证；返回后仍由人工在编辑器里确认才保存。
+   */
+  async generateContent(
+    input: ContentDraftInput,
+    meta: AiInvocationMeta,
+  ): Promise<{ draft: ContentDraft; generationId: string; model: string }> {
+    const platformHint = input.platform
+      ? `- 目标平台：${PLATFORM_LABELS[input.platform]}(${input.platform})，风格要求：${platformGuidance(input.platform)}`
+      : '';
+
+    const invocation = await this.invoke({
+      task: 'content_generate',
+      system: `${systemEditor()}${SYSTEM_JSON}`,
+      json: true,
+      user: [
+        '请根据下面的主题，写一篇可以直接发布的内容。',
+        `主题=${input.topic}`,
+        input.brand ? `品牌=${input.brand}` : '',
+        input.tone ? `语气=${input.tone}` : '',
+        input.keywords?.length ? `必须覆盖的关键词=${input.keywords.join(',')}` : '',
+        platformHint,
+        input.wordCount ? `正文长度约 ${input.wordCount} 字` : '',
+        input.knowledge?.section ? input.knowledge.section : '',
+        '',
+        '要求：',
+        '- 只写品牌资料里可验证的事实（配方、规格、工艺、人群、用法），资料里没有的成分、功效、认证一律不得编造。',
+        '- 不写治疗功效、不做效果承诺、不使用绝对化用语（最/第一/根治/治愈等）。',
+        '- 正文用短句分自然段，便于阅读；结尾不要加任何 AI 标识（系统会自动追加）。',
+        '- 标签 3-6 个，用于后续检索与平台分发。',
+        '输出格式：{"title":"不超过 30 字的标题","summary":"一句话摘要，不超过 50 字","body":"正文","tags":["标签"]}',
+      ]
+        .filter(Boolean)
+        .join('\n'),
+      meta,
+      parse: (completion) => this.parseContentDraft(completion.text, completion.finishReason),
+    });
+
+    return { draft: invocation.result, generationId: invocation.generationId, model: invocation.model };
   }
 
   /**
@@ -722,6 +771,19 @@ export class AiService {
       );
     }
     return variants;
+  }
+
+  private parseContentDraft(text: string, finishReason?: string): ContentDraft {
+    const parsed = this.parseJson(text, finishReason);
+    const body = String(parsed.body ?? '').trim();
+    if (body.length < 50) throw new Error('AI 生成的正文过短，请把主题写得更具体后重试');
+    const title = String(parsed.title ?? '').trim().slice(0, 60);
+    return {
+      title: title || body.slice(0, 24),
+      summary: String(parsed.summary ?? '').trim().slice(0, 120),
+      body,
+      tags: Array.isArray(parsed.tags) ? parsed.tags.map((tag) => String(tag).trim()).filter(Boolean).slice(0, 8) : [],
+    };
   }
 
   private parseKnowledgeDraft(text: string, finishReason?: string): KnowledgeDraft {

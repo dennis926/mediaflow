@@ -91,7 +91,24 @@
 | DELETE | `/api/contents/:id` | 软删除（`deleted_at`，列表与详情立即不可见） |
 | PATCH | `/api/contents/:id/ai-flag-check` | 标记 AI 标识已复核（`aiFlagChecked=true/true` 才能发布 AI 内容） |
 | GET | `/api/contents/:id/variants` | 平台版本列表 |
+| POST | `/api/contents/ai-draft` | **AI 一键生成**：给主题从零起草一篇内容（不入库，返回草案供编辑器确认） |
 | POST | `/api/contents/:id/ai-adapt` | AI 多平台适配，生成/更新 `content_variants` |
+
+`POST /api/contents/ai-draft` 请求体（`topic` 必填，4-300 字）：
+
+```json
+{
+  "topic": "秋季肠道健康科普，面向 30-50 岁人群",
+  "platform": "xiaohongshu",
+  "tone": "亲切",
+  "wordCount": 600,
+  "keywords": ["膳食纤维", "肠道菌群"],
+  "brand": "卿尔美"
+}
+```
+
+返回 `data.draft`（`title` / `summary` / `body` / `tags`）、`generationId`、`model`、`knowledgeUsed`（本次命中的品牌资料）。
+**产物不入库**——需再调 `POST /api/contents` 保存，届时按 AI 标识规则自动追加显式标识并要求复核。
 
 `POST /api/contents/:id/ai-adapt` 请求体：
 
@@ -284,7 +301,7 @@ scheduled ──(到点，由扫描器入队)──> pending
 
 ## 5. 规划接口（待实现）
 
-- 内容：`/api/contents`、`/api/contents/:id`、`/api/contents/:id/ai-adapt`
+- 内容：`/api/contents`、`/api/contents/:id`、`/api/contents/ai-draft`、`/api/contents/:id/ai-adapt`
 - 发布：`/api/publish/tasks/:id/retry`、`/api/publish/calendar`
 - 数据：`/api/analytics/overview`、`/api/analytics/trend`
 - 账号：`/api/accounts`、`/api/accounts/bind`
