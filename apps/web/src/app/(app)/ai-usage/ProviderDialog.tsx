@@ -35,6 +35,8 @@ export function ProviderDialog({ open, current, onClose, onSaved, onError }: Pro
     apiKey: '',
     modelsText: '',
     protocol: 'openai-compatible',
+    // 官方直连 / 第三方中转：中转渠道的价格由中转商决定，不能套官方价
+    kind: 'official' as 'official' | 'relay',
   });
 
   useEffect(() => {
@@ -47,9 +49,19 @@ export function ProviderDialog({ open, current, onClose, onSaved, onError }: Pro
         apiKey: '', // 留空表示不修改
         modelsText: (current.models ?? []).map((model) => model.model).join('\n'),
         protocol: current.protocol ?? 'openai-compatible',
+        // 保留原有接入方式：漏传会被当成官方直连，中转渠道的计费就错了
+        kind: current.kind === 'relay' ? 'relay' : 'official',
       });
     } else {
-      setForm({ provider: 'deepseek', label: '', baseUrl: '', apiKey: '', modelsText: '', protocol: 'openai-compatible' });
+      setForm({
+        provider: 'deepseek',
+        label: '',
+        baseUrl: '',
+        apiKey: '',
+        modelsText: '',
+        protocol: 'openai-compatible',
+        kind: 'official',
+      });
     }
   }, [open, current]);
 
@@ -65,6 +77,7 @@ export function ProviderDialog({ open, current, onClose, onSaved, onError }: Pro
           .map((item) => item.trim())
           .filter(Boolean),
         protocol: form.protocol,
+        kind: form.kind,
       }),
     onSuccess: () => onSaved(`供应商「${form.label || form.provider}」已保存`),
     onError: (error: unknown) => onError(error instanceof ApiError ? error.message : '保存失败'),
@@ -108,6 +121,25 @@ export function ProviderDialog({ open, current, onClose, onSaved, onError }: Pro
           </span>
         </Banner>
 
+        <Select
+          label="接入方式"
+          name="kind"
+          value={form.kind}
+          options={[
+            { value: 'official', label: '官方直连（自动用官网价）' },
+            { value: 'relay', label: '第三方中转（价格自己填）' },
+          ]}
+          onChange={(event) =>
+            setForm((prev) => ({ ...prev, kind: event.target.value as 'official' | 'relay' }))
+          }
+        />
+        {form.kind === 'relay' ? (
+          <Banner tone="warning">
+            <span>
+              中转渠道通常有倍率，系统不会拿官方价代替。请保存后到下方模型行点「改价」填写该渠道的实际单价。
+            </span>
+          </Banner>
+        ) : null}
         <Select
           label="供应商"
           name="provider"

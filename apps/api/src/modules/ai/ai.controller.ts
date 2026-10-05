@@ -58,6 +58,9 @@ export class AiController {
       apiKey: body.apiKey === undefined ? undefined : String(body.apiKey),
       models: Array.isArray(body.models) ? body.models.map((item) => String(item)) : undefined,
       protocol: body.protocol as never,
+      // 接入方式必须透传：从「AI 用量」页编辑供应商时若丢掉它，
+      // 已配置的中转渠道会被悄悄当成官方直连，计费又回到按官方价算。
+      kind: body.kind as never,
     });
   }
 

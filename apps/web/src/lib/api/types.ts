@@ -475,6 +475,8 @@ export interface OfficialPriceRefreshResultView {
 export interface ProviderConfigItem {
   provider: string;
   label: string;
+  /** 官方直连 / 第三方中转 */
+  kind?: 'official' | 'relay';
   baseUrl: string;
   models: string[];
   protocol: string;
