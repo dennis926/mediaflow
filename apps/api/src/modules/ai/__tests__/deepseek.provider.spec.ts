@@ -42,13 +42,20 @@ describe('DeepSeekProvider', () => {
 
   it('fails loudly when the API key is missing', async () => {
     const provider = new DeepSeekProvider({ apiKey: '', model: 'deepseek-chat', fetchImpl: vi.fn() });
-    await expect(provider.complete({ task: 'generate', system: 's', user: 'u' })).rejects.toThrow('未配置 AI_API_KEY');
+    await expect(provider.complete({ task: 'generate', system: 's', user: 'u' })).rejects.toThrow(
+      '未配置 DeepSeek 的 API Key',
+    );
   });
 
-  it('surfaces the platform error message', async () => {
+  it('surfaces the platform error message alongside our own guidance', async () => {
     const fetchImpl = vi.fn(async () => jsonResponse({ error: { message: 'Invalid token' } }, 401));
-    const provider = new DeepSeekProvider({ apiKey: 'sk-bad', model: 'deepseek-chat', fetchImpl });
+    const provider = new DeepSeekProvider({ apiKey: 'sk-test', model: 'deepseek-chat', fetchImpl });
 
-    await expect(provider.complete({ task: 'generate', system: 's', user: 'u' })).rejects.toThrow('Invalid token');
+    // 中文提示要给出方向，但供应商原文必须保留 —— 排障时丢掉原文就无从判断是哪一类失败
+    const error = await provider
+      .complete({ task: 'generate', system: 's', user: 'u' })
+      .catch((e: Error) => e.message);
+    expect(error).toContain('鉴权失败');
+    expect(error).toContain('Invalid token');
   });
 });

@@ -180,7 +180,10 @@ export default function AiConfigPage() {
                 value={provider}
                 options={[
                   { value: 'mock', label: '离线占位（不调用外部接口）' },
-                  ...catalog.map((item) => ({ value: item.provider, label: item.label })),
+                  ...catalog.map((item) => ({
+                    value: item.provider,
+                    label: item.regionNotice ? `${item.label}（本服务器所在地区不可直连）` : item.label,
+                  })),
                 ]}
                 onChange={(event) => {
                   const next = event.target.value;
@@ -190,6 +193,12 @@ export default function AiConfigPage() {
                   setModels(found?.models ?? []);
                   setModel(found?.models[0] ?? '');
                   setStep('idle');
+                  // 已知不可直连的供应商提前告知，不必等用户填完 Key 点测试才失败
+                  setFeedback(
+                    found?.regionNotice
+                      ? { tone: 'warning', text: found.regionNotice }
+                      : null,
+                  );
                 }}
               />
               <Input

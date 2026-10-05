@@ -704,6 +704,8 @@ export interface AiConfigCatalogItem {
   defaultBaseUrl: string;
   models: string[];
   protocol: string;
+  /** 服务区域限制提示：该供应商不向本服务器所在地区开放 */
+  regionNotice?: string;
 }
 
 export interface AiConfigView {

@@ -29,6 +29,57 @@ export interface DeepSeekProviderOptions {
 
 const DEFAULT_BASE_URL = 'https://api.deepseek.com';
 
+/** 供应商代码 → 中文名，报错里要说「哪个供应商」而不是把代码甩给用户。 */
+const PROVIDER_LABELS: Record<string, string> = {
+  deepseek: 'DeepSeek',
+  openai: 'OpenAI',
+  anthropic: 'Claude',
+  google: 'Gemini',
+  zhipu: '智谱 GLM',
+  kimi: 'Kimi',
+  doubao: '豆包',
+  qwen: '通义千问',
+  minimax: 'MiniMax',
+  xai: 'xAI',
+  mock: '离线占位',
+};
+
+/**
+ * 把供应商的 HTTP 报错翻译成「能照着做」的提示。
+ *
+ * 背景：服务器部署在香港，OpenAI / Claude / Gemini 官方接口对香港 IP 直接返回 403
+ * （错误码 unsupported_country_region_territory）。此时 Key 是对的、网络是通的，
+ * 但把英文原文抛给用户毫无帮助——实测用户看到的就是一句
+ * "Country, region, or territory not supported"，既不知道是地区问题也不知道该怎么办。
+ * 401（Key 无效）与 403（地域封锁）必须区分清楚，否则会误导用户反复重填 Key。
+ */
+function explainHttpError(providerId: string, status: number, raw: string): string {
+  const label = PROVIDER_LABELS[providerId] ?? providerId;
+  if (status === 401 || status === 403) {
+    // OpenAI/Anthropic 措辞不同，统一按"地域"判断：只有这两种文案才是地域封锁
+    const regionBlocked = /country|region|territory|not allowed|unsupported_country/i.test(raw);
+    if (regionBlocked) {
+      return (
+        `${label} 拒绝了本服务器的请求：出口 IP 所在地区不在该供应商的服务范围内。` +
+        `这不是 Key 填错了，换 Key 也无效。可行做法：改用国内供应商（DeepSeek / 智谱 / Kimi / 豆包 / 通义千问），` +
+        `或改用支持该模型的第三方中转服务（把接口地址与 Key 换成中转商的即可）。`
+      );
+    }
+    return `${label} 鉴权失败（HTTP ${status}）：请检查 API Key 是否正确、是否已过期、账户余额是否充足。${raw ? ` 供应商原始提示：${raw.slice(0, 160)}` : ''}`;
+  }
+  if (status === 404) {
+    return `${label} 接口地址或模型标识不存在（HTTP 404）：请检查接口地址是否填全（需带 /v1），以及模型名称是否正确。${raw ? ` 供应商原始提示：${raw.slice(0, 160)}` : ''}`;
+  }
+  if (status === 429) {
+    return `${label} 拒绝了请求（HTTP 429）：通常是调用频率或额度超限，请稍后重试或检查账户额度。`;
+  }
+  if (status >= 500) {
+    return `${label} 服务端异常（HTTP ${status}）：供应商自身故障，请稍后重试。`;
+  }
+  return `${label} 接口返回 HTTP ${status}：${raw.slice(0, 200) || '未知错误'}`;
+  // 说明：401/404 分支保留上游原文，避免排障时丢掉 "Invalid token" 这类关键细节。
+}
+
 export class DeepSeekProvider implements AiProvider {
   /** 对外暴露的是"配置里的供应商"，而不是底层使用的兼容协议实现 */
   readonly name: string;
@@ -38,9 +89,12 @@ export class DeepSeekProvider implements AiProvider {
   private readonly baseUrl: string;
   private readonly fetchImpl: (input: string, init?: RequestInit) => Promise<Response>;
   private readonly timeoutMs: number;
+  /** 中文供应商名，用于报错文案 */
+  private readonly label: string;
 
   constructor(options: DeepSeekProviderOptions) {
     this.name = options.providerId ?? 'deepseek';
+    this.label = PROVIDER_LABELS[this.name] ?? this.name;
     this.apiKey = options.apiKey;
     this.model = options.model;
     this.baseUrl = options.baseUrl ?? DEFAULT_BASE_URL;
@@ -55,7 +109,7 @@ export class DeepSeekProvider implements AiProvider {
    * 不让用户凭记忆手打模型标识（打错了要到调用时才报错，很难查）。
    */
   async listModels(): Promise<string[]> {
-    if (!this.apiKey) throw new Error('未配置 API Key，无法获取模型列表');
+    if (!this.apiKey) throw new Error(`未配置 ${this.label} 的 API Key，无法获取模型列表`);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
     try {
@@ -66,7 +120,7 @@ export class DeepSeekProvider implements AiProvider {
       });
       const text = await response.text();
       if (!response.ok) {
-        throw new Error(`获取模型列表失败（HTTP ${response.status}）：${text.slice(0, 200)}`);
+        throw new Error(explainHttpError(this.name, response.status, text));
       }
       const parsed = JSON.parse(text) as { data?: Array<{ id?: string }> };
       const ids = (parsed.data ?? [])
@@ -79,7 +133,7 @@ export class DeepSeekProvider implements AiProvider {
   }
 
   async complete(request: AiCompletionRequest): Promise<AiCompletionResult> {
-    if (!this.apiKey) throw new Error('未配置 AI_API_KEY，无法调用 DeepSeek 接口');
+    if (!this.apiKey) throw new Error(`未配置 ${this.label} 的 API Key，无法调用接口`);
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
@@ -105,9 +159,9 @@ export class DeepSeekProvider implements AiProvider {
         signal: controller.signal,
       });
 
-      const payload = (await response.json()) as ChatCompletionResponse;
+      const payload = (await response.json().catch(() => ({}))) as ChatCompletionResponse;
       if (!response.ok) {
-        throw new Error(`DeepSeek 接口返回 HTTP ${response.status}：${payload.error?.message ?? '未知错误'}`);
+        throw new Error(explainHttpError(this.name, response.status, payload.error?.message ?? ''));
       }
       const choice = payload.choices?.[0];
       const text = choice?.message?.content;
@@ -116,8 +170,8 @@ export class DeepSeekProvider implements AiProvider {
         const thought = (choice?.message?.reasoning_content ?? '').length;
         throw new Error(
           truncated
-            ? `DeepSeek 只返回了思考过程（${thought} 字）就被 max_tokens 截断，未产出正文：请提高最大输出长度后重试`
-            : 'DeepSeek 未返回内容',
+            ? `${this.label} 只返回了思考过程（${thought} 字）就被 max_tokens 截断，未产出正文：请提高最大输出长度后重试`
+            : `${this.label} 未返回内容`,
         );
       }
 

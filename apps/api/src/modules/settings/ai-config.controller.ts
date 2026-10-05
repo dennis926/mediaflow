@@ -18,8 +18,29 @@ export interface AiConnectionView {
   /** 当前使用的是离线占位还是真实供应商 */
   offline: boolean;
   /** 预置供应商目录，界面上的"选择供应商"下拉用 */
-  catalog: Array<{ provider: string; label: string; defaultBaseUrl: string; models: string[]; protocol: string }>;
+  catalog: Array<{
+    provider: string;
+    label: string;
+    defaultBaseUrl: string;
+    models: string[];
+    protocol: string;
+    /**
+     * 该供应商的服务区域限制提示（如 OpenAI 官方不向香港 IP 开放）。
+     * 前端在"选择供应商"时就提示，避免用户白填一份 Key 再去试连接才发现用不了。
+     */
+    regionNotice?: string;
+  }>;
 }
+
+/**
+ * 已实测确认的服务区域限制（2026-10-05，服务器出口为香港 IP）：
+ * 这几家官方接口对香港直接返回 403，换 Key 无效，只能走中转或换供应商。
+ */
+const REGION_RESTRICTED: Record<string, string> = {
+  openai: 'OpenAI 官方接口不向香港地区开放，本服务器无法直连；请改用国内供应商，或把接口地址与 Key 换成支持 GPT 的中转服务。',
+  anthropic: 'Claude 官方接口不向香港地区开放，本服务器无法直连；请改用国内供应商，或使用中转服务。',
+  google: 'Gemini 官方接口不向香港地区开放，本服务器无法直连；请改用国内供应商，或使用中转服务。',
+};
 
 interface TestInput {
   provider?: string;
@@ -68,6 +89,7 @@ export class AiConfigController {
         defaultBaseUrl: item.defaultBaseUrl,
         models: item.models.map((entry) => entry.model),
         protocol: item.protocol,
+        regionNotice: REGION_RESTRICTED[item.provider],
       })),
     };
   }
