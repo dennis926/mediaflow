@@ -161,12 +161,19 @@
 | GET | `/api/ai-config` | 当前生效配置（密钥打码）+ 预置供应商目录（provider/label/defaultBaseUrl/models/protocol） |
 | POST | `/api/ai-config/test` | 第一步：连接测试。body `{provider?,apiKey?,baseUrl?,model?}`，表单值优先、未填回退已保存配置 |
 | POST | `/api/ai-config/models` | 第二步：拉取供应商可用模型（OpenAI 兼容 `GET /models`）。返回 `{ok,models[],error?}` |
-| PUT | `/api/ai-config/default` | 第三步：保存并设为默认。body `{provider,model,baseUrl?,apiKey?,models?}`，一次性写入供应商/模型/地址/密钥 |
+| PUT | `/api/ai-config/default` | 第三步：保存并设为默认。body `{provider,model,baseUrl?,apiKey?,models?,kind?,channelLabel?}`，一次性写入供应商/模型/地址/密钥。`kind='relay'` 表示第三方中转 |
 | PUT | `/api/ai-config/offline` | 切换为离线占位（不调用外部接口、不消耗额度） |
 
 - `POST /test` 返回 `{ok,provider,model,latencyMs,reply?,error?}`；输出被截断只说明"答得太长"，不算连接失败。
 - 协议没有 `/models` 的供应商（例如 Anthropic 原生协议）`POST /models` 会明确返回"请手动填写模型标识"，界面可继续手动输入。
 - 保存后运行时快照立即重建，**不需要重启服务**。
+- `GET /api/ai-config` 返回的 `kind` 表示当前生效渠道是 `official`（官方直连）还是 `relay`（第三方中转），
+  供应商目录里带 `regionNotice` 的项表示该供应商**不向本服务器所在地区开放**（实测 OpenAI / Claude / Gemini 在香港 IP 上返回 403）。
+- **第三方中转（`kind='relay'`）的计费口径**：一律不查官方价，只用「AI 用量」里为该渠道模型填写的单价
+  （设置键 `AI_MODEL_PRICES`，键格式 `provider/model`）；未填写则回落到全局兜底价，
+  价格来源标记为 `relay`（区别于 `global`）。
+  这是必须的——中转通常有倍率且一个渠道混挂多家模型，按官方价算会**静默低估成本**。
+  中转渠道也不做官网价抓取（`scrapable=false`），且只列出用户填写的模型。
 
 ### 3.5c 角色与权限（可视化，仅 owner / admin）
 
