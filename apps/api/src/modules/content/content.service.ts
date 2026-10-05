@@ -1,6 +1,6 @@
 import { ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { AiFlagType, ContentStatus, PlatformCode, PublishTaskStatus, appendAiDisclosure } from '@mediaflow/shared';
+import { AiFlagType, ContentStatus, PlatformCode, PublishTaskStatus } from '@mediaflow/shared';
 import { runtime } from '../settings/runtime-config';
 import { DataSource, EntityManager, Repository } from 'typeorm';
 import { AuditService } from '../../audit/audit.service';
@@ -62,14 +62,13 @@ export class ContentService {
   ) {}
 
   /**
-   * B0.6：AI 标识一致性校验（法定要求）。
+   * AI 标识一致性**提示**（不再是强制闸门）。
    *
-   * 判定依据不是"用户填了什么"，而是**系统自己的证据**：`ai_generations` 里是否有这条内容的生成记录。
-   * 若有记录却把标识填成 `none`，只有两条路：
-   *   ① 没填理由 → **强制回填标识**（改成 assisted + 追加显式标识文案），并写审计 `content.ai_flag.backfilled`；
-   *   ② 填了理由 → 保留 none，但理由必须留痕（审计 `content.ai_flag.exempted` 带理由与证据条数）。
+   * 用户明确要求：「不要自动加标识，默认就是没有」。因此这里只做两件事：
+   *   ① 有 AI 生成记录却没填标识时，写一条审计留痕并返回 flagged=true，让界面提示操作者自行决定；
+   *   ② 绝不修改正文、绝不改 ai_flag_type、绝不阻塞保存或发布。
    *
-   * 调用点：内容创建/更新后，以及**审核通过前**（发布闸门的最后一道）。
+   * 依据《人工智能生成合成内容标识办法》，标识义务仍在发布者身上，所以留痕保留以便追溯。
    */
   async assertAiFlagConsistency(
     contentId: string,
@@ -84,7 +83,6 @@ export class ContentService {
       return { flagged: false, evidence: 0, aiFlagType: content.aiFlagType };
     }
 
-    // 证据：这条内容是否有 AI 生成记录（来自 ai_generations，不依赖人工填写）
     const evidenceRows = await this.dataSource.query(
       'SELECT count(*)::int AS n FROM ai_generations WHERE content_id = $1 AND workspace_id = $2',
       [contentId, scope.workspaceId],
@@ -92,39 +90,17 @@ export class ContentService {
     const evidence = Number(evidenceRows[0]?.n ?? 0);
     if (evidence === 0) return { flagged: false, evidence: 0, aiFlagType: AiFlagType.None };
 
-    const reason = content.aiFlagExemptReason?.trim();
-    if (reason) {
-      await this.audit.record({
-        action: 'content.ai_flag.exempted',
-        resourceType: 'content',
-        resourceId: content.id,
-        tenantId: scope.tenantId,
-        workspaceId: scope.workspaceId,
-        actorId: actor.id ?? null,
-        actorName: actor.name ?? null,
-        payload: { evidence, reason, aiFlagType: AiFlagType.None },
-      });
-      return { flagged: false, evidence, aiFlagType: AiFlagType.None };
-    }
-
-    // 强制回填：标识改成 assisted，并把显式标识文案并入正文（法定显式标识）
-    const body = appendAiDisclosure(content.body, AiFlagType.Assisted, runtime().site.aiDisclosureSuffix);
-    await this.contents.update(
-      { id: content.id },
-      { aiFlagType: AiFlagType.Assisted, aiGenerated: true, body },
-    );
     await this.audit.record({
-      action: 'content.ai_flag.backfilled',
+      action: 'content.ai_flag.reminded',
       resourceType: 'content',
       resourceId: content.id,
       tenantId: scope.tenantId,
       workspaceId: scope.workspaceId,
       actorId: actor.id ?? null,
       actorName: actor.name ?? null,
-      payload: { evidence, from: AiFlagType.None, to: AiFlagType.Assisted },
+      payload: { evidence, aiFlagType: AiFlagType.None },
     });
-    this.logger.warn(`内容缺少 AI 标识但存在 ${evidence} 条 AI 生成记录，已强制回填：${content.id}`);
-    return { flagged: true, evidence, aiFlagType: AiFlagType.Assisted };
+    return { flagged: true, evidence, aiFlagType: AiFlagType.None };
   }
 
   async create(dto: CreateContentDto, actor: ContentActor): Promise<Content> {
@@ -136,8 +112,11 @@ export class ContentService {
       workspaceId: scope.workspaceId,
       title: dto.title,
       summary: dto.summary ?? null,
-      // The legal AI mark is stored with the text, so every downstream consumer inherits it.
-      body: appendAiDisclosure(dto.body, aiFlagType, runtime().site.aiDisclosureSuffix),
+      /**
+       * 标识不再自动写进正文（用户明确要求：默认就是没有）。
+       * 需要显式标识时由操作者在编辑器里自行添加，系统只按填写值记录 ai_flag_type。
+       */
+      body: dto.body,
       coverUrl: dto.coverUrl ?? null,
       mediaUrls: dto.mediaUrls ?? [],
       tags: dto.tags ?? [],
@@ -222,7 +201,7 @@ export class ContentService {
       brandKnowledgeId: dto.brandKnowledgeId ?? content.brandKnowledgeId,
       aiFlagType,
       aiGenerated: aiFlagType !== AiFlagType.None,
-      body: appendAiDisclosure(rawBody, aiFlagType, runtime().site.aiDisclosureSuffix),
+      body: rawBody,
       // 审核通过后如果再改动（正文/标题/标签/素材），原审核结论失效，必须重新送审。
       // 客户端传的 status 已在 DTO 层移除，这里只保留服务端自己的状态机。
       status: contentChanged && previousStatus === ContentStatus.Approved ? ContentStatus.Draft : content.status,
@@ -581,7 +560,7 @@ export class ContentService {
         contentId: content.id,
         platform,
         title: variant.title,
-        body: appendAiDisclosure(variant.body, variantFlag),
+        body: variant.body,
         tags: variant.tags,
         mediaUrls: content.mediaUrls,
         status: ContentStatus.Draft,

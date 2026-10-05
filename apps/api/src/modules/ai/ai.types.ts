@@ -38,6 +38,11 @@ export interface AiProvider {
   readonly name: string;
   readonly model: string;
   complete(request: AiCompletionRequest): Promise<AiCompletionResult>;
+  /**
+   * 可选：拉取供应商可用模型列表（OpenAI 兼容的 GET /models）。
+   * 不是所有协议都支持（Anthropic 原生协议没有等价接口），因此是可选方法。
+   */
+  listModels?(): Promise<string[]>;
 }
 
 export interface AdaptedVariantPayload {

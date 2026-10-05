@@ -102,8 +102,12 @@ export class PublishService {
     const content = await this.contents.findOne({ where: { id: dto.contentId, workspaceId: scope.workspaceId } });
     if (!content) throw new NotFoundException('内容不存在或无权访问');
 
+    /**
+     * 标识不再是发布闸门（用户要求：默认就是没有，不强制）。
+     * 只在内容确实由 AI 参与且尚未复核时留一条日志，方便事后追溯，不影响发布。
+     */
     if (content.aiGenerated && !content.aiFlagChecked) {
-      throw new BadRequestException('AI 生成内容发布前必须通过 AI 标识校验（ai_flag_checked）');
+      this.logger.log(`内容 ${content.id} 由 AI 参与生成但标识未复核，按配置继续发布`);
     }
 
     /**

@@ -128,14 +128,17 @@ describe('PublishService AI disclosure', () => {
 });
 
 describe('PublishService guards', () => {
-  it('refuses to publish AI content that has not passed the AI flag check', async () => {
+  it('publishes AI content even when the AI flag has not been reviewed', async () => {
     const { service } = buildService({
-      content: { id: 'content-3', aiGenerated: true, aiFlagChecked: false } as Partial<Content>,
+      content: { id: 'content-3', title: 'AI 稿件', aiGenerated: true, aiFlagChecked: false } as Partial<Content>,
     });
 
-    await expect(
-      service.createTasks({ contentId: 'content-3', platforms: [PlatformCode.WechatMp] }, { name: 'tester' }),
-    ).rejects.toBeInstanceOf(BadRequestException);
+    // 标识不再是发布闸门：只留日志，任务照常创建
+    const created = await service.createTasks(
+      { contentId: 'content-3', platforms: [PlatformCode.WechatMp] },
+      { name: 'tester' },
+    );
+    expect(created).toHaveLength(1);
   });
 
   it('creates a pending task and pushes it to the queue', async () => {

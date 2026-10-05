@@ -125,7 +125,7 @@ describe.skipIf(!credentialsReady)('MediaFlow 端到端流程', () => {
     token = login.body.data.accessToken as string;
   });
 
-  it('创建内容（AI 标识与合规后缀）', async () => {
+  it('创建内容（记录 AI 标识，但不改动正文）', async () => {
     const created = await request(app.getHttpServer())
       .post('/api/contents')
       .set('Authorization', `Bearer ${token}`)
@@ -133,8 +133,11 @@ describe.skipIf(!credentialsReady)('MediaFlow 端到端流程', () => {
       .expect(201);
 
     contentId = created.body.data.id as string;
+    // 标识按填写值记录……
     expect(created.body.data.aiGenerated).toBe(true);
-    expect(String(created.body.data.body)).toContain('（本文由 AI 辅助生成）');
+    expect(created.body.data.aiFlagType).toBe('assisted');
+    // ……但系统不再往正文里追加任何标识文案（用户要求：不要自动加）
+    expect(String(created.body.data.body)).toBe('这是一段用于集成测试的正文。');
   });
 
   it('AI 多平台适配生成版本', async () => {
@@ -154,16 +157,21 @@ describe.skipIf(!credentialsReady)('MediaFlow 端到端流程', () => {
     expect(variants.body.data.length).toBe(2);
   });
 
-  it('AI 内容未复核标识时拒绝发布', async () => {
+  it('AI 内容未复核标识也能发布（标识不再是闸门）', async () => {
     const response = await request(app.getHttpServer())
       .post('/api/publish/tasks')
       .set('Authorization', `Bearer ${token}`)
       .send({ contentId, platforms: ['wechat_mp'] })
-      .expect(400);
-    expect(response.body.code).toBe(40000);
+      .expect(201);
+    expect(response.body.data.length).toBe(1);
+    // 立刻清掉，免得后面重复排期同一平台触发 409
+    await request(app.getHttpServer())
+      .delete(`/api/publish/tasks/${response.body.data[0].id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
   });
 
-  it('复核标识后可创建发布任务并查询状态', async () => {
+  it('复核标识后仍可创建发布任务并查询状态', async () => {
     await request(app.getHttpServer())
       .patch(`/api/contents/${contentId}/ai-flag-check`)
       .set('Authorization', `Bearer ${token}`)

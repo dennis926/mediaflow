@@ -48,6 +48,36 @@ export class DeepSeekProvider implements AiProvider {
     this.timeoutMs = options.timeoutMs ?? 60_000;
   }
 
+  /**
+   * 拉取该供应商的可用模型列表（OpenAI 兼容的 GET /models）。
+   *
+   * 用于「AI 配置」里的「测试连接 → 获取模型」：连上之后直接把模型列出来给用户勾选，
+   * 不让用户凭记忆手打模型标识（打错了要到调用时才报错，很难查）。
+   */
+  async listModels(): Promise<string[]> {
+    if (!this.apiKey) throw new Error('未配置 API Key，无法获取模型列表');
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    try {
+      const response = await this.fetchImpl(`${this.baseUrl}/models`, {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${this.apiKey}`, Accept: 'application/json' },
+        signal: controller.signal,
+      });
+      const text = await response.text();
+      if (!response.ok) {
+        throw new Error(`获取模型列表失败（HTTP ${response.status}）：${text.slice(0, 200)}`);
+      }
+      const parsed = JSON.parse(text) as { data?: Array<{ id?: string }> };
+      const ids = (parsed.data ?? [])
+        .map((item) => (typeof item?.id === 'string' ? item.id.trim() : ''))
+        .filter(Boolean);
+      return [...new Set(ids)].sort();
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   async complete(request: AiCompletionRequest): Promise<AiCompletionResult> {
     if (!this.apiKey) throw new Error('未配置 AI_API_KEY，无法调用 DeepSeek 接口');
 

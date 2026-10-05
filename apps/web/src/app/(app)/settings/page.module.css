@@ -89,3 +89,310 @@
   color: var(--mf-color-brand-700);
   font-weight: var(--mf-font-weight-medium);
 }
+
+.bannerClose {
+  margin-left: auto;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: inherit;
+  font-size: var(--mf-font-size-sm);
+}
+
+/* ---------- AI 配置 ---------- */
+.summaryGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: var(--mf-space-4);
+  margin-bottom: var(--mf-space-4);
+}
+
+.summaryItem {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mf-space-1);
+  padding: var(--mf-space-3) var(--mf-space-4);
+  border: 1px solid var(--mf-color-border-subtle);
+  border-radius: var(--mf-radius-md);
+  background: var(--mf-color-surface-raised);
+}
+
+.summaryLabel {
+  font-size: var(--mf-font-size-xs);
+  color: var(--mf-color-text-tertiary);
+}
+
+.summaryValue {
+  font-size: var(--mf-font-size-md);
+  font-weight: var(--mf-font-weight-medium);
+  word-break: break-all;
+}
+
+.steps {
+  display: flex;
+  gap: var(--mf-space-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--mf-space-4);
+}
+
+.stepChip {
+  padding: var(--mf-space-1) var(--mf-space-3);
+  border-radius: 999px;
+  border: 1px solid var(--mf-color-border-subtle);
+  font-size: var(--mf-font-size-xs);
+  color: var(--mf-color-text-tertiary);
+  background: var(--mf-color-surface-raised);
+}
+
+.stepChipDone {
+  border-color: var(--mf-color-brand-500);
+  background: var(--mf-color-brand-50);
+  color: var(--mf-color-brand-700);
+}
+
+.formGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: var(--mf-space-4);
+}
+
+.fieldActions {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--mf-space-3);
+  flex-wrap: wrap;
+}
+
+.modelList {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+  gap: var(--mf-space-2);
+  max-height: 22rem;
+  overflow-y: auto;
+}
+
+.modelItem {
+  display: flex;
+  align-items: center;
+  gap: var(--mf-space-2);
+  min-height: var(--mf-size-touch-min);
+  padding: 0 var(--mf-space-3);
+  border: 1px solid var(--mf-color-border-subtle);
+  border-radius: var(--mf-radius-md);
+  cursor: pointer;
+  background: var(--mf-color-surface);
+}
+
+.modelItem:hover {
+  border-color: var(--mf-color-brand-500);
+}
+
+.modelItemActive {
+  border-color: var(--mf-color-brand-500);
+  background: var(--mf-color-brand-50);
+}
+
+.modelName {
+  font-size: var(--mf-font-size-sm);
+  word-break: break-all;
+  flex: 1;
+  min-width: 0;
+}
+
+/* ---------- 权限表 ---------- */
+.roleNames {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: var(--mf-space-3);
+  margin-bottom: var(--mf-space-4);
+}
+
+.roleNameCard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mf-space-2);
+  padding: var(--mf-space-3);
+  border: 1px solid var(--mf-color-border-subtle);
+  border-radius: var(--mf-radius-md);
+  background: var(--mf-color-surface-raised);
+}
+
+.roleNameCode {
+  font-size: var(--mf-font-size-xs);
+  color: var(--mf-color-text-tertiary);
+}
+
+.matrixWrap {
+  overflow-x: auto;
+  border: 1px solid var(--mf-color-border-subtle);
+  border-radius: var(--mf-radius-md);
+}
+
+.matrix {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 44rem;
+}
+
+.matrix th,
+.matrix td {
+  padding: var(--mf-space-2) var(--mf-space-3);
+  border-bottom: 1px solid var(--mf-color-border-subtle);
+  text-align: left;
+  font-size: var(--mf-font-size-sm);
+}
+
+.matrix thead th {
+  background: var(--mf-color-surface-raised);
+  font-weight: var(--mf-font-weight-medium);
+  color: var(--mf-color-text-secondary);
+  white-space: nowrap;
+}
+
+.matrix tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.groupRow td {
+  background: var(--mf-color-neutral-50, #f8fafc);
+  font-weight: var(--mf-font-weight-medium);
+  color: var(--mf-color-text-secondary);
+}
+
+.groupDesc {
+  font-size: var(--mf-font-size-xs);
+  color: var(--mf-color-text-tertiary);
+  font-weight: normal;
+  margin-left: var(--mf-space-2);
+}
+
+.capabilityCell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.capabilityKey {
+  font-size: var(--mf-font-size-xs);
+  color: var(--mf-color-text-tertiary);
+}
+
+.dangerText {
+  color: var(--mf-color-danger-600, #dc2626);
+}
+
+.centerCell {
+  text-align: center;
+}
+
+@media (max-width: 767px) {
+  .matrix {
+    min-width: 34rem;
+  }
+  .roleNames {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ---------- 渠道卡片（开关 + 展开编辑） ---------- */
+.channelCard {
+  border: 1px solid var(--mf-color-border-subtle);
+  border-radius: var(--mf-radius-md);
+  padding: var(--mf-space-3) var(--mf-space-4);
+  margin-bottom: var(--mf-space-3);
+  background: var(--mf-color-surface);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.channelCard:hover {
+  border-color: var(--mf-color-brand-500);
+  box-shadow: var(--mf-shadow-sm, 0 1px 2px rgba(15, 23, 42, 0.06));
+}
+
+.channelHeader {
+  display: flex;
+  align-items: center;
+  gap: var(--mf-space-3);
+}
+
+.channelHeader > *:first-child {
+  flex: 1;
+  min-width: 0;
+}
+
+.channelStatus {
+  flex: 0 0 auto;
+}
+
+.channelBody {
+  margin-top: var(--mf-space-3);
+  padding-top: var(--mf-space-3);
+  border-top: 1px dashed var(--mf-color-border-subtle);
+}
+
+@media (max-width: 767px) {
+  .channelHeader {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .channelStatus {
+    align-self: flex-end;
+  }
+}
+
+/* ---------- 模块入口卡片 ---------- */
+.moduleGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: var(--mf-space-4);
+}
+
+.moduleCard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mf-space-2);
+  padding: var(--mf-space-4);
+  border: 1px solid var(--mf-color-border-subtle);
+  border-radius: var(--mf-radius-md);
+  background: var(--mf-color-surface);
+  text-decoration: none;
+  color: inherit;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.moduleCard:hover {
+  border-color: var(--mf-color-brand-500);
+  box-shadow: var(--mf-shadow-md, 0 4px 12px rgba(15, 23, 42, 0.08));
+  transform: translateY(-1px);
+}
+
+.moduleIcon {
+  font-size: 1.5rem;
+  line-height: 1;
+}
+
+.moduleTitle {
+  font-size: var(--mf-font-size-md);
+  font-weight: var(--mf-font-weight-medium);
+}
+
+.moduleDesc {
+  font-size: var(--mf-font-size-xs);
+  color: var(--mf-color-text-tertiary);
+  line-height: var(--mf-font-lineHeight-normal);
+}
+
+.moduleMeta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--mf-space-2);
+  margin-top: auto;
+  padding-top: var(--mf-space-2);
+}
+
+.moduleArrow {
+  font-size: var(--mf-font-size-xs);
+  color: var(--mf-color-brand-600);
+  font-weight: var(--mf-font-weight-medium);
+}

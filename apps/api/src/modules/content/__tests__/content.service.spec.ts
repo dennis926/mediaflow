@@ -83,7 +83,7 @@ function buildService(options: { existingVariants?: Partial<ContentVariant>[] } 
 }
 
 describe('ContentService disclosure', () => {
-  it('marks AI assisted content and appends the disclosure to the stored body', async () => {
+  it('records the chosen AI flag but does NOT append any disclosure to the body', async () => {
     const { service, contents } = buildService();
 
     const created = await service.create(
@@ -92,9 +92,11 @@ describe('ContentService disclosure', () => {
     );
 
     expect(contents.save).toHaveBeenCalledTimes(1);
+    // 标识按填写值记录（便于统计与追溯）……
     expect(created.aiGenerated).toBe(true);
     expect(created.aiFlagChecked).toBe(false);
-    expect(created.body.endsWith('（本文由 AI 辅助生成）')).toBe(true);
+    // ……但正文一个字都不改：系统不再自动追加「（本文由 AI 辅助生成）」
+    expect(created.body).toBe('正文');
   });
 
   it('does not touch human written bodies', async () => {
@@ -143,7 +145,7 @@ describe('ContentService disclosure', () => {
 });
 
 describe('ContentService aiAdapt', () => {
-  it('persists a variant per platform with the disclosure applied', async () => {
+  it('persists a variant per platform without touching the body', async () => {
     const content = {
       id: 'c1',
       title: '标题',
@@ -170,7 +172,8 @@ describe('ContentService aiAdapt', () => {
     const saved = result.variants[0];
     expect(saved.aiFlagType).toBe(AiFlagType.Assisted);
     expect(saved.generationId).toBe('gen-1');
-    expect(saved.body.endsWith('（本文由 AI 辅助生成）')).toBe(true);
+    // 平台版本同样不再自动追加标识文案（正文只来自 AI 返回内容本身）
+    expect(saved.body).not.toContain('本文由 AI 辅助生成');
   });
 
   it('rejects early when every requested platform already exists', async () => {

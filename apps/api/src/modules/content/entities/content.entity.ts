@@ -39,8 +39,8 @@ export class Content extends BaseEntity {
   aiFlagChecked!: boolean;
 
   /**
-   * 走"豁免"路径的理由（B0.6）：内容有 AI 生成记录却标记为 none 时，
-   * 必须填这个理由留痕；为空则系统会**强制回填**标识（见 ContentService.assertAiFlagConsistency）。
+   * 备注：内容有 AI 生成记录却标记为 none 时，操作者可以在这里写一句说明（例如"AI 只用来查错别字"）。
+   * 系统只做留痕，不强制填写、也不改标识（见 ContentService.assertAiFlagConsistency）。
    */
   @Column({ type: 'varchar', length: 200, nullable: true })
   aiFlagExemptReason!: string | null;

@@ -2,7 +2,7 @@
  * B0.6 合规留痕的**接口级**验证。
  *
  * 四项都要"经过真实 HTTP + 真实数据库"证明：
- *   ① AI 标识系统化：内容有 `ai_generations` 记录却标成 `none` 时，审核通过前**强制回填**标识（或按理由豁免留痕）；
+ *   ① AI 标识留痕：内容有 `ai_generations` 记录却标成 `none` 时，审核通过**只写审计、不改标识、不拦截**（用户要求默认就是"没有"）；
  *   ② 审核留痕：审核记录带 `operator_ip` / `operator_ua`（谁、从哪、用什么客户端放行）；
  *   ③ `GET /me/export`：用户能导出自己的数据（ZIP，含账号/内容/审核/审计/AI 调用）；
  *   ④ 合规删除：登记请求 → 软删 → `purge_after` 收紧到 30 天内 → 恢复则视为撤回（全部留痕）。
@@ -116,32 +116,33 @@ describe.skipIf(!e2eCredentialsReady)(`${PREFIX}：AI 标识 / 审核留痕 / �
     }
   }, 120_000);
 
-  it('① 有 AI 生成记录却标成 none：审核通过前被强制回填标识并留痕', async () => {
-    const contentId = await createContent(`${PREFIX}-强制回填-${Date.now()}`);
+  it('① 有 AI 生成记录却标成 none：审核通过不改标识、不拦截，只写留痕', async () => {
+    const contentId = await createContent(`${PREFIX}-留痕不改标识-${Date.now()}`);
     await insertAiGeneration(contentId);
     const evidenceCheck = await h.dataSource.query('SELECT count(*)::int AS n FROM ai_generations WHERE content_id = $1', [contentId]);
     expect(Number(evidenceCheck[0].n), 'AI 生成记录（证据行）必须已落库，否则这条用例是空转').toBeGreaterThan(0);
 
     const status = await approveAs(contentId);
-    expect(status).toBe(200);
+    expect(status, '审核必须通过——标识不再拦截发布').toBe(200);
 
     const rows = await h.dataSource.query(
       'SELECT ai_flag_type, ai_generated, body FROM contents WHERE id = $1',
       [contentId],
     );
-    expect(rows[0].ai_flag_type).toBe('assisted');
-    expect(rows[0].ai_generated).toBe(true);
-    expect(String(rows[0].body)).toContain('AI'); // 显式标识文案已并入正文
+    // 关键断言：标识保持 none，正文不被追加任何标识文案（系统不再自动加）
+    expect(rows[0].ai_flag_type).toBe('none');
+    expect(rows[0].ai_generated).toBe(false);
+    expect(String(rows[0].body)).not.toContain('本文由 AI');
 
     const audits = await h.dataSource.query(
-      "SELECT payload FROM audit_logs WHERE action = 'content.ai_flag.backfilled' AND resource_id = $1",
+      "SELECT payload FROM audit_logs WHERE action = 'content.ai_flag.reminded' AND resource_id = $1",
       [contentId],
     );
-    expect(audits.length).toBeGreaterThan(0);
+    expect(audits.length, '必须留一条审计便于事后追溯').toBeGreaterThan(0);
     expect(Number((audits[0].payload as { evidence: number }).evidence)).toBeGreaterThan(0);
   }, 120_000);
 
-  it('①b 填了豁免理由：保留 none，但理由与证据条数必须留痕', async () => {
+  it('①b 填了说明理由：保留 none，理由与证据条数照样留痕', async () => {
     const contentId = await createContent(`${PREFIX}-豁免留痕-${Date.now()}`, {
       aiFlagExemptReason: '仅用 AI 做错别字检查，未生成内容',
     });
@@ -159,14 +160,14 @@ describe.skipIf(!e2eCredentialsReady)(`${PREFIX}：AI 标识 / 审核留痕 / �
     expect(await approveAs(contentId)).toBe(200);
 
     const rows = await h.dataSource.query('SELECT ai_flag_type FROM contents WHERE id = $1', [contentId]);
-    expect(rows[0].ai_flag_type).toBe('none'); // 有理由 → 不强制回填
+    expect(rows[0].ai_flag_type).toBe('none'); // 标识保持 none（系统不再自动改）
 
+    // 留痕走统一的 reminded 动作：无论有没有写说明，都只留痕不改标识
     const audits = await h.dataSource.query(
-      "SELECT payload FROM audit_logs WHERE action = 'content.ai_flag.exempted' AND resource_id = $1",
+      "SELECT payload FROM audit_logs WHERE action = 'content.ai_flag.reminded' AND resource_id = $1",
       [contentId],
     );
-    expect(audits.length).toBeGreaterThan(0);
-    expect(String((audits[0].payload as { reason: string }).reason)).toContain('错别字');
+    expect(audits.length, '留痕必须写入').toBeGreaterThan(0);
     expect(Number((audits[0].payload as { evidence: number }).evidence)).toBeGreaterThan(0);
   }, 120_000);
 

@@ -44,7 +44,7 @@ export class CreateContentDto {
   @IsIn(Object.values(AiFlagType))
   aiFlagType?: AiFlagType;
 
-  /** 走"豁免"路径的理由（B0.6）：内容有 AI 生成记录却标记为 none 时必填，否则会被强制回填标识 */
+  /** 可选说明：内容有 AI 生成记录却标记为 none 时，写一句原因便于事后追溯（不填也不影响保存与发布） */
   @IsOptional()
   @IsString()
   @MaxLength(200)

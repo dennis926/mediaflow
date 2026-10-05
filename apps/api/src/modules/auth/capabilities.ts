@@ -65,6 +65,48 @@ export const CAPABILITY_LABELS: Record<Capability, string> = {
   'workspace.purge': '永久清除工作区数据（不可逆，高危）',
 };
 
+/**
+ * 能力点分组：界面上的权限表按这些分组分区展示，避免 17 个能力点平铺一页。
+ * 分组只影响展示顺序，不影响鉴权逻辑（鉴权只看 matrix）。
+ */
+export type CapabilityGroup = 'content' | 'publish' | 'platform' | 'admin' | 'workspace';
+
+export const CAPABILITY_GROUPS: Array<{ group: CapabilityGroup; label: string; description: string; capabilities: Capability[] }> = [
+  {
+    group: 'content',
+    label: '内容生产',
+    description: '写稿、审核、归档、维护知识库',
+    capabilities: ['content.write', 'content.review', 'content.archive', 'knowledge.write'],
+  },
+  {
+    group: 'publish',
+    label: '发布与数据',
+    description: '创建发布任务、同步平台数据',
+    capabilities: ['publish.execute', 'analytics.sync'],
+  },
+  {
+    group: 'platform',
+    label: '账号绑定',
+    description: '绑定与解绑各平台账号',
+    capabilities: ['platform.bind'],
+  },
+  {
+    group: 'admin',
+    label: '系统管理',
+    description: '系统设置、用户管理、审计日志',
+    capabilities: ['settings.write', 'users.manage', 'users.privileged', 'audit.read'],
+  },
+  {
+    group: 'workspace',
+    label: '工作区管理',
+    description: '多业务空间的创建、归档、删除与导出',
+    capabilities: ['workspace.manage', 'workspace.archive', 'workspace.delete', 'workspace.restore', 'workspace.export', 'workspace.purge'],
+  },
+];
+
+/** 高风险能力点：界面上红色标注并二次确认。 */
+export const DANGEROUS_CAPABILITIES: Capability[] = ['users.privileged', 'workspace.delete', 'workspace.purge', 'settings.write'];
+
 /** 默认矩阵：与改造前的 @Roles 行为完全一致，改配置后即可按公司需要调整。 */
 export const DEFAULT_PERMISSION_MATRIX: Record<Capability, RoleCode[]> = {
   'settings.write': ['owner', 'admin'],

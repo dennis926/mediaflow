@@ -107,7 +107,7 @@ describe.skipIf(!credentialsReady)('内容中心：AI 一键生成', () => {
     expect(list.body.data.items).toHaveLength(0);
   });
 
-  it('生成的草案可以走完整闭环：建内容 → 带 AI 标识 → 复核后可发布', async () => {
+  it('生成的草案可以走完整闭环：建内容 → 记录 AI 标识 → 可直接发布', async () => {
     const generated = await request(app.getHttpServer())
       .post('/api/contents/ai-draft')
       .set('Authorization', `Bearer ${token}`)
@@ -123,18 +123,24 @@ describe.skipIf(!credentialsReady)('内容中心：AI 一键生成', () => {
       .expect(201);
     createdContentIds.push(created.body.data.id);
 
-    // ② AI 标识生效，正文追加显式标识（法定要求）
+    // ② AI 标识按填写值记录，但正文不被改写（用户要求：不要自动加标识）
     expect(created.body.data.aiGenerated).toBe(true);
-    expect(String(created.body.data.body)).toContain('（本文由 AI 辅助生成）');
+    expect(created.body.data.aiFlagType).toBe('assisted');
+    expect(String(created.body.data.body)).toBe(draft.body);
 
-    // ③ 未复核标识时发布会拦（这是 AI 内容合规闸门，不能被"一键生成"绕开）
-    await request(app.getHttpServer())
+    // ③ 标识不再是闸门：未复核也能建发布任务（不再有"一键生成绕不开合规"的说法）
+    const publishable = await request(app.getHttpServer())
       .post('/api/publish/tasks')
       .set('Authorization', `Bearer ${token}`)
       .send({ contentId: created.body.data.id, platforms: ['wechat_mp'] })
-      .expect(400);
+      .expect(201);
+    expect(publishable.body.data.length).toBe(1);
+    await request(app.getHttpServer())
+      .delete(`/api/publish/tasks/${publishable.body.data[0].id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
 
-    // ④ 复核后可建发布任务
+    // ④ 复核后仍可正常建发布任务
     await request(app.getHttpServer())
       .patch(`/api/contents/${created.body.data.id}/ai-flag-check`)
       .set('Authorization', `Bearer ${token}`)

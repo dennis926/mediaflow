@@ -260,8 +260,10 @@ export function ContentEditor({ mode, templateId }: { mode: 'new' | 'edit'; temp
         summary: result.draft.summary || prev.summary,
         body: result.draft.body,
         tagsText: result.draft.tags.join('、'),
-        // AI 产物默认标记为「AI 辅助生成」，避免用户忘记填而导致保存时被强制回填
-        aiFlagType: prev.aiFlagType === AiFlagType.None ? AiFlagType.Assisted : prev.aiFlagType,
+        /**
+         * 标识不自动改（用户明确要求：默认就是没有）。
+         * 编辑器左栏会给出提示，是否标注由操作者自己决定。
+         */
       }));
       setFeedback({
         tone: 'success',
@@ -462,8 +464,8 @@ export function ContentEditor({ mode, templateId }: { mode: 'new' | 'edit'; temp
               />
               {content.data?.aiGenerated ? (
                 <div style={{ display: 'flex', alignItems: 'flex-end' }}>
-                  <Tag tone={content.data.aiFlagChecked ? 'success' : 'danger'}>
-                    {content.data.aiFlagChecked ? 'AI 标识已复核' : 'AI 标识待复核（发布会拦截）'}
+                  <Tag tone={content.data.aiFlagChecked ? 'success' : 'info'}>
+                    {content.data.aiFlagChecked ? 'AI 标识已复核' : 'AI 标识未复核（不拦截发布）'}
                   </Tag>
                 </div>
               ) : null}
@@ -881,7 +883,10 @@ export function ContentEditor({ mode, templateId }: { mode: 'new' | 'edit'; temp
           )}
         </div>
         <Banner tone="info">
-          <span>AI 生成内容会自动追加「（本文由 AI 辅助生成）」标识，并记录到 AI 调用日志。</span>
+          <span>
+            AI 生成的内容会记录到 AI 调用日志。是否需要标注「AI 辅助生成」由您决定：
+            编辑器里的「内容来源标识」默认是「人工撰写」，按实际情况选择即可，系统不会自动改、也不会因此拦截发布。
+          </span>
         </Banner>
       </Dialog>
 

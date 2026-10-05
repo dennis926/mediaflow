@@ -5,7 +5,9 @@ import type {
   AccountView,
   AdaptResult,
   AdapterDescriptor,
+  AiConfigView,
   AiGeneration,
+  AiModelsResult,
   AiTestResult,
   AiUsageReport,
   AiUsageSummary,
@@ -13,6 +15,7 @@ import type {
   AuthUser,
   CalendarDay,
   CapabilitiesView,
+  ChannelsView,
   CommitImportResult,
   ComplianceReport,
   Content,
@@ -38,6 +41,7 @@ import type {
   OverviewData,
   Paged,
   ParseResult,
+  PermissionMatrixView,
   OfficialPriceRefreshResultView,
   OfficialPriceSnapshotView,
   PricingRulesView,
@@ -435,4 +439,35 @@ export const knowledgeApi = {
   /** 预览本次 AI 生成会引用哪些品牌资料 */
   preview: (contentId: string, limit = 5) =>
     api.get<{ matches: KnowledgeMatchItem[] }>('/knowledge/preview', { contentId, limit }),
+};
+
+export const aiConfigApi = {
+  view: () => api.get<AiConfigView>('/ai-config'),
+  /** 第一步：测试连接（表单值优先，未填则用已保存的） */
+  test: (payload: { provider?: string; apiKey?: string; baseUrl?: string; model?: string }) =>
+    api.post<AiTestResult>('/ai-config/test', payload),
+  /** 第二步：获取模型列表 */
+  models: (payload: { provider?: string; apiKey?: string; baseUrl?: string; model?: string }) =>
+    api.post<AiModelsResult>('/ai-config/models', payload),
+  /** 第三步：保存并设为默认 */
+  saveDefault: (payload: { provider: string; model: string; baseUrl?: string; apiKey?: string; models?: string[] }) =>
+    api.put<AiConfigView>('/ai-config/default', payload),
+  /** 切到离线占位（不消耗额度） */
+  offline: () => api.put<AiConfigView>('/ai-config/offline', {}),
+};
+
+export const channelsApi = {
+  notify: () => api.get<ChannelsView>('/channels/notify'),
+  saveNotify: (payload: { enabled?: Record<string, boolean>; values?: Record<string, string>; globals?: Record<string, string> }) =>
+    api.put<ChannelsView>('/channels/notify', payload),
+  platform: () => api.get<ChannelsView>('/channels/platform'),
+  savePlatform: (payload: { enabled?: Record<string, boolean>; values?: Record<string, string> }) =>
+    api.put<ChannelsView>('/channels/platform', payload),
+};
+
+export const permissionsApi = {
+  view: () => api.get<PermissionMatrixView>('/permissions'),
+  saveMatrix: (matrix: Record<string, string[]>) => api.put<PermissionMatrixView>('/permissions/matrix', { matrix }),
+  saveRoleLabels: (labels: Record<string, string>) => api.put<PermissionMatrixView>('/permissions/roles', { labels }),
+  reset: () => api.put<PermissionMatrixView>('/permissions/reset', {}),
 };

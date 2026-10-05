@@ -195,9 +195,10 @@ export class ContentReviewService {
     const previousStatus = before?.status ?? ContentStatus.Draft;
 
     /**
-     * B0.6：审核通过前先做 AI 标识一致性校验——
-     * 内容有 AI 生成记录却标成 none 时，这里会强制回填标识（或按已填理由留痕豁免）。
-     * 放在 approve 这一步，保证"通过审核"的内容一定是标识合规的。
+     * AI 标识一致性**留痕**（不再是强制闸门）。
+     *
+     * 用户明确要求标识默认就是"没有"、系统不自动加也不拦截，所以这里只在
+     * 「有 AI 生成记录但标识为 none」时写一条审计，方便事后追溯；不改内容、不阻塞审核。
      */
     if (dto.decision === 'approved') {
       const flag = await this.contentService.assertAiFlagConsistency(review.contentId, {
@@ -205,7 +206,7 @@ export class ContentReviewService {
         name: actor.name ?? null,
       });
       if (flag.flagged) {
-        this.logger.log(`审核通过前已强制回填 AI 标识（证据 ${flag.evidence} 条）：${review.contentId}`);
+        this.logger.log(`审核通过的内容存在 ${flag.evidence} 条 AI 生成记录但未标注标识（已留痕，未拦截）：${review.contentId}`);
       }
     }
 

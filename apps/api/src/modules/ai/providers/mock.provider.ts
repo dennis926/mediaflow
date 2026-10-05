@@ -10,6 +10,11 @@ export class MockAiProvider implements AiProvider {
 
   constructor(readonly model = 'mock-model') {}
 
+  /** 离线占位：列出几个"看起来像模型"的标识，让「获取模型」按钮在无 Key 时也能演示。 */
+  async listModels(): Promise<string[]> {
+    return ['mock-model', 'mock-model-fast', 'mock-model-long-context'];
+  }
+
   async complete(request: AiCompletionRequest): Promise<AiCompletionResult> {
     const text = this.build(request);
     return { text, model: this.model, tokensInput: request.user.length, tokensOutput: text.length, tokensCached: 0, tokensReasoning: 0, finishReason: 'stop' };

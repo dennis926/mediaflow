@@ -7,7 +7,9 @@ export type SettingGroup =
   | 'knowledge'
   | 'publish'
   | 'notify'
+  | 'notify_email'
   | 'platform'
+  | 'platform_account'
   | 'monitor'
   | 'workspace';
 
@@ -21,6 +23,10 @@ export interface SettingDefinition {
   envKey: string;
   placeholder?: string;
   options?: Array<{ value: string; label: string }>;
+  /** 未配置时的界面默认值（仅影响展示，运行时的兜底仍在 runtime-config.ts）。 */
+  defaultValue?: string;
+  /** danger = 高风险项，界面上用红色标注。 */
+  tone?: 'danger';
 }
 
 /**
@@ -235,6 +241,32 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
     ],
   },
   {
+    key: 'NOTIFY_CHANNEL_WEBHOOK',
+    group: 'notify',
+    label: '群机器人通知',
+    description: '开关：打开后可编辑 Webhook 配置。发布失败、账号掉线时推送到群里。',
+    secret: false,
+    envKey: 'NOTIFY_CHANNEL_WEBHOOK',
+    defaultValue: 'false',
+    options: [
+      { value: 'false', label: '关闭' },
+      { value: 'true', label: '开启' },
+    ],
+  },
+  {
+    key: 'NOTIFY_CHANNEL_EMAIL',
+    group: 'notify',
+    label: '邮件通知',
+    description: '开关：打开后可编辑 SMTP 配置。适合需要留档的告警。',
+    secret: false,
+    envKey: 'NOTIFY_CHANNEL_EMAIL',
+    defaultValue: 'false',
+    options: [
+      { value: 'false', label: '关闭' },
+      { value: 'true', label: '开启' },
+    ],
+  },
+  {
     key: 'NOTIFY_EMAIL_ENABLED',
     group: 'notify',
     label: '启用邮件通知',
@@ -248,7 +280,7 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
   },
   {
     key: 'NOTIFY_EMAIL_TO',
-    group: 'notify',
+    group: 'notify_email',
     label: '通知收件人',
     description: '多个用逗号分隔',
     secret: false,
@@ -257,7 +289,7 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
   },
   {
     key: 'SMTP_HOST',
-    group: 'notify',
+    group: 'notify_email',
     label: 'SMTP 服务器',
     description: '例如 smtp.qq.com / smtp.163.com / smtp.exmail.qq.com',
     secret: false,
@@ -266,7 +298,7 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
   },
   {
     key: 'SMTP_PORT',
-    group: 'notify',
+    group: 'notify_email',
     label: 'SMTP 端口',
     description: 'SSL 通常 465，STARTTLS 通常 587',
     secret: false,
@@ -275,7 +307,7 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
   },
   {
     key: 'SMTP_SECURE',
-    group: 'notify',
+    group: 'notify_email',
     label: 'SMTP 加密方式',
     description: '465 端口选 SSL；587 端口选 STARTTLS',
     secret: false,
@@ -287,7 +319,7 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
   },
   {
     key: 'SMTP_USER',
-    group: 'notify',
+    group: 'notify_email',
     label: 'SMTP 账号',
     description: '通常是完整邮箱地址',
     secret: false,
@@ -295,7 +327,7 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
   },
   {
     key: 'SMTP_PASSWORD',
-    group: 'notify',
+    group: 'notify_email',
     label: 'SMTP 密码/授权码',
     description: '加密存储；QQ/163 邮箱需要填"授权码"而不是登录密码',
     secret: true,
@@ -303,7 +335,7 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
   },
   {
     key: 'SMTP_FROM',
-    group: 'notify',
+    group: 'notify_email',
     label: '发件人显示名',
     description: '留空则用 SMTP 账号',
     secret: false,
@@ -757,7 +789,7 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
   },
   {
     key: 'WECHAT_MP_APP_ID',
-    group: 'platform',
+    group: 'platform_account',
     label: '公众号 AppID',
     description: '用于拉取图文分析数据；公众号禁止 API 发布，仅供人工发布',
     secret: false,
@@ -765,7 +797,7 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
   },
   {
     key: 'WECHAT_MP_APP_SECRET',
-    group: 'platform',
+    group: 'platform_account',
     label: '公众号 AppSecret',
     description: '加密存储',
     secret: true,
@@ -773,7 +805,7 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
   },
   {
     key: 'DOUYIN_CLIENT_KEY',
-    group: 'platform',
+    group: 'platform_account',
     label: '抖音 Client Key',
     description: '发布接口需要 OAuth 授权；互动接口不可用',
     secret: false,
@@ -781,7 +813,7 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
   },
   {
     key: 'DOUYIN_CLIENT_SECRET',
-    group: 'platform',
+    group: 'platform_account',
     label: '抖音 Client Secret',
     description: '加密存储',
     secret: true,
@@ -789,7 +821,7 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
   },
   {
     key: 'XIAOHONGSHU_APP_ID',
-    group: 'platform',
+    group: 'platform_account',
     label: '小红书 App ID',
     description: '需企业资质认证',
     secret: false,
@@ -797,7 +829,7 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
   },
   {
     key: 'XIAOHONGSHU_APP_SECRET',
-    group: 'platform',
+    group: 'platform_account',
     label: '小红书 App Secret',
     description: '加密存储',
     secret: true,
@@ -805,7 +837,7 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
   },
   {
     key: 'XIAOHONGSHU_API_BASE',
-    group: 'platform',
+    group: 'platform_account',
     label: '小红书开放平台地址',
     description: '留空时适配器不发起请求，只返回明确报错',
     secret: false,
@@ -813,7 +845,7 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
   },
   {
     key: 'BAIJIAHAO_APP_ID',
-    group: 'platform',
+    group: 'platform_account',
     label: '百家号 app_id',
     description: '百家号后台开通「开发者服务」后获取（作者帐号ID）',
     secret: false,
@@ -821,11 +853,116 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
   },
   {
     key: 'BAIJIAHAO_APP_TOKEN',
-    group: 'platform',
+    group: 'platform_account',
     label: '百家号 app_token',
     description: '开发者服务授权密钥，加密存储，长期有效',
     secret: true,
     envKey: 'BAIJIAHAO_APP_TOKEN',
+  },
+
+  {
+    key: 'PLATFORM_CHANNEL_WECHAT_MP',
+    group: 'platform',
+    label: '微信公众号',
+    description: '内容创作辅助 + 人工发布。公众号禁止 API 自动发布（运营规范 3.27），系统生成待发内容后由您复制到后台发布。',
+    secret: false,
+    envKey: 'PLATFORM_CHANNEL_WECHAT_MP',
+    defaultValue: 'true',
+    options: [
+      { value: 'false', label: '不使用' },
+      { value: 'true', label: '使用' },
+    ],
+  },
+  {
+    key: 'PLATFORM_CHANNEL_WECHAT_VIDEO',
+    group: 'platform',
+    label: '视频号',
+    description: '无官方发布 API，通过浏览器插件填充内容，发布按钮由您手动点击。',
+    secret: false,
+    envKey: 'PLATFORM_CHANNEL_WECHAT_VIDEO',
+    defaultValue: 'false',
+    options: [
+      { value: 'false', label: '不使用' },
+      { value: 'true', label: '使用' },
+    ],
+  },
+  {
+    key: 'PLATFORM_CHANNEL_DOUYIN',
+    group: 'platform',
+    label: '抖音',
+    description: '开放平台提供视频发布 API（需 OAuth 授权）。私信/评论等互动接口已回收，本系统不含互动功能。',
+    secret: false,
+    envKey: 'PLATFORM_CHANNEL_DOUYIN',
+    defaultValue: 'false',
+    options: [
+      { value: 'false', label: '不使用' },
+      { value: 'true', label: '使用' },
+    ],
+  },
+  {
+    key: 'PLATFORM_CHANNEL_XIAOHONGSHU',
+    group: 'platform',
+    label: '小红书',
+    description: '开放平台提供笔记发布 API（需企业资质）。未认证时自动降级为插件半自动发布。',
+    secret: false,
+    envKey: 'PLATFORM_CHANNEL_XIAOHONGSHU',
+    defaultValue: 'false',
+    options: [
+      { value: 'false', label: '不使用' },
+      { value: 'true', label: '使用' },
+    ],
+  },
+  {
+    key: 'PLATFORM_CHANNEL_ZHIHU',
+    group: 'platform',
+    label: '知乎',
+    description: '官方发布 API 已关闭，通过浏览器插件半自动发布。',
+    secret: false,
+    envKey: 'PLATFORM_CHANNEL_ZHIHU',
+    defaultValue: 'false',
+    options: [
+      { value: 'false', label: '不使用' },
+      { value: 'true', label: '使用' },
+    ],
+  },
+  {
+    key: 'PLATFORM_CHANNEL_TOUTIAO',
+    group: 'platform',
+    label: '今日头条',
+    description: '无官方发布 API，通过浏览器插件半自动发布。',
+    secret: false,
+    envKey: 'PLATFORM_CHANNEL_TOUTIAO',
+    defaultValue: 'false',
+    options: [
+      { value: 'false', label: '不使用' },
+      { value: 'true', label: '使用' },
+    ],
+  },
+  {
+    key: 'PLATFORM_CHANNEL_BAIJIAHAO',
+    group: 'platform',
+    label: '百家号',
+    description: '官方提供 article/publish 接口，填入下方 app_id 与 app_token 后可直接发布。',
+    secret: false,
+    envKey: 'PLATFORM_CHANNEL_BAIJIAHAO',
+    defaultValue: 'false',
+    options: [
+      { value: 'false', label: '不使用' },
+      { value: 'true', label: '使用' },
+    ],
+  },
+  {
+    key: 'PLATFORM_CHANNEL_QI_E',
+    group: 'platform',
+    label: '企鹅号',
+    description: '仅"内容网站"自用模式提供接口，一般走插件半自动发布。',
+    secret: false,
+    envKey: 'PLATFORM_CHANNEL_QI_E',
+    defaultValue: 'false',
+    options: [
+      { value: 'false', label: '不使用' },
+      { value: 'true', label: '使用' },
+    ],
   },
   {
     key: 'REQUIRE_CONTENT_APPROVAL',
@@ -999,11 +1136,13 @@ export const SETTING_GROUP_LABELS: Record<SettingGroup, string> = {
   permissions: '角色与权限',
   media: '素材库',
   notify: '通知渠道',
+  notify_email: '邮件通知',
   ai: 'AI 服务',
   compliance: '合规词库',
   knowledge: '知识库',
   publish: '发布队列',
   platform: '平台密钥',
+  platform_account: '平台账号密钥',
   monitor: '运行监控',
   workspace: '工作区与租户',
 };

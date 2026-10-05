@@ -103,6 +103,26 @@ export class AiProviderFactory {
     }
   }
 
+  /**
+   * 用给定（或已保存）的凭据去供应商拉取可用模型列表。
+   *
+   * 「AI 配置」模块的流程是：填 Key → 测试连接 → 获取模型 → 从列表里选默认模型。
+   * 这里复用 create()，保证拉模型用的就是刚才测试通过的那套凭据。
+   */
+  async fetchModels(overrides: AiProviderOverrides = {}): Promise<{ ok: boolean; models: string[]; error?: string }> {
+    try {
+      const provider = await this.build(overrides);
+      if (!provider.listModels) {
+        return { ok: false, models: [], error: `${provider.name} 不支持自动获取模型列表（该协议没有 /models 接口），请手动填写模型标识` };
+      }
+      const models = await provider.listModels();
+      if (models.length === 0) return { ok: false, models: [], error: '供应商返回了空的模型列表' };
+      return { ok: true, models };
+    } catch (error) {
+      return { ok: false, models: [], error: error instanceof Error ? error.message : String(error) };
+    }
+  }
+
   async describe(): Promise<{ provider: string; model: string }> {
     const provider = await this.get();
     return { provider: provider.name, model: provider.model };

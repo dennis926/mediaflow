@@ -52,7 +52,11 @@ const NAV_ITEMS: SidebarItem[] = [
 const PAGE_META: Array<{ prefix: string; title: string; subtitle: string }> = [
   { prefix: '/ai-usage', title: 'AI 用量与花费', subtitle: '调用次数、token 消耗与成本估算' },
   { prefix: '/audit', title: '审计日志', subtitle: '谁在什么时候改了什么' },
-  { prefix: '/settings', title: '系统设置', subtitle: 'AI 与平台密钥、发布队列参数' },
+  { prefix: '/settings/ai', title: 'AI 配置', subtitle: '供应商、密钥、测试连接与默认模型' },
+  { prefix: '/settings/permissions', title: '角色与权限', subtitle: '角色显示名与权限勾选表' },
+  { prefix: '/settings/notify', title: '通知渠道', subtitle: '开关式启用群机器人与邮件通知' },
+  { prefix: '/settings/platform', title: '平台密钥', subtitle: '开关式选择要接入的平台并填写凭据' },
+  { prefix: '/settings', title: '系统设置', subtitle: '站点、发布、监控等通用参数' },
   { prefix: '/reviews', title: '内容审核', subtitle: '提交审核与审核决定' },
   { prefix: '/content-templates', title: '文案模板库', subtitle: '常用写法沉淀 · 一键套用到编辑器' },
   { prefix: '/media', title: '素材库', subtitle: '图片与视频素材：上传、分组、复制外链' },

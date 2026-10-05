@@ -696,3 +696,84 @@ export interface WorkspaceExportJobItem {
   createdAt: string;
   downloadEndpoint?: string;
 }
+
+/* ---------- AI 配置模块 ---------- */
+export interface AiConfigCatalogItem {
+  provider: string;
+  label: string;
+  defaultBaseUrl: string;
+  models: string[];
+  protocol: string;
+}
+
+export interface AiConfigView {
+  provider: string;
+  model: string;
+  baseUrl: string;
+  apiKeyMasked: string;
+  hasApiKey: boolean;
+  /** true = 当前是离线占位，不会真实调用外部接口 */
+  offline: boolean;
+  catalog: AiConfigCatalogItem[];
+}
+
+export interface AiModelsResult {
+  ok: boolean;
+  models: string[];
+  error?: string;
+}
+
+/* ---------- 通知渠道 / 平台密钥（开关 + 勾选） ---------- */
+export interface ChannelFieldView {
+  key: string;
+  label: string;
+  description: string;
+  secret: boolean;
+  value: string;
+  configured: boolean;
+  placeholder?: string;
+  options?: Array<{ value: string; label: string }>;
+}
+
+export interface ChannelView {
+  code: string;
+  label: string;
+  description: string;
+  enabled: boolean;
+  fields: ChannelFieldView[];
+  ready: boolean;
+}
+
+export interface ChannelsView {
+  channels: ChannelView[];
+  globals: ChannelFieldView[];
+}
+
+/* ---------- 角色与权限（勾选表格） ---------- */
+export interface RoleView {
+  code: string;
+  label: string;
+  isSystem: boolean;
+  capabilityCount: number;
+}
+
+export interface CapabilityView {
+  key: string;
+  label: string;
+  dangerous: boolean;
+  roles: string[];
+}
+
+export interface CapabilityGroupView {
+  group: string;
+  label: string;
+  description: string;
+  capabilities: CapabilityView[];
+}
+
+export interface PermissionMatrixView {
+  roles: RoleView[];
+  groups: CapabilityGroupView[];
+  capabilityLabels: Record<string, string>;
+  dangerous: string[];
+}

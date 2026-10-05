@@ -176,7 +176,7 @@ describe.skipIf(!e2eCredentialsReady)('类别 1：状态机越权', () => {
     expect(response.body.code).toBe(40000);
   });
 
-  it('9. AI 生成内容：未复核标识不得发布，复核后可发布且正文含显式标识（合规 P1-3 闸门）', async () => {
+  it('9. AI 生成内容：标识按填写值记录、不自动改写正文，且不再是发布闸门', async () => {
     const created = await request(server())
       .post('/api/contents')
       .set(auth(owner))
@@ -184,29 +184,41 @@ describe.skipIf(!e2eCredentialsReady)('类别 1：状态机越权', () => {
       .expect(201);
     const aiContentId = created.body.data.id as string;
     expect(created.body.data.aiGenerated).toBe(true);
-    expect(String(created.body.data.body)).toContain('（本文由 AI 辅助生成）');
+    // 正文保持原样：系统不再自动追加显式标识（用户要求：默认就是没有）
+    expect(String(created.body.data.body)).toBe('AI 生成正文');
 
-    // 未复核标识 → 直接发布被拒
-    const blocked = await request(server())
-      .post('/api/publish/tasks')
-      .set(auth(owner))
-      .send({ contentId: aiContentId, platforms: ['wechat_mp'] });
-    expect(blocked.status).toBe(400);
-    expect(String(blocked.body.message)).toContain('AI 标识校验');
-
-    await request(server())
-      .patch(`/api/contents/${aiContentId}/ai-flag-check`)
-      .set(auth(owner))
-      .send({ checked: true, note: '端到端测试' })
-      .expect(200);
+    /**
+     * 关键顺序：审核闸门仍然有效（内容必须先过审），所以先送审通过再排期。
+     * 这里刻意**不复核 AI 标识**就排期——标识若还是闸门，这里会拿到 400。
+     */
     await submitReview(aiContentId).expect(201);
     await decide(await latestReviewId(aiContentId), 'approved', '测试：AI 内容通过').expect(200);
+
+    const rows = await h.dataSource.query(
+      'SELECT ai_flag_type, ai_flag_checked FROM contents WHERE id = $1',
+      [aiContentId],
+    );
+    expect(rows[0].ai_flag_type).toBe('assisted');
+    expect(rows[0].ai_flag_checked, '本用例全程未复核标识，用来证明发布不受它影响').toBe(false);
 
     const published = await request(server())
       .post('/api/publish/tasks')
       .set(auth(owner))
       .send({ contentId: aiContentId, platforms: ['wechat_mp'] })
       .expect(201);
+    expect(published.body.data.length).toBe(1);
     h.createdTaskIds.push(...(published.body.data as Array<{ id: string }>).map((task) => task.id));
+
+    // 对照：内容未过审时仍然被审核闸门拦住（证明闸门没被误伤）
+    const fresh = await request(server())
+      .post('/api/contents')
+      .set(auth(owner))
+      .send({ title: `${PREFIX} AI标识未过审 ${Date.now()}`, body: '未过审正文', aiFlagType: 'none' })
+      .expect(201);
+    const blockedByReview = await request(server())
+      .post('/api/publish/tasks')
+      .set(auth(owner))
+      .send({ contentId: fresh.body.data.id, platforms: ['wechat_mp'] });
+    expect(blockedByReview.status, '审核闸门必须仍然生效').toBe(400);
   });
 });
