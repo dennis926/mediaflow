@@ -2,6 +2,55 @@
 
 > 每次交付迭代都追加一条，并打上 `v<版本号>` 标签。
 
+## v0.7.1 — 2026-10-05
+
+- 修复设置子页面 CSS 引用路径（构建失败）；同步 AI 标识不再自动追加的界面文案与文档标注
+
+
+## v0.7.0 — 设置中心重构 + AI 标识放开
+
+**日期**：2026-10-05
+
+### 1. AI 标识不再自动回填、不再拦截发布
+- `POST /contents` / `PUT /contents/:id` / 多平台适配：**不再**自动追加「（本文由 AI 辅助生成）」，
+  `ai_flag_type` 只按填写值记录（默认 `none` = 人工撰写）。
+- `assertAiFlagConsistency` 由「强制回填」改为**纯留痕**：有 AI 生成记录但标识为 none 时写审计
+  `content.ai_flag.reminded`，不改内容、不阻塞任何流程。
+- `POST /api/publish/tasks` 删除 `aiGenerated && !aiFlagChecked` 的 400 拦截，降级为一条日志。
+  **审核闸门不受影响**：内容仍必须先过审才能排期。
+- 编辑器：AI 生成后不再自动切「AI 辅助」；「AI 标识待复核（发布会拦截）」改为「未复核（不拦截发布）」。
+
+### 2. AI 配置独立模块（`/settings/ai`）
+- 新增 `AiConfigController`：`GET /ai-config`、`POST /ai-config/test`（测试连接）、
+  `POST /ai-config/models`（获取模型）、`PUT /ai-config/default`（选默认模型）、`PUT /ai-config/offline`。
+- `DeepSeekProvider` 新增 `listModels()`（OpenAI 兼容 `GET /models`）；`AiProvider.listModels` 改为可选方法，
+  `MockAiProvider` 同步实现以保证离线可跑。
+- `AiProviderFactory.fetchModels()` 复用 `create()`，保证拉模型用的就是刚测通的那套凭据。
+- 界面三步闭环 + 步骤指示条；「获取模型」在测试通过前禁用，确保模型列表来自真正可用的凭据。
+
+### 3. 角色权限改为分组勾选表（`/settings/permissions`）
+- `capabilities.ts` 新增 `CAPABILITY_GROUPS`（5 个业务分组，覆盖全部 17 个能力点）与 `DANGEROUS_CAPABILITIES`。
+- 新增 `PermissionsController`：`GET /permissions`、`PUT /permissions/matrix`、`PUT /permissions/roles`、`PUT /permissions/reset`。
+- 界面为表格勾选 + 角色显示名可编辑，**不再出现任何 JSON 编辑框**；未知角色代码返回 400 而非静默写入。
+
+### 4. 通知渠道与平台密钥改为开关 + 勾选式
+- registry 新增 `notify_email` / `platform_account` 两个分组；新增渠道开关配置项
+  `NOTIFY_CHANNEL_WEBHOOK`、`NOTIFY_CHANNEL_EMAIL`、`PLATFORM_CHANNEL_*`（8 个平台）。
+- 新增 `ChannelsController`：`GET|PUT /channels/notify`、`GET|PUT /channels/platform`。
+- 关闭开关**不清空**已填配置；无官方 API 的平台 `fields` 为空数组（界面标注「插件发布」）。
+
+### 5. 其它
+- 系统设置主页改为模块导航（4 张入口卡片 + 其余通用项分页），页面标题按子路由细分。
+- 新增 `Switch` / `Checkbox` 组件与 Design Token 样式（`role="switch"`，可键盘操作）。
+- 测试：单测 444 通过（新增 `permission-groups.spec.ts` 4 例、`ai-disclosure-policy.spec.ts` 4 例），
+  E2E 169 通过（新增 `settings-modules.e2e.spec.ts` 20 例，覆盖四个模块的真实落库与校验）。
+
+### 已知边界
+- Anthropic 原生协议没有 `/models` 接口，「获取模型」会明确提示手动填写；这是协议本身的能力差异。
+# 更新日志
+
+> 每次交付迭代都追加一条，并打上 `v<版本号>` 标签。
+
 ## v0.7.0 — 2026-10-05
 
 - 设置中心重构：AI 配置独立模块（测试连接→获取模型→选默认）、角色权限改分组勾选表与可编辑显示名、通知渠道与平台密钥改开关+勾选式；AI 标识不再自动回填与拦截发布

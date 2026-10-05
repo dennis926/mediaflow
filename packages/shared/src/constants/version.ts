@@ -10,7 +10,7 @@
  *
  * Keep it in sync with the root package.json version.
  */
-export const APP_VERSION = '0.7.0';
+export const APP_VERSION = '0.7.1';
 
 /** Short build label shown next to the version in the sidebar footer. */
 export const APP_EDITION = '内部版';

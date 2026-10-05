@@ -108,7 +108,7 @@
 ```
 
 返回 `data.draft`（`title` / `summary` / `body` / `tags`）、`generationId`、`model`、`knowledgeUsed`（本次命中的品牌资料）。
-**产物不入库**——需再调 `POST /api/contents` 保存，届时按 AI 标识规则自动追加显式标识并要求复核。
+**产物不入库**——需再调 `POST /api/contents` 保存。保存时 `ai_flag_type` 只按你填写的值记录（默认 `none` = 人工撰写），系统**不会自动插入任何标识文案**，也不因标识拦截发布。
 
 `POST /api/contents/:id/ai-adapt` 请求体：
 
@@ -146,9 +146,59 @@
 | POST | `/api/settings/ai/test` | 连接测试；可选传入未保存的 `apiKey` / `model` / `baseUrl` |
 
 - 配置优先级：**数据库（后台界面）> `.env` > 代码默认值**
+- 上述 AI/权限/通知/平台四组已各自独立成模块（3.5b–3.5d），`/api/settings` 仍保留通用项，两者写入同一张 `system_settings` 表
+- **AI 标识策略（v0.7.0 起）**：内容创建/更新/多平台适配**不再自动追加**「（本文由 AI 辅助生成）」，`ai_flag_type` 只按填写值记录（默认 `none` = 人工撰写）；`POST /contents/:id/ai-flag-check` 不再是发布前置条件（`POST /api/publish/tasks` 只在有 AI 生成记录但标识为 none 时写一条审计 `content.ai_flag.reminded`）。**审核闸门不受影响**：内容仍必须先过审才能排期。
 - 密钥类字段用 AES-256-GCM 加密后入库（密钥来自 `SETTINGS_ENCRYPTION_KEY`，未配置则用 `JWT_SECRET` 派生）
 - 保存动作写入审计日志，只记录改了哪些 key，不记录值
 - 角色不足返回 `40300`
+
+### 3.5b AI 配置（独立模块，仅 owner / admin）
+
+界面：`/settings/ai`。三步闭环——**测试连接 → 获取模型 → 选择默认模型**。
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/ai-config` | 当前生效配置（密钥打码）+ 预置供应商目录（provider/label/defaultBaseUrl/models/protocol） |
+| POST | `/api/ai-config/test` | 第一步：连接测试。body `{provider?,apiKey?,baseUrl?,model?}`，表单值优先、未填回退已保存配置 |
+| POST | `/api/ai-config/models` | 第二步：拉取供应商可用模型（OpenAI 兼容 `GET /models`）。返回 `{ok,models[],error?}` |
+| PUT | `/api/ai-config/default` | 第三步：保存并设为默认。body `{provider,model,baseUrl?,apiKey?,models?}`，一次性写入供应商/模型/地址/密钥 |
+| PUT | `/api/ai-config/offline` | 切换为离线占位（不调用外部接口、不消耗额度） |
+
+- `POST /test` 返回 `{ok,provider,model,latencyMs,reply?,error?}`；输出被截断只说明"答得太长"，不算连接失败。
+- 协议没有 `/models` 的供应商（例如 Anthropic 原生协议）`POST /models` 会明确返回"请手动填写模型标识"，界面可继续手动输入。
+- 保存后运行时快照立即重建，**不需要重启服务**。
+
+### 3.5c 角色与权限（可视化，仅 owner / admin）
+
+界面：`/settings/permissions`。**不需要写任何 JSON**，全部勾选。
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/permissions` | `{roles[],groups[],capabilityLabels,dangerous}`；能力点已按业务分组（内容生产/发布与数据/账号绑定/系统管理/工作区管理） |
+| PUT | `/api/permissions/matrix` | 保存矩阵，body `{matrix:{ "content.review": ["owner","reviewer"] }}`；未提交的能力点保持原样 |
+| PUT | `/api/permissions/roles` | 保存角色显示名，body `{labels:{admin:"运营主管"}}`；留空 = 恢复默认叫法，≤20 字 |
+| PUT | `/api/permissions/reset` | 恢复出厂（矩阵与显示名都回到代码默认值） |
+
+- 未知角色代码返回 `400`，不会静默写入脏数据。
+- 能力点全集为 `CAPABILITIES`（17 项）；某项**全部不勾**表示不限制（所有角色可用），与 `CapabilityGuard` 判定一致。
+- 高危能力点（`users.privileged`、`workspace.delete`、`workspace.purge`、`settings.write`）在界面上标红提示。
+
+### 3.5d 通知渠道与平台密钥（开关式，仅 owner / admin）
+
+界面：`/settings/notify`、`/settings/platform`。**开关控制是否启用，打开后展开该渠道/平台的配置字段**，多个可同时开启。
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/channels/notify` | `{channels[],globals[]}`；`channels` 为群机器人/邮件两个渠道，各带 `enabled`/`fields`/`ready` |
+| PUT | `/api/channels/notify` | body `{enabled:{webhook:true,email:true},values:{...},globals:{...}}` |
+| GET | `/api/channels/platform` | 8 个平台通道（公众号/视频号/抖音/小红书/知乎/头条/百家号/企鹅号） |
+| PUT | `/api/channels/platform` | body `{enabled:{...},values:{...}}` |
+
+- 渠道开关本身是配置项（`NOTIFY_CHANNEL_WEBHOOK`、`NOTIFY_CHANNEL_EMAIL`、`PLATFORM_CHANNEL_*`），业务代码可读运行时快照判断"启不启用"。
+- 关闭开关**不清空已填配置**，下次打开不用重填。
+- 无官方发布 API 的平台（视频号/知乎/头条/企鹅号）`fields` 为空数组，界面标注「插件发布」。
+- 未知渠道代码或配置项返回 `400`。
+- 密钥值传打码值（`••••` 开头）表示"不修改"。
 
 ### 3.6 用户与角色（仅 owner / admin）
 

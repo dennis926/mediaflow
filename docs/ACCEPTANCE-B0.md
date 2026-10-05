@@ -12,6 +12,12 @@
 | B0.2 去重与完整性 | 发布任务幂等（服务端 409 + 部分唯一索引 `UQ_publish_tasks_active_content_platform`）、`content_revisions`/`ai_generations` 外键、磁盘口径对齐 `df` | `publish.service.ts`、迁移 `1789700800000`/`1789700900000`/`1789701000000`、`DECISION-外键与唯一约束.md` |
 | B0.4 多租户生命周期（6 步） | 归档/软删/恢复/永久清除/导出；状态机 + 4 端点 + 能力点；导出（5GB 上限、1 并发、7 天产物、一次性链接）；purge（独立备份、单事务、账本、审计、外部通报）；**15 条外键**（14 CASCADE + 导出任务 SET NULL）；工作区管理 UI；4 份演练/技术债文档 | `DESIGN-多租户生命周期.md`、`DESIGN-外键补全-第5步.md`、`DESIGN-工作区管理UI.md`、`RUNBOOK-purge演练.md`、`ACCEPTANCE-B0.4-多租户生命周期.md` |
 | B0.5 租户级密钥/配置隔离 | 4 个真实隔离缺陷修复（缓存键、运行时快照、租户条件、平台字典全表）；`system_settings` 语义定稿 | `DESIGN-租户级配置隔离.md` |
+
+> **⚠️ v0.7.0 起本节已被取代**：用户明确要求「AI 标识默认就是没有，不要自动加」。
+> 现在系统**不会**强制回填标识、**不会**往正文插入标识文案、**不会**因标识拦截发布；
+> 只在「有 AI 生成记录但标识为 none」时写一条审计 `content.ai_flag.reminded`。
+> 下方表格保留为 B0.6 当时的原始设计记录。
+
 | B0.6 合规留痕 | AI 标识按证据强制回填 / 理由留痕；审核 `operator_ip/ua`；`GET /me/export`；合规删除台账（30 天承诺，与 purge/恢复联动） | `DESIGN-合规留痕.md`、迁移 `1789701600000`–`1789701800000` |
 | B0.7 计费/配额 | `plans`/`subscriptions`/`usage_records`/`invoices`/`quotas` + 配额闸门（AI/发布/上传/成员）+ 用量流水 + 草稿账单 + 支付接口占位 | `DESIGN-计费与配额.md`、迁移 `1789701900000` |
 | B0.8 容器化 | 多阶段 Dockerfile×2（非 root、tini、healthcheck）、`docker-compose.yml`（5 服务、健康依赖、资源限制）、独立 worker 入口、容器迁移入口、部署/回滚脚本 | `Dockerfile.*`、`docker-compose.yml`、`apps/api/src/worker.ts`、`apps/api/src/database/cli.ts`、`RUNBOOK-容器化部署.md` |

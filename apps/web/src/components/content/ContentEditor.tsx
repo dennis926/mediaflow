@@ -389,7 +389,7 @@ export function ContentEditor({ mode, templateId }: { mode: 'new' | 'edit'; temp
                   required
                   className={styles.bodyArea}
                   value={form.body}
-                  placeholder="写下正文内容……AI 生成内容会自动追加合规标识"
+                  placeholder="写下正文内容……"
                   onChange={(event) => setForm({ ...form, body: event.target.value })}
                 />
               </div>

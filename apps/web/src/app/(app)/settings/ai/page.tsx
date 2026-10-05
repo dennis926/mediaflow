@@ -11,7 +11,7 @@ import { Tag } from '../../../../components/ui/Tag';
 import { ApiError } from '../../../../lib/api/client';
 import { aiConfigApi } from '../../../../lib/api/endpoints';
 import type { AiConfigView } from '../../../../lib/api/types';
-import styles from './page.module.css';
+import styles from '../page.module.css';
 
 type Step = 'idle' | 'tested' | 'fetched';
 

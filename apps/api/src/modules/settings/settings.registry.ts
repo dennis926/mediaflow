@@ -138,7 +138,7 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
     key: 'AI_DISCLOSURE_SUFFIX',
     group: 'site',
     label: 'AI 生成内容标识后缀',
-    description: 'AI 生成内容发布时自动追加的显式标识（法定要求，可改文案）',
+    description: 'AI 生成内容发布时可用的显式标识文案（法定要求，可改成贵公司的措辞；系统不会自动插入正文）',
     secret: false,
     envKey: 'AI_DISCLOSURE_SUFFIX',
     placeholder: '（本文由 AI 辅助生成）',

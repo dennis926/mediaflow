@@ -10,6 +10,12 @@
 
 | 情形 | 系统行为 | 留痕 |
 | --- | --- | --- |
+
+> **⚠️ v0.7.0 起本节已被取代**：用户明确要求「AI 标识默认就是没有，不要自动加」。
+> 现在系统**不会**强制回填标识、**不会**往正文插入标识文案、**不会**因标识拦截发布；
+> 只在「有 AI 生成记录但标识为 none」时写一条审计 `content.ai_flag.reminded`。
+> 下方表格保留为 B0.6 当时的原始设计记录。
+
 | 有 AI 生成记录，标识为 `none`，**未填理由** | **强制回填**：`ai_flag_type → assisted`、`ai_generated → true`，并把显式标识文案并入正文 | 审计 `content.ai_flag.backfilled`（含证据条数、from/to） |
 | 有 AI 生成记录，标识为 `none`，**填了理由** | 保留 `none`（理由存 `contents.ai_flag_exempt_reason`） | 审计 `content.ai_flag.exempted`（含理由与证据条数） |
 | 无 AI 生成记录 | 不动 | —— |
